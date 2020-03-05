@@ -309,9 +309,9 @@ impl<A: Clone + Debug> Vector<A> {
         // If we break invariant 2), we call balance spine tops to correct it.
         debug_assert_eq!(self.left_spine.len(), self.right_spine.len());
         // Try and pop the node into the level above
-        let (spine, other_spine) = match side {
-            Side::Back => (&mut self.right_spine, &mut self.left_spine),
-            Side::Front => (&mut self.left_spine, &mut self.right_spine),
+        let spine = match side {
+            Side::Back => &mut self.right_spine,
+            Side::Front => &mut self.left_spine,
         };
         debug_assert_eq!(spine.first().unwrap().slots(), 0);
         debug_assert!(self.root.slots() != 0 || spine.last().unwrap().slots() != 0);
@@ -1334,7 +1334,7 @@ mod test {
 
     #[test]
     pub fn empty() {
-        let mut empty: Vector<usize> = Vector::new();
+        let empty: Vector<usize> = Vector::new();
         // let empty_vec: Vec<usize> = Vec::new();
         // let empty_ref_vec: Vec<&usize> = Vec::new();
         // let empty_ref_mut_vec: Vec<&mut usize> = Vec::new();
@@ -1375,7 +1375,6 @@ mod test {
         let mut item = 9;
         let mut single = Vector::new();
         single.push_back(item);
-        let mut vec: Vec<usize> = vec![item];
 
         // Len
         assert!(!single.is_empty());

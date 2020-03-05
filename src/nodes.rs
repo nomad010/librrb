@@ -115,6 +115,7 @@ impl<A: Clone + Debug + PartialEq> Leaf<A> {
     pub(crate) fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, A>) {
         for value in &self.buffer {
             let iter_value = iter.next().unwrap();
+            println!("{:?} == {:?} = {} ", value, iter_value, value == iter_value);
         }
     }
 }
@@ -548,7 +549,7 @@ impl<A: Clone + Debug> NodeRc<A> {
     pub fn new_empty(&self) -> Self {
         match self {
             NodeRc::Internal(x) => Rc::new(x.new_empty()).into(),
-            NodeRc::Leaf(x) => Rc::new(Leaf::empty()).into(),
+            NodeRc::Leaf(_) => Rc::new(Leaf::empty()).into(),
         }
     }
 
