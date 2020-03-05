@@ -333,13 +333,10 @@ impl<A: Clone + Debug> Vector<A> {
                 .get_mut(level + 1)
                 .unwrap_or(&mut self.root)
                 .internal_mut();
-            // println!("Gar {}/{} {} ", level, spine_len, node.slots());
-            // assert_ne!(node.slots(), 0);
             let child: NodeRc<A> = match Rc::make_mut(node).children {
                 ChildList::Internals(ref mut children) => children.pop(side).into(),
                 ChildList::Leaves(ref mut children) => children.pop(side).into(),
             };
-            // println!("Garfield {:?}", child);
             Rc::make_mut(&mut Rc::make_mut(node).sizes).pop_child(side);
             mem::replace(&mut spine[level], child);
         }
@@ -384,7 +381,6 @@ impl<A: Clone + Debug> Vector<A> {
                 // continue checking.
                 let mut left_spine_top = self.left_spine.pop().unwrap();
                 let mut right_spine_top = self.right_spine.pop().unwrap();
-                // println!("Shrinking {:?} to {:?}", spine_last, other_spine_last);
                 left_spine_top.share_children_with(&mut right_spine_top, Side::Back, RRB_WIDTH);
                 mem::replace(&mut self.root, right_spine_top);
             } else if difference >= 2 {
@@ -409,25 +405,20 @@ impl<A: Clone + Debug> Vector<A> {
     /// the root sits directly above the leaves.
     fn pop_side(&mut self, side: Side) -> Option<A> {
         debug_assert_eq!(self.left_spine.len(), self.right_spine.len());
-        // println!("DERP\n{:#?}\n", self);
         if self.spine_ref(side).is_empty() {
-            // println!("roflderpedoo {:#?}", self);
             if let Ok(item) = Rc::make_mut(self.root.leaf_mut()).try_pop(side) {
                 self.len -= 1;
                 Some(item)
             } else {
                 None
             }
-        // println!("derpedoo {:#?}", self);
         } else {
             // Can never be none as the is of height at least 1
             let leaf = self.leaf_mut(side);
             let item = Rc::make_mut(leaf).pop(side);
 
             if leaf.is_empty() {
-                // println!("Derp");
                 self.empty_leaf(side);
-            // println!("roflderpedoofromher {:#?}", self);
             } else if self.spine_ref(side).len() == 1 {
                 self.fixup_spine_tops();
             }
@@ -589,8 +580,6 @@ impl<A: Clone + Debug> Vector<A> {
             return;
         }
 
-        println!("roy derpison {:#?}", self);
-
         // Make the spines the same length
         while self.right_spine.len() < other.left_spine.len() {
             // The root moves to either the left or right spine and the root becomes empty
@@ -621,10 +610,6 @@ impl<A: Clone + Debug> Vector<A> {
             other.left_spine.push(new_left);
             other.right_spine.push(new_right);
         }
-        // if self.left_spine.len() < other.left_spine.len() {
-        // self's root spine gets enlarged with
-        // let mut new_root = match self.root Rc::new().into()
-        // }
 
         debug_assert_eq!(self.right_spine.len(), self.right_spine.len());
         debug_assert_eq!(other.left_spine.len(), other.right_spine.len());
@@ -637,7 +622,7 @@ impl<A: Clone + Debug> Vector<A> {
         while !self.right_spine.is_empty() {
             let mut left_node = self.right_spine.pop().unwrap();
             let mut right_node = other.left_spine.pop().unwrap();
-            // let total_slots = left_node.slots() + right_node.slots();
+
             right_node.share_children_with(&mut left_node, Side::Front, RRB_WIDTH);
             let parent_node = self.right_spine.last_mut().unwrap_or(&mut self.root);
             let parent = Rc::make_mut(parent_node.internal_mut());
@@ -658,8 +643,6 @@ impl<A: Clone + Debug> Vector<A> {
                 }
             }
         }
-        // self.right_spine.reverse();
-        // other.left_spine.reverse();
         debug_assert!(self.right_spine.is_empty());
         debug_assert!(other.left_spine.is_empty());
         mem::replace(&mut self.right_spine, other.right_spine);
@@ -673,12 +656,7 @@ impl<A: Clone + Debug> Vector<A> {
                 .share_children_with(&mut other.root, Side::Back, 1);
         }
 
-        // let total_slots = self.root.slots() + other.root.slots();
-
-        // println!("RAWR {}", total_slots);
-
         if !other.root.is_empty() {
-            println!("neither root empty");
             other
                 .root
                 .share_children_with(&mut self.root, Side::Front, RRB_WIDTH);
@@ -691,13 +669,9 @@ impl<A: Clone + Debug> Vector<A> {
             let old_root = mem::replace(&mut self.root, new_root);
             self.left_spine.push(old_root);
             self.right_spine.push(other.root);
-        } else {
-            println!("other root empty");
         }
         self.len += other.len;
         self.fixup_spine_tops();
-
-        println!("roy arbison {:?}", self);
     }
 
     /// Slices the vector from the start to the given index exclusive.
@@ -754,7 +728,6 @@ impl<A: Clone + Debug> Vector<A> {
         // this leaf
         // 3) If the leaf only has the root as an ancestor it proceeds as 2) with the path becoming
         // the entire left spine.
-        println!("slice_to_end {} {}", start, self.len);
         if start >= self.len {
             self.left_spine.clear();
             self.right_spine.clear();
@@ -776,10 +749,6 @@ impl<A: Clone + Debug> Vector<A> {
             let mut forward_end = 0;
             let mut backward_start = self.len;
 
-            for spine in &self.right_spine {
-                println!("Gar {} {}", spine.len(), spine.level());
-            }
-
             for (idx, (left, right)) in self
                 .left_spine
                 .iter_mut()
@@ -791,14 +760,6 @@ impl<A: Clone + Debug> Vector<A> {
                 }
                 forward_end += left.len();
                 backward_start -= right.len();
-                println!(
-                    "saltwater wells {} {} {} {} {}",
-                    index,
-                    backward_start,
-                    right.len(),
-                    self.len,
-                    right.level()
-                );
                 if index >= backward_start {
                     return Some((Some((Side::Back, idx)), index - backward_start));
                 }
@@ -813,10 +774,6 @@ impl<A: Clone + Debug> Vector<A> {
         if let Some((node_position, mut node_index)) = self.find_node_info_for_index(index) {
             // We need to make this node the first/last in the tree
             // This means that this node will become the part of the spine for the given side
-            println!(
-                "DerpLOlololololo {:?} {:?} {:?}",
-                side, node_index, node_position
-            );
             match node_position {
                 None => {
                     // The root is where the spine starts.
@@ -847,13 +804,7 @@ impl<A: Clone + Debug> Vector<A> {
                     // The root and left spine remain untouched
                     // To the spine discarding efficiently we reverse, pop and reverse again
                     self.spine_mut(side).reverse();
-                    // let range = match side {
-                    //     BufferSide::Back => spine_position + 1..self.spine_ref(side).len(),
-                    //     BufferSide::Front => ,
-                    // };
-                    // println!("WTTTF {:?}", range);
                     for _ in 0..spine_position {
-                        println!("Popping");
                         self.len -= self.spine_mut(side).pop().unwrap().len();
                     }
                     self.spine_mut(side).reverse();
@@ -874,14 +825,6 @@ impl<A: Clone + Debug> Vector<A> {
                 assert!(node_index < internal.len());
                 let num_slots = internal.slots();
                 let (child_position, new_index) = internal.position_info_for(node_index).unwrap();
-                println!(
-                    "derpenstein {} {} {} {} {}",
-                    node_index,
-                    child_position,
-                    new_index,
-                    internal.len(),
-                    internal.level()
-                );
                 let internal_mut = Rc::make_mut(internal);
                 let children = &mut internal_mut.children;
                 let sizes = Rc::make_mut(&mut internal_mut.sizes);
@@ -890,7 +833,6 @@ impl<A: Clone + Debug> Vector<A> {
                     Side::Front => 0..child_position,
                 };
                 for _ in range {
-                    println!("pop");
                     match children {
                         ChildList::Internals(children) => {
                             children.pop(side);
@@ -901,7 +843,6 @@ impl<A: Clone + Debug> Vector<A> {
                     }
                     self.len -= sizes.pop_child(side);
                 }
-                println!("final pop");
                 let next_node = match children {
                     ChildList::Internals(children) => children.pop(side).into(),
                     ChildList::Leaves(children) => children.pop(side).into(),
@@ -917,20 +858,11 @@ impl<A: Clone + Debug> Vector<A> {
                 Side::Back => node_index + 1..leaf.slots(),
                 Side::Front => 0..node_index,
             };
-            println!(
-                "derlol {:?} {:?} {:?} {} {}",
-                leaf.len(),
-                range,
-                side,
-                node_index,
-                self.len
-            );
             assert!(node_index < leaf.len());
             for _ in range {
                 leaf.buffer.pop(side);
                 self.len -= 1;
             }
-            println!("derlol2 {:?} {}", leaf.len(), self.len);
 
             // Now we are done, we can reverse the spine here to get it back to normal
             spine.reverse();
@@ -1068,10 +1000,6 @@ impl<A: Clone + Debug> Vector<A> {
                 right_children - left_children
             };
 
-            println!(
-                "derpydoo {} {} {}",
-                left_children, right_children, difference
-            );
             assert!(difference <= 1);
 
             let min_children = if self.root.level() == 1 {
@@ -1101,11 +1029,6 @@ impl<A: Clone + Debug> Vector<A> {
         let root_len = self.root.len();
         let right_spine_len = self.right_spine.iter().map(|x| x.len()).sum::<usize>();
 
-        println!(
-            "Derp {} {} {} {:?}",
-            left_spine_len, root_len, right_spine_len, self
-        );
-
         assert_eq!(self.len, left_spine_len + root_len + right_spine_len);
         true
     }
@@ -1119,17 +1042,17 @@ impl<A: Clone + Debug + PartialEq> Vector<A> {
             let mut iter = v.iter();
             for spine in self.left_spine.iter() {
                 if !spine.equal_iter(&mut iter) {
-                    println!("OK Gar Left: {:?} {:?}", self, v);
+                    println!("Left: {:?} {:?}", self, v);
                     return false;
                 }
             }
             if !self.root.equal_iter(&mut iter) {
-                println!("OK Gar Root: {:?} {:?}", self, v);
+                println!("Root: {:?} {:?}", self, v);
                 return false;
             }
             for spine in self.right_spine.iter().rev() {
                 if !spine.equal_iter(&mut iter) {
-                    println!("OK Gar Right: {:?} {:?}", self, v);
+                    println!("Right: {:?} {:?}", self, v);
                     return false;
                 }
             }
@@ -1182,9 +1105,6 @@ impl<'a, A: Clone + Debug + 'a> Iterator for Iter<'a, A> {
     fn next(&mut self) -> Option<&'a A> {
         if self.front != self.back {
             let focus: &'a mut Focus<A> = unsafe { &mut *(&mut self.focus as *mut _) };
-            if focus.get(self.front).is_none() {
-                println!("RAWR {:#?}", self);
-            }
             let result = focus.get(self.front).unwrap();
             self.front += 1;
             Some(result)
@@ -1409,8 +1329,6 @@ mod test {
                 vector.iter().rev().cloned().collect::<Vec<_>>(),
                 vec.iter().rev().cloned().collect::<Vec<_>>()
             );
-
-            // println!("Rawr {:?} {:?}", vec, vector);
         }
     }
 

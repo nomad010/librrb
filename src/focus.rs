@@ -221,12 +221,6 @@ impl<'a, A: Clone + Debug> Focus<'a, A> {
                     self.tree.left_spine.len() + 1 + self.tree.right_spine.len() - position
                 }
             };
-            println!(
-                "Skipping {} of {} because of {:?}",
-                skip_amount,
-                self.tree.spine_iter().count(),
-                self.spine_position
-            );
             let mut range_start = self.focus_range.end;
             for (position, node) in self.tree.spine_iter().skip(skip_amount) {
                 let range_end = range_start + node.len();

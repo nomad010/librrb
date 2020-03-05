@@ -115,12 +115,6 @@ impl<A: Clone + Debug + PartialEq> Leaf<A> {
     pub(crate) fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, A>) {
         for value in &self.buffer {
             let iter_value = iter.next().unwrap();
-            println!(
-                "{:?} vs {:?} == {:?}",
-                value,
-                iter_value,
-                value == iter_value
-            );
         }
     }
 }

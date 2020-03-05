@@ -460,6 +460,7 @@ impl<A: Debug> CircularBuffer<A> {
     /// guaranteed that the `f(buffer[position]) == Ordering::Equal`. If the function returns
     /// `Err(position)` then `f(buffer[position]) == Ordering::Greater`. This would indicate the
     /// position where searched for element should be inserted in order to maintain sorted order.
+    /// Tgis is hoisted directly from the algorithm used in the rust std library.
     pub fn binary_search_by<F: FnMut(&A) -> cmp::Ordering>(
         &self,
         range: Range<usize>,
@@ -477,9 +478,6 @@ impl<A: Debug> CircularBuffer<A> {
         while size > 1 {
             let half = size / 2;
             let mid = base + half;
-            // mid is always in [0, size), that means mid is >= 0 and < size.
-            // mid >= 0: by definition
-            // mid < size: mid = size / 2 + size / 4 + size / 8 ...
             let cmp = f(self.get(mid).unwrap());
             base = if cmp == cmp::Ordering::Greater {
                 base
@@ -488,7 +486,6 @@ impl<A: Debug> CircularBuffer<A> {
             };
             size -= half;
         }
-        // base is always in [0, size) because base <= mid.
         let cmp = f(self.get(base).unwrap());
         if cmp == cmp::Ordering::Equal {
             Ok(base)
