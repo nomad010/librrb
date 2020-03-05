@@ -8,12 +8,13 @@ on:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v2
-    - name: Build
+      - uses: actions/checkout@v2
+      - name: rust-clippy-check
+      uses: actions-rs/clippy-check@v1.0.5
+      - name: Build
       run: cargo build --verbose
-    - name: Run tests
+      - name: Run tests
       run: cargo test --verbose
+      
