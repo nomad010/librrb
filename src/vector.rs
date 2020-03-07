@@ -1,4 +1,246 @@
-//! A container for representing sequence of elements.
+//! A container for representing a sequence of elements.
+//!
+//! # Terminology
+//!
+//! * RRB Tree
+//!
+//! A relaxed radix B-tree. An M-ary tree where the data is stored only in the leaves. The leaves
+//! are all the same distance from the root.
+//!
+//! * Level of a Node
+//!
+//! A node's distance from its descendant leaves. A leaf node's level is 0.
+//!
+//! * Height of a Tree
+//!
+//! The tree root's level.
+//!
+//! * Len/Size of a Node
+//!
+//! The number of data elements that are accessible through the node. The size of a node T is
+//! denoted as |T|
+//!
+//! * Slots of a Node
+//!
+//! The number of direct children assocciated with a node. For a leaf node, this is equivalent its
+//! size. The slots of a node T is denoted as ||T||.
+//!
+//! * Left/Right Spine of a Tree
+//!
+//! The path that is formed by accessing the first/last data element from the root. This is
+//! equivalent to the collection of nodes that are accessed by repeatedly following the first/last
+//! children from the root.
+//!
+//! * A Node being Fully Dense
+//!
+//! A node is Fully Dense if it has no free slots and all children of that node are Fully Dense. If
+//! the node is a leaf it has exactly M data elements. If the node is internal, then it has exactly
+//! M children which are all Fully Dense.
+//!
+//! The size of a Fully Dense node T of level L may be calculated as:
+//! |T| = M^(L + 1).
+//!
+//! * A Node being Left/Right Dense
+//!
+//! A node is Left/Right Dense if all but the left/right most and last child are Fully Dense while
+//! the left/right most node is Left/Right Dense. A leaf node is always Left/Right Dense. The number
+//! of children of a Left/Right Dense node is allowed to vary, but may not be empty.
+//!
+//! The size of a Left/Right Dense node T of level L may be calculated as:
+//! |T| = (||T|| - 1) * M ^ L + |T_left/right|
+//!
+//! * A Node being Inner Dense
+//!
+//! A node is Inner Dense if all but the first and last children are Fully Dense and the first and
+//! last children are Left/Right Dense. A leaf node is always Inner Dense. The number of children of an
+//! Inner Dense node is allowed to vary, but must contain at least two children.
+//!
+//! The size of an Inner Dense node T of level L may be calculated as:
+//! |T| = (||T|| - 2) * M ^ L + |T_left| + |T_right|
+//!
+//! # Implementation
+//!
+//! We keep the tree in a format that allows quick access to its spines. Each node in the spine is
+//! stored in a vector (one for the left spine, and one for the right spine). The root is
+//! technically part of both spines, but we'd rather not have the root be in two places so we keep
+//! the root in a separate node in the tree.
+//!
+//! This implementation is similar to the Display model of other implementations, however there are
+//! two differences. Instead of tracking a single, flexible position, we always track both the first
+//! and last positions within the tree. Since we are tracking two positions, the root requires
+//! special handling. Like the Display model, the tracked nodes of the spine are removed from the
+//! other nodes of the tree. This is explained in the Invariants section.
+//!
+//! The implementation provides operations for push_back, push_front, pop_front, pop_back,
+//! concatenate, slice_from_start and slice_to_end. Additionaly, there are fast operations to get
+//! the front and back elements.
+//!
+//! # Invariants
+//!
+//! ## Invariant 1
+//!
+//! Spines must be of equal length. This should never be broken by an operation.
+//!
+//! ## Invariant 2
+//!
+//! All nodes in the spine except for the first one (the leaf) must have at least 1 slot free.
+//!
+//! This is equivalent to the process of keeping a Display focused on the first element. On the left
+//! spine, this is the missing child is the leftmost node, while the missing child is the rightmost
+//! node on the right spine. This missing child logically points to the spine element below.
+//!
+//! ## Invariant 3
+//!
+//! The first node(the leaf) in the spine must have at least 1 element, but may be full.
+//!
+//! Leaves, in general, cannot be empty. There is one case in which there could be an empty leaf in
+//! the tree being the empty tree. In this case the leaf would be the root node and the spines would
+//! be empty.
+//!
+//! By ensuring leaves in the spine cannot be empty, we can handle queries for the front/back
+//! element (or elements near it) quickly.
+//!
+//! ## Invariant 4
+//!
+//! If the root is a non-leaf, it must always have at least 2 slot free, but may be empty.
+//!
+//! The two missing slots occur on either end of the root. These two missing slots logically point
+//! to the the tops of both spines. This explains why this invariant if the root is a leaf as both
+//! spines are empty.
+//!
+//! ## Invariant 5
+//!
+//! If the root is an empty non-leaf node then the last two nodes of both spines:
+//! 1) Must not be able to be merged into a node of 1 less height.
+//! 2) Must differ in slots by at most one node.
+//!
+//! This invariant is important to ensuring the pop* operations complete in a timely fashion. These
+//! operations must occassionally traverse the tree to find the next non-empty leaf. Typically,
+//! finding the leaf doesn't require more than a few hops, however in the worst case we would end up
+//! going all the way up to the root and back down the other side of the tree. Although not strictly
+//! necessary to keep performance guarantees we want to avoid this situation.
+//!
+//! Invariant 5 puts a bound on the size of the top of the spine in the case that the root is empty.
+//! Let L and R be the number of slots in the left and right spine tops respectively. If the root is
+//! empty, then L + R > M - 2 and |R - L| <= 1.
+//!
+//! Operations may cause the this invariant to be broken, a certain method is employed to fix up
+//! these violations.
+//!
+//! This invariant is experimental and is likely to change.
+//!
+//! # Operations
+//!
+//! ## push_front/push_back
+//!
+//! Adds an element to the front or back of the collection. This operation will not create or remove
+//! unbalanced nodes in the tree.
+//!
+//! ## pop_front/pop_back
+//!
+//! Removes an element to the front or back of the collection. This operation will not create
+//! additional unbalanced nodes in the tree, however it may remove them.
+//!
+//! ## slice_from_start
+//!
+//! Slices a tree from the start to the given index. The elements after this index are discarded.
+//! Additionally, this shrinks the tree if required. This happens if the LCA of the first index and
+//! the given index is not the root. This LCA node will become the new root. This new tree will be
+//! Inner Dense. Slicing a tree cannot increase the number of unbalanced nodes in the tree.
+//!
+//! ## slice_to_end
+//!
+//! Slices a tree from the given index to the end. The elements before this index are discarded.
+//! Additionally, this shrinks the tree if required. This happens if the LCA of the last index and
+//! the given index is not the root. This LCA node will become the new root. This new tree will be
+//! Inner Dense. Slicing a tree cannot increase the number of unbalanced nodes. in the tree.
+//!
+//! ## concatenate
+//!
+//! Appends one tree onto the other, combining the sequences into one. The operation starts by
+//! equalizing the height of both trees by add single child parents to the shorter tree. This
+//! will break Invariant 5, but we do not worry about it till the end. Internally, concatenating
+//! requires getting of the right spine of the first tree and the left spine of the tree.
+//! Ideally, we want the two trees be Left/Right Dense so that they can be snapped together and the
+//! result is Inner Dense.
+//!
+//! Unfortunately, this is usually not possible. Recall from the terminology section that Left/Right
+//! Dense nodes have but one node Fully Dense. In this case, we need the spines we are removing to
+//! be Fully Dense. The size of a Fully Dense node is always a power of M, however the size of these
+//! spines might not be. As it is not possible to make this Fully Dense, the root may also not be
+//! Inner Dense. Clearly, we have to compromise by allowing unbalanced nodes. We will describe 3
+//! algorithms.
+//!
+//! ### Summing over two levels
+//!
+//! The algorithm proceeds by walking both spines to the level just above the leaves and merging
+//! these node's children as far left as possible. If the right node becomes completely empty then
+//! it is discarded, dropping the node. This reduces the height of the unbalanced part by two
+//! levels. Correspondingly, any unbalanced part of at most 2 levels becomes Fully Dense afterwards.
+//! Finally, this works its way up to the roots of both trees. The tree might have to be grown if
+//! there are still two roots left or Invariant 5 is broken. The downside to this algorithm is that
+//! it needs O(M^2 * H) time to complete the operation. It is presumed that this maintains a height
+//! of O(logN + log(C/M^2)) where N and C are the total elements and the total concatenations used
+//! to build up the tree.
+//!
+//! ### Summing over one level
+//!
+//! Similar to the above algorithm, this one proceeds by walking both spines to the leaves and
+//! merging these node's children as far left as possible. If the right node becomes completely
+//! empty then it is discarded, dropping the node. This reduces the height of the unbalanced part by
+//! two levels. Any unbalanced part of at most 1 level becomes Fully Dense. Finally, this works its
+//! way up to the roots of both trees. The tree might have to be grown if there are still two roots
+//! left or Invariant 5 is broken. This algorithm runs in O(M * H) time, but it balances the tree
+//! less than the first algorithm. This maintains a height of O(logN + log(C/M)) where N and C are
+//! the total elements and the total concatenations used to build up the tree.
+//!
+//! ### Concatenating roots
+//!
+//! Finally, this algorithm only merges the roots of both trees. If both roots fit into a single
+//! node, then this just needs to merge the nodes and return the merged node. If it is not possible
+//! to merge into a single node then we simple grow the tree to encompass both nodes. This algorithm
+//! runs in O(M) time, but it doesn't balance the tree at all. There is an advantage to not doing
+//! any balancing, the tree structure is able to make better use of structural sharing as only the
+//! roots of the original tree need to change. Like the above, this maintains a height of
+//! O(logN + log(C/M)) where N and C are the total elements and the total concatenations used to
+//! build up the tree. The difference between this algorithm and the one listed above is that the
+//! worst case is much more likely to happen here. However, the plus side there is better structural
+//! sharing.
+//!
+//! # Performance
+//!
+//! Assume the height of the tree is H and the number of elements in the tree is N.
+//!
+//! | Operation | Average case | Worst case |
+//! | --- | --- | --- |
+//! | [`Push front`][Vector::push_front] | O(1) | O(H) |
+//! | [`Push back`][Vector::push_back] | O(1) | O(H) |
+//! | [`Pop front`][Vector::pop_front] | O(1) | O(H) |
+//! | [`Pop back`][Vector::pop_back] | O(1) | O(H) |
+//! | [`Slice from Start`][Vector::slice_from_start] | O(MH) | O(MH) |
+//! | [`Slice to Back`][Vector::slice_to_end] | O(MH) | O(MH) |
+//! | [`Concatenate`][Vector::concatenate] | O(MH) | O(MH) |
+//! | [`Clone`][Vector::clone] | O(H) | O(H) |
+//! | [`Front`][Vector::front] | O(1) | O(1) |
+//! | [`Back`][Vector::back] | O(1) | O(1) |
+//! | [`New empty`][Vector::new] | O(M) | O(M) |
+//! | [`New singleton`][Vector::singleton] | O(M) | O(M) |
+//!
+//! We currently choose the `Summing over one level` algorithm for concatenation, however in the
+//! future this may switch to other algorithms. This means that H is bounded by O(logN + logC/M).
+//!
+//! [Vector::push_front]: ./struct.Vector.html#method.push_front
+//! [Vector::push_back]: ./struct.Vector.html#method.push_back
+//! [Vector::pop_front]: ./struct.Vector.html#method.pop_front
+//! [Vector::pop_back]: ./struct.Vector.html#method.pop_back
+//! [Vector::slice_from_start]: ./struct.Vector.html#method.slice_from_start
+//! [Vector::slice_to_end]: ./struct.Vector.html#method.slice_to_end
+//! [Vector::concatenate]: ./struct.Vector.html#method.concatenate
+//! [Vector::clone]: ./struct.Vector.html#method.clone
+//! [Vector::front]: ./struct.Vector.html#method.front
+//! [Vector::back]: ./struct.Vector.html#method.back
+//! [Vector::new]: ./struct.Vector.html#method.new
+//! [Vector::singleton]: ./struct.Vector.html#method.singleton
 
 use crate::focus::Focus;
 use crate::nodes::{ChildList, Internal, Leaf, NodeRc};
