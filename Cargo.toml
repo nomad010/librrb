@@ -11,3 +11,7 @@ edition = "2018"
 [dev-dependencies]
 proptest = "*"
 proptest-derive = "*"
+
+[features]
+level-concatenations = []
+

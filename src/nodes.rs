@@ -242,6 +242,7 @@ impl<A: Clone + Debug> ChildList<A> {
 
     /// Returns a copy of the Rc of the node at the given position in the node.
     pub fn get_child_node(&self, idx: usize) -> Option<NodeRc<A>> {
+        // TODO: Get rid of this function
         match self {
             ChildList::Leaves(children) => children.get(idx).map(|x| Rc::clone(x).into()),
             ChildList::Internals(children) => children.get(idx).map(|x| Rc::clone(x).into()),
@@ -312,9 +313,11 @@ impl<A: Clone + Debug> Internal<A> {
         debug_assert_eq!(self.level(), destination.level());
         let shared = match self.children {
             ChildList::Internals(ref mut children) => {
+                debug_assert_eq!(children.len(), self.sizes.len());
                 children.decant_into(destination.children.internals_mut(), share_side, len)
             }
             ChildList::Leaves(ref mut children) => {
+                debug_assert_eq!(children.len(), self.sizes.len());
                 children.decant_into(destination.children.leaves_mut(), share_side, len)
             }
         };
@@ -329,6 +332,92 @@ impl<A: Clone + Debug> Internal<A> {
         }
 
         shared
+    }
+
+    /// Packs the children of the to the left of the node so that all but the last is dense.
+    pub fn pack_children(&mut self) {
+        if self.is_empty() {
+            return;
+        }
+        if self.level() == 1 {
+            assert_eq!(self.children.leaves_ref().len(), self.sizes.len());
+        } else {
+            assert_eq!(self.children.internals_ref().len(), self.sizes.len());
+        }
+        // TODO: Genericize on a side
+        let mut write_position = 0;
+        let mut read_position = write_position + 1;
+        match self.children {
+            ChildList::Internals(ref mut children) => {
+                while read_position < children.len() {
+                    if read_position == write_position {
+                        read_position += 1;
+                        continue;
+                    } else {
+                        let (write, read) = children.pair_mut(write_position, read_position);
+                        Rc::make_mut(read).share_children_with(
+                            Rc::make_mut(write),
+                            Side::Front,
+                            RRB_WIDTH,
+                        );
+
+                        if write.is_full() {
+                            write_position += 1;
+                        }
+                        if read.is_empty() {
+                            read_position += 1;
+                        }
+                    }
+                }
+                // println!("lolinternals {:#?}", children);
+                while children.back().unwrap().is_empty() {
+                    children.pop_back();
+                }
+                let sizes = Rc::make_mut(&mut self.sizes);
+                *sizes = SizeTable::new(sizes.level());
+                for child in children {
+                    sizes.push_child(Side::Back, child.len());
+                }
+            }
+            ChildList::Leaves(ref mut children) => {
+                while read_position < children.len() {
+                    if read_position == write_position {
+                        read_position += 1;
+                        continue;
+                    } else {
+                        let (write, read) = children.pair_mut(write_position, read_position);
+                        Rc::make_mut(read).share_children_with(
+                            Rc::make_mut(write),
+                            Side::Front,
+                            RRB_WIDTH,
+                        );
+
+                        if write.is_full() {
+                            write_position += 1;
+                        }
+                        if read.is_empty() {
+                            read_position += 1;
+                        }
+                    }
+                }
+
+                // println!("lolleaves {:#?}", children);
+                while children.back().unwrap().is_empty() {
+                    children.pop_back();
+                }
+                let sizes = Rc::make_mut(&mut self.sizes);
+                *sizes = SizeTable::new(sizes.level());
+                for child in children {
+                    sizes.push_child(Side::Back, child.len());
+                }
+            }
+        }
+
+        if self.level() == 1 {
+            assert_eq!(self.children.leaves_ref().len(), self.sizes.len());
+        } else {
+            assert_eq!(self.children.internals_ref().len(), self.sizes.len());
+        }
     }
 
     /// Returns a reference to the element at the given index in the tree.

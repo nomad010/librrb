@@ -32,7 +32,7 @@ impl SizeTable {
     }
 
     /// Returns the capacity of each of child in this node.
-    fn items_per_dense_node(&self) -> usize {
+    pub fn items_per_dense_node(&self) -> usize {
         RRB_WIDTH.pow(self.level as u32)
     }
 

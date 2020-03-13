@@ -226,8 +226,15 @@
 //! | [`New empty`][Vector::new] | O(M) | O(M) |
 //! | [`New singleton`][Vector::singleton] | O(M) | O(M) |
 //!
-//! We currently choose the `Summing over one level` algorithm for concatenation, however in the
-//! future this may switch to other algorithms. This means that H is bounded by O(logN + logC/M).
+//! We currently choose the `Summing over two levels` algorithm for concatenation, however in the
+//! future this may switch to other algorithms. This means that H is bounded by O(logN + logC/M^2).
+//! An example of what to expect from this algorithm can be found by understanding the inserts test.
+//! The insert operation is done by splitting the original vector into two pieces before and after
+//! the split point. The new element is inserted and the two pieces are concatenated back together.
+//! The test, itself, inserts 0..N repetitively into the middle of a Vector. When N is roughly
+//! 200000, the height of the tree reaches 100. For comparison a full tree of height 4 can holds
+//! 1048576 or over 5 times this amount and a full tree of 100 levels could hold over 10^150
+//! elements.
 //!
 //! [Vector::push_front]: ./struct.Vector.html#method.push_front
 //! [Vector::push_back]: ./struct.Vector.html#method.push_back
@@ -589,6 +596,7 @@ impl<A: Clone + Debug> Vector<A> {
     /// Fixes up the top of the spines. Certain operations break some invariants that we use to keep
     /// the tree balanced. This repeatedly fixes up the tree to fulfill the invariants.
     fn fixup_spine_tops(&mut self) {
+        // println!("Fixing up spines {:#?}", self);
         // The following invariant is fixed up here
 
         // Invariant 5
@@ -621,6 +629,7 @@ impl<A: Clone + Debug> Vector<A> {
                 // Part 1) of invariant 5 is broken, we merge into a single node decreasing the
                 // tree's height by 1. Invariant 5 might be broken with the new root so we need to
                 // continue checking.
+                // println!("Merging");
                 let mut left_spine_top = self.left_spine.pop().unwrap();
                 let mut right_spine_top = self.right_spine.pop().unwrap();
                 left_spine_top.share_children_with(&mut right_spine_top, Side::Back, RRB_WIDTH);
@@ -782,6 +791,7 @@ impl<A: Clone + Debug> Vector<A> {
         Rc::make_mut(leaf.leaf_mut()).back_mut()
     }
 
+    #[cfg(feature = "level-concatenations")]
     /// Appends the given vector onto the back of this vector.
     ///
     /// # Examples
@@ -832,10 +842,27 @@ impl<A: Clone + Debug> Vector<A> {
                     Rc::new(Internal::empty_internal(root.level() + 1)).into()
                 }
             };
-            let new_left = mem::replace(&mut self.root, new_root);
-            let new_right = new_left.new_empty();
+            let mut new_left = mem::replace(&mut self.root, new_root);
+            let mut new_right = new_left.new_empty();
+            new_left.share_children_with(&mut new_right, Side::Back, new_left.slots() / 2);
             self.left_spine.push(new_left);
             self.right_spine.push(new_right);
+        }
+
+        while other.left_spine.len() < self.right_spine.len() {
+            // The root moves to either the left or right spine and the root becomes empty
+            // We replace the right with root here and left with an empty node
+            let new_root = match &other.root {
+                NodeRc::Leaf(_) => Rc::new(Internal::empty_leaves()).into(),
+                NodeRc::Internal(root) => {
+                    Rc::new(Internal::empty_internal(root.level() + 1)).into()
+                }
+            };
+            let mut new_right = mem::replace(&mut other.root, new_root);
+            let mut new_left = new_right.new_empty();
+            new_right.share_children_with(&mut new_left, Side::Front, new_right.slots() / 2);
+            other.left_spine.push(new_left);
+            other.right_spine.push(new_right);
         }
 
         while other.left_spine.len() < self.right_spine.len() {
@@ -916,6 +943,232 @@ impl<A: Clone + Debug> Vector<A> {
         self.fixup_spine_tops();
     }
 
+    #[cfg(not(feature = "level-concatenations"))]
+    /// Appends the given vector onto the back of this vector.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![1, 2, 3];
+    /// v.concatenate(vector![4, 5, 6]);
+    /// assert_eq!(v, vector![1, 2, 3, 4, 5, 6]);
+    /// ```
+    pub fn concatenate(&mut self, mut other: Self) {
+        // Don't merge too thoroughly
+        // 1) Walk down to the leaves
+        // 2a) If the number of occupied slots on both sides is more than M than leave both sides
+        // untouched
+        // 2b) If the number of occupied slots on both sides is less than or equal to M than leave
+        // merge the left into the right (or the right into the left)
+        // 3) If left or right is non-empty, pack them up into their respective parent
+        // 4) Go up 1 level to the node parents and repeat the process from step 2 (unless this is the root)
+        // 5a) If there is one root that has at most M - 2 children then we are DONE
+        // 5b) If there is one root with more than M - 2 children, then we split the root up into the
+        // two evenly sized nodes (these nodes will have at most M/2 children)
+        // 5c) If there are two roots we share the the nodes evenly between them
+        // 6) The two roots from the previous step become the new left and right spine tops and a new
+        // empty root is set.
+        //
+        // Analysis: This algorithm is O(M.H) as in the worst case for each pair of spine nodes
+        // there could be a merge of the left and right children. Each merge simply shifts elements
+        // out of one node and adds them tp another.
+        // In the best case, this algorithm is O(H)
+        if self.is_empty() {
+            mem::replace(self, other);
+            return;
+        }
+        if other.is_empty() {
+            return;
+        }
+
+        let new_len = self.len + other.len();
+
+        // Make the spines the same length
+        while self.right_spine.len() < other.left_spine.len() {
+            // The root moves to either the left or right spine and the root becomes empty
+            // We replace the left with root here and right with an empty node
+            let new_root = match &self.root {
+                NodeRc::Leaf(_) => Rc::new(Internal::empty_leaves()).into(),
+                NodeRc::Internal(root) => {
+                    Rc::new(Internal::empty_internal(root.level() + 1)).into()
+                }
+            };
+            let mut new_left = mem::replace(&mut self.root, new_root);
+            let mut new_right = new_left.new_empty();
+            new_left.share_children_with(&mut new_right, Side::Back, new_left.slots() / 2);
+            self.left_spine.push(new_left);
+            self.right_spine.push(new_right);
+        }
+
+        while other.left_spine.len() < self.right_spine.len() {
+            // The root moves to either the left or right spine and the root becomes empty
+            // We replace the right with root here and left with an empty node
+            let new_root = match &other.root {
+                NodeRc::Leaf(_) => Rc::new(Internal::empty_leaves()).into(),
+                NodeRc::Internal(root) => {
+                    Rc::new(Internal::empty_internal(root.level() + 1)).into()
+                }
+            };
+            let mut new_right = mem::replace(&mut other.root, new_root);
+            let mut new_left = new_right.new_empty();
+            new_right.share_children_with(&mut new_left, Side::Front, new_right.slots() / 2);
+            other.left_spine.push(new_left);
+            other.right_spine.push(new_right);
+        }
+
+        debug_assert_eq!(self.right_spine.len(), self.right_spine.len());
+        debug_assert_eq!(other.left_spine.len(), other.right_spine.len());
+        debug_assert_eq!(self.right_spine.len(), other.left_spine.len());
+
+        let packer = |new_node: NodeRc<A>, parent_node: &mut Rc<Internal<A>>, side| {
+            if !new_node.is_empty() {
+                let parent = &mut Rc::make_mut(parent_node);
+                Rc::make_mut(&mut parent.sizes).push_child(side, new_node.len());
+                match parent.children {
+                    ChildList::Internals(ref mut children) => {
+                        children.push(side, new_node.internal())
+                    }
+                    ChildList::Leaves(ref mut children) => children.push(side, new_node.leaf()),
+                }
+            }
+        };
+
+        // More efficient to work from front to back here, but we need to remove elements
+        // We reverse to make this more efficient
+        self.right_spine.reverse();
+        other.left_spine.reverse();
+        if let Some(left_child) = self.right_spine.pop() {
+            let parent_node = self
+                .right_spine
+                .last_mut()
+                .unwrap_or(&mut self.root)
+                .internal_mut();
+            packer(left_child, parent_node, Side::Back);
+        }
+        if let Some(right_child) = other.left_spine.pop() {
+            let parent_node = other
+                .left_spine
+                .last_mut()
+                .unwrap_or(&mut other.root)
+                .internal_mut();
+            packer(right_child, parent_node, Side::Front);
+        }
+        while !self.right_spine.is_empty() {
+            let mut left_node = self.right_spine.pop().unwrap();
+            let mut right_node = other.left_spine.pop().unwrap();
+
+            let left = Rc::make_mut(left_node.internal_mut());
+            let right = Rc::make_mut(right_node.internal_mut());
+
+            if !left.is_empty() {
+                left.pack_children();
+
+                let left_position = left.slots() - 1;
+                while left
+                    .children
+                    .get_child_node(left_position)
+                    .unwrap()
+                    .free_slots()
+                    != 0
+                    && !right.is_empty()
+                {
+                    match left.children {
+                        ChildList::Internals(ref mut children) => {
+                            let destination_node =
+                                Rc::make_mut(children.get_mut(left_position).unwrap());
+                            let source_node =
+                                Rc::make_mut(right.children.internals_mut().front_mut().unwrap());
+                            let shared = source_node.share_children_with(
+                                destination_node,
+                                Side::Front,
+                                RRB_WIDTH,
+                            );
+                            Rc::make_mut(&mut left.sizes).increment_side_size(Side::Back, shared);
+                            Rc::make_mut(&mut right.sizes).decrement_side_size(Side::Front, shared);
+                            if source_node.is_empty() {
+                                right.children.internals_mut().pop_front();
+                                Rc::make_mut(&mut right.sizes).pop_child(Side::Front);
+                            }
+                            assert_eq!(right.sizes.len(), right.children.internals_mut().len());
+                        }
+                        ChildList::Leaves(ref mut children) => {
+                            let destination_node =
+                                Rc::make_mut(children.get_mut(left_position).unwrap());
+                            let source_node =
+                                Rc::make_mut(right.children.leaves_mut().front_mut().unwrap());
+                            let shared = source_node.share_children_with(
+                                destination_node,
+                                Side::Front,
+                                RRB_WIDTH,
+                            );
+                            Rc::make_mut(&mut left.sizes).increment_side_size(Side::Back, shared);
+                            Rc::make_mut(&mut right.sizes).decrement_side_size(Side::Front, shared);
+                            if source_node.is_empty() {
+                                right.children.leaves_mut().pop_front();
+                                Rc::make_mut(&mut right.sizes).pop_child(Side::Front);
+                            }
+                            assert_eq!(right.sizes.len(), right.children.leaves_mut().len());
+                        }
+                    }
+                }
+            }
+
+            if !right.is_empty() {
+                right.pack_children();
+                right.share_children_with(left, Side::Front, RRB_WIDTH);
+            }
+
+            packer(
+                left_node,
+                self.right_spine
+                    .last_mut()
+                    .unwrap_or(&mut self.root)
+                    .internal_mut(),
+                Side::Back,
+            );
+            if !right.is_empty() {
+                packer(
+                    right_node,
+                    other
+                        .left_spine
+                        .last_mut()
+                        .unwrap_or(&mut other.root)
+                        .internal_mut(),
+                    Side::Front,
+                );
+            }
+        }
+
+        debug_assert!(self.right_spine.is_empty());
+        debug_assert!(other.left_spine.is_empty());
+        mem::replace(&mut self.right_spine, other.right_spine);
+
+        other
+            .root
+            .share_children_with(&mut self.root, Side::Front, RRB_WIDTH);
+
+        if self.root.free_slots() < 2 {
+            self.root
+                .share_children_with(&mut other.root, Side::Back, 1);
+        }
+
+        if !other.root.is_empty() {
+            let new_root = match &self.root {
+                NodeRc::Leaf(_) => Rc::new(Internal::empty_leaves()).into(),
+                NodeRc::Internal(root) => {
+                    Rc::new(Internal::empty_internal(root.level() + 1)).into()
+                }
+            };
+            let old_root = mem::replace(&mut self.root, new_root);
+            self.left_spine.push(old_root);
+            self.right_spine.push(other.root);
+        }
+        self.len = new_len;
+        self.fixup_spine_tops();
+    }
+
     /// Slices the vector from the start to the given index exclusive.
     ///
     /// # Examples
@@ -936,7 +1189,6 @@ impl<A: Clone + Debug> Vector<A> {
         // node, but we add back the spine by replacing it with path to this leaf
         // 3) If the leaf only has the root as an ancestor it proceeds as 2) with the path becoming
         // the entire right spine.
-        self.assert_invariants();
         if len == 0 {
             self.left_spine.clear();
             self.right_spine.clear();
@@ -949,7 +1201,7 @@ impl<A: Clone + Debug> Vector<A> {
         self.fixup_spine_tops();
     }
 
-    /// Slices the vector from the given index inclusive to the end..
+    /// Slices the vector from the given index inclusive to the end.
     ///
     /// # Examples
     ///
@@ -977,7 +1229,6 @@ impl<A: Clone + Debug> Vector<A> {
             self.len = 0;
             return;
         }
-        self.assert_invariants();
         let index = start;
         self.make_index_side(index, Side::Front);
         self.fixup_spine_tops();
@@ -1016,6 +1267,7 @@ impl<A: Clone + Debug> Vector<A> {
         if let Some((node_position, mut node_index)) = self.find_node_info_for_index(index) {
             // We need to make this node the first/last in the tree
             // This means that this node will become the part of the spine for the given side
+            // println!("rawr derp doo {:#?}", self);
             match node_position {
                 None => {
                     // The root is where the spine starts.
@@ -1111,6 +1363,45 @@ impl<A: Clone + Debug> Vector<A> {
         }
     }
 
+    /// Splits the vector at the given index into two vectors. `self` is replaced with every element
+    /// before the given index and a new vector containing everything after and including the index.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![1, 2, 3];
+    /// let last_half = v.split_off(1);
+    /// assert_eq!(v, vector![1]);
+    /// assert_eq!(last_half, vector![2, 3]);
+    /// ```
+    pub fn split_off(&mut self, at: usize) -> Vector<A> {
+        // TODO: This is not really the most efficient way to do this, specialize this function.
+        let mut result = self.clone();
+        result.slice_to_end(at);
+        self.slice_from_start(at);
+        result
+    }
+
+    /// Inserts the item into the vector at the given index.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![1, 2, 3];
+    /// v.insert(1, 4);
+    /// assert_eq!(v, vector![1, 4, 2, 3]);
+    /// ```
+    pub fn insert(&mut self, index: usize, element: A) {
+        // TODO: This is not really the most efficient way to do this, specialize this function.
+        let last_part = self.split_off(index);
+        self.push_back(element);
+        self.concatenate(last_part);
+    }
+
     /// Returns the height of the tree.
     pub(crate) fn height(&self) -> usize {
         debug_assert_eq!(self.left_spine.len(), self.right_spine.len());
@@ -1200,6 +1491,7 @@ impl<A: Clone + Debug> Vector<A> {
 
     /// Checks the internal invariants that are required by the Vector.
     pub(crate) fn assert_invariants(&self) -> bool {
+        // println!("assert {:#?}", self);
         // Invariant 1
         // Spines must be of equal length
         assert_eq!(self.left_spine.len(), self.right_spine.len());
@@ -1692,72 +1984,21 @@ mod test {
         );
     }
 
-    // #[test]
-    // pub fn sort() {
-    //     let items = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
-    //     let mut buffer = CircularBuffer::new();
-    //     for item in &items {
-    //         buffer.push_back(*item);
-    //     }
+    #[test]
+    pub fn inserts() {
+        let mut v = Vector::new();
+        const N: usize = 10000;
+        for i in 0..N {
+            v.insert(v.len() / 2, i);
+            v.assert_invariants();
+        }
+        let first_half = (1..N).step_by(2);
+        let second_half = (0..N).step_by(2).rev();
 
-    //     // Len
-    //     assert!(!buffer.is_empty());
-    //     assert_eq!(buffer.len(), 10);
-    //     assert!(!buffer.is_full() || RRB_WIDTH == 10);
+        let mut vector = Vec::new();
+        vector.extend(first_half);
+        vector.extend(second_half);
 
-    //     // Back
-    //     assert_eq!(buffer.back(), Some(&0));
-    //     assert_eq!(buffer.back_mut(), Some(&mut 0));
-    //     assert_eq!(buffer.end(BufferSide::Back), Some(&0));
-    //     assert_eq!(buffer.end_mut(BufferSide::Back), Some(&mut 0));
-    //     let mut back = buffer.clone();
-    //     assert_eq!(back.try_pop_back(), Ok(0));
-    //     assert_eq!(back.try_pop_back(), Ok(1));
-    //     assert_eq!(back.try_pop_back(), Ok(2));
-    //     assert_eq!(back.try_pop_back(), Ok(3));
-    //     assert_eq!(back.try_pop_back(), Ok(4));
-    //     assert_eq!(back.try_pop_back(), Ok(5));
-    //     assert_eq!(back.try_pop_back(), Ok(6));
-    //     assert_eq!(back.try_pop_back(), Ok(7));
-    //     assert_eq!(back.try_pop_back(), Ok(8));
-    //     assert_eq!(back.try_pop_back(), Ok(9));
-    //     assert_eq!(back.try_pop_back(), Err(()));
-    //     assert_eq!(back.back(), None);
-    //     assert_eq!(back.back_mut(), None);
-    //     assert_eq!(back.end(BufferSide::Back), None);
-    //     assert_eq!(back.end_mut(BufferSide::Back), None);
-
-    //     // Front
-    //     assert_eq!(buffer.front(), Some(&9));
-    //     assert_eq!(buffer.front_mut(), Some(&mut 9));
-    //     assert_eq!(buffer.end(BufferSide::Front), Some(&9));
-    //     assert_eq!(buffer.end_mut(BufferSide::Front), Some(&mut 9));
-    //     let mut front = buffer.clone();
-    //     assert_eq!(front.try_pop_front(), Ok(9));
-    //     assert_eq!(front.try_pop_front(), Ok(8));
-    //     assert_eq!(front.try_pop_front(), Ok(7));
-    //     assert_eq!(front.try_pop_front(), Ok(6));
-    //     assert_eq!(front.try_pop_front(), Ok(5));
-    //     assert_eq!(front.try_pop_front(), Ok(4));
-    //     assert_eq!(front.try_pop_front(), Ok(3));
-    //     assert_eq!(front.try_pop_front(), Ok(2));
-    //     assert_eq!(front.try_pop_front(), Ok(1));
-    //     assert_eq!(front.try_pop_front(), Ok(0));
-    //     assert_eq!(front.try_pop_front(), Err(()));
-    //     assert_eq!(front.end(BufferSide::Front), None);
-    //     assert_eq!(front.end_mut(BufferSide::Front), None);
-
-    //     // Sort
-    //     buffer.sort();
-    //     assert_eq!(buffer.try_pop_front(), Ok(0));
-    //     assert_eq!(buffer.try_pop_front(), Ok(1));
-    //     assert_eq!(buffer.try_pop_front(), Ok(2));
-    //     assert_eq!(buffer.try_pop_front(), Ok(3));
-    //     assert_eq!(buffer.try_pop_front(), Ok(4));
-    //     assert_eq!(buffer.try_pop_front(), Ok(5));
-    //     assert_eq!(buffer.try_pop_front(), Ok(6));
-    //     assert_eq!(buffer.try_pop_front(), Ok(7));
-    //     assert_eq!(buffer.try_pop_front(), Ok(8));
-    //     assert_eq!(buffer.try_pop_front(), Ok(9));
-    // }
+        assert_eq!(v.iter().copied().collect::<Vec<usize>>(), vector);
+    }
 }

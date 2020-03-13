@@ -274,8 +274,8 @@ impl<A: Debug> CircularBuffer<A> {
     ///
     /// Returns None if the index does not exist.
     pub fn get(&self, idx: usize) -> Option<&A> {
-        if !self.is_empty() {
-            let index = (self.front + idx) % RRB_WIDTH;
+        if idx < self.len() {
+            let index = self.index_for(idx);
             unsafe { Some(&*self.data[index].as_ptr()) }
         } else {
             None
@@ -286,8 +286,8 @@ impl<A: Debug> CircularBuffer<A> {
     ///
     /// Returns None if the index does not exist.
     pub fn get_mut(&mut self, idx: usize) -> Option<&mut A> {
-        if !self.is_empty() {
-            let index = (self.front + idx) % RRB_WIDTH;
+        if idx < self.len() {
+            let index = self.index_for(idx);
             unsafe { Some(&mut *self.data[index].as_mut_ptr()) }
         } else {
             None
@@ -384,6 +384,31 @@ impl<A: Debug> CircularBuffer<A> {
         self.data.rotate_left(self.front);
         self.back = self.len();
         self.front = 0;
+    }
+
+    /// Returns a pair of mutable references to the data at the given positions.
+    ///
+    /// # Panics
+    ///
+    /// This panics if both indices are equal.
+    /// This panics if either indices are out of bounds.
+    pub fn pair_mut(&mut self, first: usize, second: usize) -> (&mut A, &mut A) {
+        assert_ne!(first, second);
+        assert!(first < self.len());
+        assert!(second < self.len());
+
+        let first_idx = self.index_for(first);
+        let second_idx = self.index_for(second);
+        if first_idx > second_idx {
+            let result = self.pair_mut(second, first);
+            return (result.1, result.0);
+        }
+
+        let (first_slice, second_slice) = self.data.split_at_mut(second_idx);
+        let first_ptr = first_slice[first_idx].as_mut_ptr();
+        let second_ptr = second_slice[0].as_mut_ptr();
+
+        unsafe { (&mut *first_ptr, &mut *second_ptr) }
     }
 
     /// Returns the circular buffer as a single slice if possible.
