@@ -1402,6 +1402,26 @@ impl<A: Clone + Debug> Vector<A> {
         self.concatenate(last_part);
     }
 
+    /// Removes item from the vector at the given index.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![1, 2, 3];
+    /// v.remove(1);
+    /// assert_eq!(v, vector![1, 3]);
+    /// ```
+    pub fn remove(&mut self, index: usize) {
+        // TODO: This is not really the most efficient way to do this, specialize this function
+        if index < self.len {
+            let mut last_part = self.split_off(index);
+            last_part.pop_front();
+            self.concatenate(last_part);
+        }
+    }
+
     /// Returns the height of the tree.
     pub(crate) fn height(&self) -> usize {
         debug_assert_eq!(self.left_spine.len(), self.right_spine.len());
@@ -1987,7 +2007,7 @@ mod test {
     #[test]
     pub fn inserts() {
         let mut v = Vector::new();
-        const N: usize = 2000;
+        const N: usize = 200000;
         for i in 0..N {
             v.insert(v.len() / 2, i);
             v.assert_invariants();
@@ -2000,5 +2020,7 @@ mod test {
         vector.extend(second_half);
 
         assert_eq!(v.iter().copied().collect::<Vec<usize>>(), vector);
+
+        println!("{} {}", v.len(), v.height());
     }
 }
