@@ -1987,7 +1987,7 @@ mod test {
     #[test]
     pub fn inserts() {
         let mut v = Vector::new();
-        const N: usize = 10000;
+        const N: usize = 2000;
         for i in 0..N {
             v.insert(v.len() / 2, i);
             v.assert_invariants();
