@@ -608,7 +608,7 @@ impl<A: Clone + Debug> Clone for CircularBuffer<A> {
 impl<A: Debug> Drop for CircularBuffer<A> {
     fn drop(&mut self) {
         if self.is_full() {
-            for x in &mut self.data {
+            for x in self.data.iter_mut() {
                 unsafe {
                     mem::replace(x, mem::MaybeUninit::uninit()).assume_init();
                 }

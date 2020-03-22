@@ -232,8 +232,8 @@
 //! The insert operation is done by splitting the original vector into two pieces before and after
 //! the split point. The new element is inserted and the two pieces are concatenated back together.
 //! The test, itself, inserts 0..N repetitively into the middle of a Vector. When N is roughly
-//! 200000, the height of the tree reaches 100. For comparison a full tree of height 4 can holds
-//! 1048576 or over 5 times this amount and a full tree of 100 levels could hold over 10^150
+//! 200000, the height of the tree reaches 26. For comparison a full tree of height 4 can holds
+//! 16_777_216 or over 800 times this amount and a full tree of 26 levels could hold over 10^44
 //! elements.
 //!
 //! [Vector::push_front]: ./struct.Vector.html#method.push_front
@@ -2007,7 +2007,7 @@ mod test {
     #[test]
     pub fn inserts() {
         let mut v = Vector::new();
-        const N: usize = 1000;
+        const N: usize = 1_000;
         for i in 0..N {
             v.insert(v.len() / 2, i);
             v.assert_invariants();
