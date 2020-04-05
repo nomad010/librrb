@@ -72,6 +72,16 @@ impl<A: Clone + Debug> Leaf<A> {
         *self.buffer.get_mut(idx).unwrap() = item;
     }
 
+    // Gets a reference to the element at the requested index from the leaf.
+    pub fn get(&self, idx: usize) -> Option<&A> {
+        self.buffer.get(idx)
+    }
+
+    // Gets a mutable reference to the element at the requested index from the leaf.
+    pub fn get_mut(&mut self, idx: usize) -> Option<&mut A> {
+        self.buffer.get_mut(idx)
+    }
+
     /// Checks whether the node corresponds to its size table, Leaves do not have these tables so
     /// this never fails.
     pub fn debug_check_lens_size_table(&self) -> (usize, bool) {

@@ -431,6 +431,45 @@ impl<A: Debug> CircularBuffer<A> {
         }
     }
 
+    /// Temporarily removes an item at the requested index if it exists. The item must be put back
+    /// into the buffer before ANY other operations on the cirular buffer are performed. The item
+    /// can be returned to the buffer with the `return_item` function. It is not safe to clone, drop
+    /// or do anything except return the item to the buffer while the item is taken.
+    ///
+    /// # Panics
+    ///
+    /// This panics if the index points to an out of bound item.
+    ///
+    /// # Safety
+    ///
+    /// This is a very unsafe function. If the buffer is dropped while an item is taken out,
+    /// undefined behaviour will occur. If the same item is taken multiple items, instant undefined
+    /// behaviour will occur. Reading taken items via calls such as `get`, `get_mut` or `pop` will
+    /// invoke undefined behaviour. Putting an item back in the wrong place, will invoke undefined
+    /// behaviour when the buffer is dropped.
+    pub unsafe fn take_item(&mut self, idx: usize) -> A {
+        assert!(idx < self.len());
+        let position = (self.front + idx) % RRB_WIDTH;
+        mem::replace(&mut self.data[position], mem::MaybeUninit::uninit()).assume_init()
+    }
+
+    /// Returns an item to the given index. Calling this on an existing item that was not taken out,
+    /// will leak the memory of the item that is replaced.
+    ///
+    /// # Panics
+    ///
+    /// This panics if the index points to an out of bound item.
+    ///
+    /// # Safety
+    ///
+    /// Putting an item back in the wrong place will invoke undefined behaviour when the buffer is
+    /// dropped.
+    pub unsafe fn return_item(&mut self, idx: usize, item: A) {
+        assert!(idx < self.len());
+        let position = (self.front + idx) % RRB_WIDTH;
+        self.data[position] = mem::MaybeUninit::new(item);
+    }
+
     /// Removes elements from `self` and inserts these elements into `destination`. At most `len`
     /// elements will be removed. The actual number of elements decanted is returned. Elements are
     /// popped from `share_side` but pushed into the destination via `share_side.negate()`.
