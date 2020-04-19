@@ -249,7 +249,7 @@
 //! [Vector::new]: ./struct.Vector.html#method.new
 //! [Vector::singleton]: ./struct.Vector.html#method.singleton
 
-use crate::focus::Focus;
+use crate::focus::{Focus, FocusMut};
 use crate::nodes::{ChildList, Internal, Leaf, NodeRc};
 use crate::{Side, RRB_WIDTH};
 use std::fmt::Debug;
@@ -596,7 +596,6 @@ impl<A: Clone + Debug> Vector<A> {
     /// Fixes up the top of the spines. Certain operations break some invariants that we use to keep
     /// the tree balanced. This repeatedly fixes up the tree to fulfill the invariants.
     fn fixup_spine_tops(&mut self) {
-        // println!("Fixing up spines {:#?}", self);
         // The following invariant is fixed up here
 
         // Invariant 5
@@ -629,7 +628,6 @@ impl<A: Clone + Debug> Vector<A> {
                 // Part 1) of invariant 5 is broken, we merge into a single node decreasing the
                 // tree's height by 1. Invariant 5 might be broken with the new root so we need to
                 // continue checking.
-                // println!("Merging");
                 let mut left_spine_top = self.left_spine.pop().unwrap();
                 let mut right_spine_top = self.right_spine.pop().unwrap();
                 left_spine_top.share_children_with(&mut right_spine_top, Side::Back, RRB_WIDTH);
@@ -1267,7 +1265,6 @@ impl<A: Clone + Debug> Vector<A> {
         if let Some((node_position, mut node_index)) = self.find_node_info_for_index(index) {
             // We need to make this node the first/last in the tree
             // This means that this node will become the part of the spine for the given side
-            // println!("rawr derp doo {:#?}", self);
             match node_position {
                 None => {
                     // The root is where the spine starts.
@@ -1487,6 +1484,21 @@ impl<A: Clone + Debug> Vector<A> {
         Focus::new(self)
     }
 
+    /// Returns a mutable focus over the vector. A focus tracks the last leaf and positions which
+    /// was read. The path down this tree is saved in the focus and is used to accelerate lookups in
+    /// nearby locations.
+    pub fn focus_mut(&mut self) -> FocusMut<A> {
+        let mut nodes = Vec::new();
+        for node in self.left_spine.iter_mut() {
+            nodes.push(node.borrow());
+        }
+        nodes.push(self.root.borrow());
+        for node in self.right_spine.iter_mut().rev() {
+            nodes.push(node.borrow());
+        }
+        FocusMut::from_vector(Rc::new(self), nodes)
+    }
+
     /// Returns an iterator over the vector.
     ///
     /// # Examples
@@ -1511,7 +1523,6 @@ impl<A: Clone + Debug> Vector<A> {
 
     /// Checks the internal invariants that are required by the Vector.
     pub(crate) fn assert_invariants(&self) -> bool {
-        // println!("assert {:#?}", self);
         // Invariant 1
         // Spines must be of equal length
         assert_eq!(self.left_spine.len(), self.right_spine.len());
@@ -2002,6 +2013,56 @@ mod test {
             vec.iter().rev().collect::<Vec<_>>(),
             (0..N).rev().collect::<Vec<_>>().iter().collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    pub fn single_focus_mut() {
+        let mut v = Vector::new();
+        const N: usize = 1_000;
+        for i in 0..N {
+            v.push_back(i);
+        }
+
+        let mut focus = v.focus_mut();
+        for i in 0..N {
+            let thing = focus.index(i);
+            *thing = 0;
+        }
+        for v in v.iter() {
+            assert_eq!(v, &0);
+        }
+    }
+
+    #[test]
+    pub fn split_focus_mut() {
+        let mut v = Vector::new();
+        const N: usize = 1_000;
+        for i in 0..N {
+            v.push_back(i);
+        }
+
+        const S: usize = N / 2;
+        let mut focus = v.focus_mut();
+        let mut focus_2 = focus.split_at(S);
+        for i in 0..S {
+            let thing = focus.get(i);
+            if let Some(thing) = thing {
+                *thing = 0;
+            }
+        }
+        for i in 0..N - S {
+            let thing = focus_2.get(i);
+            if let Some(thing) = thing {
+                *thing = 1;
+            }
+        }
+        for (i, v) in v.iter().enumerate() {
+            if i < S {
+                assert_eq!(v, &0);
+            } else {
+                assert_eq!(v, &1);
+            }
+        }
     }
 
     #[test]
