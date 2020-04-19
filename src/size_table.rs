@@ -8,8 +8,8 @@ use crate::{Side, RRB_WIDTH};
 /// track of the size of each of child as well as the level of the node in the tree.
 #[derive(Clone, Debug)]
 pub(crate) struct SizeTable {
-    level: usize,
-    buffer: CircularBuffer<usize>,
+    pub(crate) level: usize,
+    pub(crate) buffer: CircularBuffer<usize>,
 }
 
 impl SizeTable {

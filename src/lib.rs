@@ -18,7 +18,6 @@
 //! [`im`]: https://docs.rs/im/
 //!
 //! # What are some differences between librrb's Vector vs im's Vector?
-//! * `librrb` does not yet support mutating iterators.
 //! * `librrb` is not thread-safe, but may be in the future. `im` has a thread-safe Vector and a
 //! non-thread-safe Vector. It is likely that `librrb` may use a different scheme to `im`.
 //! * `librrb` keeps the tree in a format that allows quick access to the spines of the RRB tree.
@@ -30,7 +29,6 @@
 #![deny(missing_docs)]
 
 mod circular;
-mod misc;
 mod nodes;
 mod size_table;
 
@@ -42,7 +40,7 @@ pub mod focus;
 pub use vector::Vector;
 
 #[doc(inline)]
-pub use focus::Focus;
+pub use focus::{Focus, FocusMut};
 
 /// The width of the RRB tree nodes. The maximum number of elements in a leaf or internal node.
 const RRB_WIDTH: usize = 64;
