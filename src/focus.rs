@@ -7,7 +7,7 @@ use crate::vector::Vector;
 use crate::Side;
 use std::fmt::Debug;
 use std::mem;
-use std::ops::Range;
+use std::ops::{Bound, Range, RangeBounds};
 use std::rc::Rc;
 
 /// A focus for a particular node in the spine.
@@ -414,11 +414,45 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
         }
     }
 
+    /// Gets the length of the focus.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![1, 2, 3];
+    /// let mut focus_1 = v.focus_mut();
+    /// let mut focus_2 = focus_1.split_at(1);
+    /// assert_eq!(focus_1.len(), 1);
+    /// assert_eq!(focus_2.len(), 2);
+    /// ```
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Tests whether the focus represents no elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![1, 2, 3];
+    /// let mut focus_1 = v.focus_mut();
+    /// let mut focus_2 = focus_1.split_at(0);
+    /// assert!(focus_1.is_empty());
+    /// assert!(!focus_2.is_empty());
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Splits the focus into two foci. This focus is replaced with a focus that represents
     /// everything up to (excluding) the index. The return result is a focus that represents
     /// everything after (including) the index.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// # #[macro_use] extern crate librrb;
@@ -442,13 +476,16 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
         if index == 0 {
             // This vector becomes empty and the returned one is self.
             let empty = self.empty();
-            return mem::replace(self, empty);
+            let result = mem::replace(self, empty);
+            debug_assert!(self.assert_invariants());
+            debug_assert!(result.assert_invariants());
+            return result;
         } else if index == self.len {
             // This vector is unchanged and the returned one is empty.
-            return self.empty();
-        }
-        if index == self.len {
-            return FocusMut::from_vector(Rc::clone(&self.origin), vec![]);
+            let result = self.empty();
+            debug_assert!(self.assert_invariants());
+            debug_assert!(result.assert_invariants());
+            return result;
         }
         // index is now 1..self.len()
         let (self_child_position, mut subindex) = self.find_node_info_for_index(index).unwrap();
@@ -498,9 +535,49 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
         }
         right_nodes.reverse();
 
+        self.root.take();
+        self.path.clear();
+        self.leaf = None;
+        self.leaf_range = 0..0;
+
         let result = FocusMut::from_vector(Rc::clone(&self.origin), right_nodes);
         assert_eq!(self.len + result.len, original_len);
+        debug_assert!(self.assert_invariants());
+        debug_assert!(result.assert_invariants());
         result
+    }
+
+    /// Narrows the focus so it only represents the given subrange of the focus.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![1, 2, 3];
+    /// let mut focus = v.focus_mut();
+    /// focus.narrow(1..3);
+    /// assert_eq!(focus.get(0), Some(&mut 2));
+    /// assert_eq!(focus.get(1), Some(&mut 3));
+    /// assert_eq!(focus.get(2), None);
+    /// ```
+    pub fn narrow<R: RangeBounds<usize>>(&mut self, range: R) {
+        let range_start = match range.start_bound() {
+            Bound::Unbounded => 0,
+            Bound::Included(x) => *x,
+            Bound::Excluded(x) => x + 1,
+        };
+        let range_end = match range.end_bound() {
+            Bound::Unbounded => self.len(),
+            Bound::Included(x) => x + 1,
+            Bound::Excluded(x) => *x,
+        };
+        if range_start != 0 {
+            let new_focus = self.split_at(range_start);
+            mem::replace(self, new_focus);
+        }
+
+        self.split_at(range_end - range_start);
     }
 
     fn move_focus(&mut self, mut idx: usize) {
@@ -508,17 +585,47 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
             // Nothing needs to move here
             return;
         }
-        if let Some((_, ref mut range)) = self.root {
+        if let Some((root_id, ref mut range)) = self.root {
+            // println!(
+            //     "Checking root range validity {:?} for {} sz {}",
+            //     range,
+            //     idx,
+            //     self.nodes[root_id].len()
+            // );
             if !range.contains(&idx) {
-                self.root.take();
+                // println!(
+                //     "resetting root {} {} {:?} {}",
+                //     self.nodes.len(),
+                //     root_id,
+                //     range,
+                //     idx
+                // );
+                self.root.take(); //.unwrap();
                 self.path.clear();
                 self.leaf = None;
                 self.leaf_range = 0..0;
+                // if let Some((node_position, new_idx)) =
+                //     self.find_new_node_info_for_index(idx, root_id, range)
+                // {
+                //     let node_start = idx - new_idx;
+                //     let node_len = self.nodes[node_position].len();
+                //     self.root = Some((node_position, node_start..node_start + node_len));
+                //     // println!(
+                //     //     "{} {:?} vs {} {:?} with {}",
+                //     //     root_id,
+                //     //     range,
+                //     //     node_position,
+                //     //     node_start..node_start + node_len,
+                //     //     idx
+                //     // );
+                // }
             }
         }
+        // println!("Checking root {:?}", self.root);
         if self.root.is_none() {
             // If the root is unassigned we can potentially find a new one.
-            if let Some((node_position, new_idx)) = self.find_node_info_for_index(idx) {
+            if idx < self.len {
+                let (node_position, new_idx) = self.find_node_info_for_index(idx).unwrap();
                 let node_start = idx - new_idx;
                 let node_len = self.nodes[node_position].len();
                 self.root = Some((node_position, node_start..node_start + node_len));
@@ -527,53 +634,59 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
                 // the correct leaf
                 return;
             }
+            // if  {
+            //     // println!("Found new {:?} going to {}", node_position, new_idx);
+            // } else {
+            // }
         }
         // Resets the path so only correct items remain
+        // println!("Checking path {} {}", idx, self.path.len());
         while let Some((_, range)) = self.path.last() {
+            // println!("Check {:?}", range);
             if range.contains(&idx) {
                 break;
             }
+            // println!("Popping path");
             self.path.pop();
         }
+        // println!("Done checking path");
         if self.path.is_empty() {
             if let Some((ref root, ref range)) = self.root {
                 // Over here we are guaranteed only the root and the elements in path are correct
                 // Our job now is to refresh the remainder of the path and the leave.
-                if self.path.is_empty() {
-                    let root = &mut self.nodes[*root];
-                    match root {
-                        BorrowedNode::Internal(internal) => {
-                            // Root has children
-                            let (child_idx, new_idx) =
-                                internal.position_info_for(idx - range.start).unwrap();
-                            let range_start = idx - new_idx;
-                            match internal.children {
-                                BorrowedChildList::Internals(ref mut children) => {
-                                    let child = Rc::make_mut(children.get_mut(child_idx).unwrap());
-                                    self.path
-                                        .push((child, range_start..range_start + child.len()));
-                                }
-                                BorrowedChildList::Leaves(ref mut children) => {
-                                    let leaf = Rc::make_mut(children.get_mut(child_idx).unwrap());
-                                    let leaf_len = leaf.len();
-                                    let leaf: *mut Leaf<A> = leaf;
-                                    self.leaf = Some(leaf);
-                                    self.leaf_range = range_start..range_start + leaf_len;
-                                    return;
-                                }
+                let root = &mut self.nodes[*root];
+                match root {
+                    BorrowedNode::Internal(internal) => {
+                        // Root has children
+                        // println!("derp {} {:?} {:?}", idx, range, internal.len());
+                        let (child_idx, new_idx) =
+                            internal.position_info_for(idx - range.start).unwrap();
+                        let range_start = idx - new_idx;
+                        match internal.children {
+                            BorrowedChildList::Internals(ref mut children) => {
+                                let child = Rc::make_mut(children.get_mut(child_idx).unwrap());
+                                self.path
+                                    .push((child, range_start..range_start + child.len()));
+                            }
+                            BorrowedChildList::Leaves(ref mut children) => {
+                                let leaf = Rc::make_mut(children.get_mut(child_idx).unwrap());
+                                let leaf_len = leaf.len();
+                                let leaf: *mut Leaf<A> = leaf;
+                                self.leaf = Some(leaf);
+                                self.leaf_range = range_start..range_start + leaf_len;
+                                return;
                             }
                         }
-                        BorrowedNode::Leaf(_) => {
-                            // Root is a leaf so the only thing we need to do here is just set the leaf
-                            // range
-                            self.leaf_range = range.clone();
-                            return;
-                        }
+                    }
+                    BorrowedNode::Leaf(_) => {
+                        // Root is a leaf so the only thing we need to do here is just set the leaf
+                        // range
+                        self.leaf_range = range.clone();
+                        return;
                     }
                 }
             }
         }
-
         idx -= self
             .path
             .last()
@@ -681,5 +794,45 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
             }
             unreachable!();
         }
+    }
+
+    /// Returns the spine position and subindex corresponding the given index.
+    fn find_new_node_info_for_index(
+        &self,
+        index: usize,
+        old_position: usize,
+        old_range: Range<usize>,
+    ) -> Option<(usize, usize)> {
+        if index >= self.len {
+            None
+        } else if index >= old_range.end {
+            let mut forward_end = old_range.end;
+
+            for (idx, node) in self.nodes.iter().enumerate().skip(old_position + 1) {
+                if index < forward_end + node.len() {
+                    return Some((idx, index - forward_end));
+                }
+                forward_end += node.len();
+            }
+            unreachable!();
+        } else {
+            let mut forward_start = old_range.start;
+
+            for (idx, node) in self.nodes.iter().enumerate().take(old_position).rev() {
+                forward_start -= node.len();
+                if index >= forward_start {
+                    return Some((idx, index - forward_start));
+                }
+            }
+            unreachable!()
+        }
+    }
+
+    fn assert_invariants(&self) -> bool {
+        let mut cumulative = 0;
+        for node in self.nodes.iter() {
+            cumulative += node.assert_size_invariants();
+        }
+        cumulative == self.len
     }
 }

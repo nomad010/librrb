@@ -7,6 +7,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+rand_core = "*"
+rand_xoshiro = "*"
 
 [dev-dependencies]
 proptest = "*"
@@ -14,4 +16,3 @@ proptest-derive = "*"
 
 [features]
 level-concatenations = []
-

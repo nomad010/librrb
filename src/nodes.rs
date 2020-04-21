@@ -794,6 +794,44 @@ impl<'a, A: Clone + Debug> BorrowedInternal<A> {
             sizes: Rc::clone(&self.sizes),
         }
     }
+
+    pub fn debug_check_lens_size_table(&self) -> usize {
+        let mut cumulative_size = 0;
+        match &self.children {
+            BorrowedChildList::Internals(children) => {
+                // debug_assert_eq!(self.sizes.len(), children.len());
+                for i in 0..children.len() {
+                    // println!(
+                    //     "{} vs {}",
+                    //     children.get(i).unwrap().len(),
+                    //     children.get(i).unwrap().debug_check_lens_size_table()
+                    // );
+                    debug_assert_eq!(
+                        children.get(i).unwrap().len(),
+                        children.get(i).unwrap().debug_check_lens_size_table()
+                    );
+                    cumulative_size += children.get(i).unwrap().len();
+                }
+                cumulative_size
+            }
+            BorrowedChildList::Leaves(children) => {
+                // debug_assert_eq!(self.sizes.len(), children.len());
+                for i in 0..children.len() {
+                    // println!(
+                    //     "{} vs {}",
+                    //     children.get(i).unwrap().len(),
+                    //     self.sizes.get_child_size(i).unwrap()
+                    // );
+                    debug_assert_eq!(
+                        children.get(i).unwrap().len(),
+                        self.sizes.get_child_size(i).unwrap()
+                    );
+                    cumulative_size += children.get(i).unwrap().len();
+                }
+                cumulative_size
+            }
+        }
+    }
 }
 
 /// Represents an arbitrary node in the tree.
@@ -1178,6 +1216,13 @@ impl<A: Clone + Debug> BorrowedNode<A> {
             x
         } else {
             panic!("Failed to unwrap a node as an internal node")
+        }
+    }
+
+    pub fn assert_size_invariants(&self) -> usize {
+        match self {
+            BorrowedNode::Internal(internal) => internal.debug_check_lens_size_table(),
+            BorrowedNode::Leaf(leaf) => leaf.len(),
         }
     }
 }
