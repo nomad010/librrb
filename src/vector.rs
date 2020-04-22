@@ -2381,7 +2381,7 @@ mod test {
 
     proptest! {
         #[test]
-        fn test_quicksort(ref input in proptest::collection::vec(i32::ANY, 0..100_000)) {
+        fn test_quicksort(ref input in proptest::collection::vec(i32::ANY, 0..10_000)) {
             let mut vec = input.clone();
             let mut vector = Vector::new();
             for i in vec.iter() {
