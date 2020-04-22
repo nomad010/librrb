@@ -293,6 +293,17 @@ impl<A: Clone + Debug> ChildList<A> {
         }
     }
 
+    pub fn get_mut(&mut self, child_idx: usize, idx: usize) -> Option<&mut A> {
+        match self {
+            ChildList::Leaves(children) => {
+                Rc::make_mut(children.get_mut(child_idx).unwrap()).get_mut(idx)
+            }
+            ChildList::Internals(children) => {
+                Rc::make_mut(children.get_mut(child_idx).unwrap()).get_mut(idx)
+            }
+        }
+    }
+
     /// Returns a copy of the Rc of the node at the given position in the node.
     pub fn get_child_node(&self, idx: usize) -> Option<NodeRc<A>> {
         // TODO: Get rid of this function
@@ -526,6 +537,14 @@ impl<A: Clone + Debug> Internal<A> {
     pub fn get(&self, idx: usize) -> Option<&A> {
         if let Some((array_idx, new_idx)) = self.sizes.position_info_for(idx) {
             self.children.get(array_idx, new_idx)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_mut(&mut self, idx: usize) -> Option<&mut A> {
+        if let Some((array_idx, new_idx)) = self.sizes.position_info_for(idx) {
+            self.children.get_mut(array_idx, new_idx)
         } else {
             None
         }
@@ -929,6 +948,14 @@ impl<A: Clone + Debug> NodeRc<A> {
         match self {
             NodeRc::Leaf(x) => x.get(idx),
             NodeRc::Internal(x) => x.get(idx),
+        }
+    }
+
+    /// Returns the element at the given position in the node.
+    pub fn get_mut(&mut self, idx: usize) -> Option<&mut A> {
+        match self {
+            NodeRc::Leaf(ref mut x) => Rc::make_mut(x).get_mut(idx),
+            NodeRc::Internal(ref mut x) => Rc::make_mut(x).get_mut(idx),
         }
     }
 

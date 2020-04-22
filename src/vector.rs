@@ -255,9 +255,9 @@ use crate::{Side, RRB_WIDTH};
 use rand_core::{RngCore, SeedableRng};
 use std::cmp;
 use std::fmt::Debug;
-use std::iter::{self, FusedIterator};
+use std::iter::{self, FromIterator, FusedIterator};
 use std::mem;
-use std::ops::RangeBounds;
+use std::ops::{Bound, RangeBounds};
 use std::rc::Rc;
 
 /// Construct a vector.
@@ -792,6 +792,44 @@ impl<A: Clone + Debug> Vector<A> {
         Rc::make_mut(leaf.leaf_mut()).back_mut()
     }
 
+    /// Derp
+    pub fn get(&self, idx: usize) -> Option<&A> {
+        if let Some((spine_info, subindex)) = self.find_node_info_for_index(idx) {
+            let node = match spine_info {
+                Some((Side::Front, spine_idx)) => &self.left_spine[spine_idx],
+                Some((Side::Back, spine_idx)) => &self.right_spine[spine_idx],
+                None => &self.root,
+            };
+            Some(node.get(subindex).unwrap())
+        } else {
+            None
+        }
+    }
+
+    /// Derp
+    pub fn index(&self, idx: usize) -> &A {
+        self.get(idx).expect("Index out of bounds.")
+    }
+
+    /// Derp
+    pub fn get_mut(&mut self, idx: usize) -> Option<&mut A> {
+        if let Some((spine_info, subindex)) = self.find_node_info_for_index(idx) {
+            let node = match spine_info {
+                Some((Side::Front, spine_idx)) => &mut self.left_spine[spine_idx],
+                Some((Side::Back, spine_idx)) => &mut self.right_spine[spine_idx],
+                None => &mut self.root,
+            };
+            Some(node.get_mut(subindex).unwrap())
+        } else {
+            None
+        }
+    }
+
+    /// Derp
+    pub fn index_mut(&mut self, idx: usize) -> &mut A {
+        self.get_mut(idx).expect("Index out of bounds.")
+    }
+
     #[cfg(feature = "level-concatenations")]
     /// Appends the given vector onto the back of this vector.
     ///
@@ -1235,8 +1273,27 @@ impl<A: Clone + Debug> Vector<A> {
         self.fixup_spine_tops();
     }
 
+    /// Derp
+    pub fn extract_slice<R: RangeBounds<usize> + Debug>(&mut self, range: R) -> Self {
+        let range_start = match range.start_bound() {
+            Bound::Unbounded => 0,
+            Bound::Included(x) => *x,
+            Bound::Excluded(x) => x + 1,
+        };
+        let range_end = match range.end_bound() {
+            Bound::Unbounded => self.len(),
+            Bound::Included(x) => x + 1,
+            Bound::Excluded(x) => *x,
+        };
+
+        let last_bit = self.split_off(range_end);
+        let middle_bit = self.split_off(range_start);
+        self.concatenate(last_bit);
+        middle_bit
+    }
+
     /// Returns the spine position and subindex corresponding the given index.
-    fn find_node_info_for_index(&mut self, index: usize) -> Option<(Option<(Side, usize)>, usize)> {
+    fn find_node_info_for_index(&self, index: usize) -> Option<(Option<(Side, usize)>, usize)> {
         if index >= self.len {
             None
         } else {
@@ -1245,8 +1302,8 @@ impl<A: Clone + Debug> Vector<A> {
 
             for (idx, (left, right)) in self
                 .left_spine
-                .iter_mut()
-                .zip(self.right_spine.iter_mut())
+                .iter()
+                .zip(self.right_spine.iter())
                 .enumerate()
             {
                 if index < forward_end + left.len() {
@@ -1882,6 +1939,16 @@ where
     }
 }
 
+impl<A: Clone + Debug> FromIterator<A> for Vector<A> {
+    fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self {
+        let mut result = Vector::new();
+        for item in iter {
+            result.push_back(item);
+        }
+        result
+    }
+}
+
 /// An iterator for a Vector.
 #[derive(Clone, Debug)]
 pub struct Iter<'a, A: Clone + Debug> {
@@ -2314,7 +2381,7 @@ mod test {
 
     proptest! {
         #[test]
-        fn test_quicksort(ref input in proptest::collection::vec(i32::ANY, 0..10_000)) {
+        fn test_quicksort(ref input in proptest::collection::vec(i32::ANY, 0..100_000)) {
             let mut vec = input.clone();
             let mut vector = Vector::new();
             for i in vec.iter() {

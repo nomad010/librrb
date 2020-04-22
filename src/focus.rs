@@ -266,6 +266,11 @@ impl<'a, A: Clone + Debug> Focus<'a, A> {
         }
     }
 
+    /// Derp
+    pub fn index(&mut self, idx: usize) -> &A {
+        self.get(idx).unwrap()
+    }
+
     /// Returns the length of the range that is accessible through the focus.
     ///
     /// # Examples
@@ -328,12 +333,22 @@ impl<'a, A: Clone + Debug> Focus<'a, A> {
     /// focus.narrow(1..1);
     /// assert_eq!(focus.get(0), None);
     /// ```
-    pub fn narrow(&mut self, range: Range<usize>) {
-        if range.end > self.range.end {
+    pub fn narrow<R: RangeBounds<usize>>(&mut self, range: R) {
+        let range_start = match range.start_bound() {
+            Bound::Unbounded => 0,
+            Bound::Included(x) => *x,
+            Bound::Excluded(x) => x + 1,
+        };
+        let range_end = match range.end_bound() {
+            Bound::Unbounded => self.len(),
+            Bound::Included(x) => x + 1,
+            Bound::Excluded(x) => *x,
+        };
+        if range_end > self.range.end {
             panic!("Range must be inside the parent range");
         }
-        let new_start = self.range.start + range.start;
-        let new_end = new_start + range.end - range.start;
+        let new_start = self.range.start + range_start;
+        let new_end = new_start + range_end - range_start;
         let new_focus = Focus::narrowed_tree(&self.tree, new_start..new_end);
         *self = new_focus;
     }

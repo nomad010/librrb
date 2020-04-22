@@ -37,7 +37,7 @@ pub mod vector;
 pub mod focus;
 
 #[doc(inline)]
-pub use vector::Vector;
+pub use vector::{Iter, Vector};
 
 #[doc(inline)]
 pub use focus::{Focus, FocusMut};
