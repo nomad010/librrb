@@ -1,6 +1,11 @@
 
 Vector
-[] Investigate use of removing Clone bound for some operations
+[] Investigate use of removing Clone bound for some operations @started(20-04-28 20:42)
+  We can remove the Clone bounds on the Leaf but Internal is going to require work. We need to
+  implement a new Rc type that understands whether or not it has ever been cloned. Uncloned Rc's
+  would allow mutatio without requiring the Clone bound.
+  [] Create own Rc type.
+
 [] Implement extra functions on the vector
  [] constant_of_length 
  [] reverse
@@ -9,9 +14,13 @@ Vector
  [] equal_range
  [] permute
  [] slice_extract vs slice_remove
+
 [] Implement extension traits for nodes
+
 [] Implement annotation methods for nodes
+
 [] Remove function improvements
+
 [] Split_at improvements
 
 Focus

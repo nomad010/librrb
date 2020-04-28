@@ -17,7 +17,7 @@ pub(crate) struct BorrowBufferMut<A: Debug> {
     // len: usize,
 }
 
-impl<A: Clone + Debug> Debug for BorrowBufferMut<A> {
+impl<A: Debug> Debug for BorrowBufferMut<A> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
         f.write_str("[")?;
         if !self.is_empty() {

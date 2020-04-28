@@ -9,12 +9,12 @@ use std::ops::{Deref, DerefMut, Range};
 use std::rc::Rc;
 
 /// A leaf indicates a terminal node in the tree.
-#[derive(Clone, Debug)]
-pub(crate) struct Leaf<A: Clone + Debug> {
+#[derive(Debug)]
+pub(crate) struct Leaf<A: Debug> {
     pub buffer: CircularBuffer<A>,
 }
 
-impl<A: Clone + Debug> Leaf<A> {
+impl<A: Debug> Leaf<A> {
     /// Sorts the leaf by the given comparator.
     pub fn sort_by<F: FnMut(&A, &A) -> cmp::Ordering>(&mut self, range: Range<usize>, f: &mut F) {
         self.buffer.sort_by(range, f)
@@ -104,7 +104,7 @@ impl<A: Clone + Debug> Leaf<A> {
     }
 }
 
-impl<A: Clone + Debug + PartialEq> Leaf<A> {
+impl<A: Debug + PartialEq> Leaf<A> {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
     pub(crate) fn equal_iter<'a>(&self, iter: &mut std::slice::Iter<'a, A>) -> bool {
@@ -126,7 +126,15 @@ impl<A: Clone + Debug + PartialEq> Leaf<A> {
     }
 }
 
-impl<A: Clone + Debug> Deref for Leaf<A> {
+impl<A: Clone + Debug> Clone for Leaf<A> {
+    fn clone(&self) -> Self {
+        Leaf {
+            buffer: self.buffer.clone(),
+        }
+    }
+}
+
+impl<A: Debug> Deref for Leaf<A> {
     type Target = CircularBuffer<A>;
 
     fn deref(&self) -> &CircularBuffer<A> {
@@ -134,18 +142,18 @@ impl<A: Clone + Debug> Deref for Leaf<A> {
     }
 }
 
-impl<A: Clone + Debug> DerefMut for Leaf<A> {
+impl<A: Debug> DerefMut for Leaf<A> {
     fn deref_mut(&mut self) -> &mut CircularBuffer<A> {
         &mut self.buffer
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct BorrowedLeaf<A: Clone + Debug> {
+pub(crate) struct BorrowedLeaf<A: Debug> {
     buffer: BorrowBufferMut<A>,
 }
 
-impl<'a, A: Clone + Debug> BorrowedLeaf<A> {
+impl<'a, A: Debug> BorrowedLeaf<A> {
     pub fn empty(&mut self) -> Self {
         BorrowedLeaf {
             buffer: self.buffer.empty(),
@@ -177,8 +185,6 @@ impl<'a, A: Clone + Debug> BorrowedLeaf<A> {
         self.buffer.get_mut(idx)
     }
 }
-
-// pub enum BorrowedOrPtrLeaf<A: Clone + Debug> {}
 
 /// Represents a homogenous list of nodes.
 #[derive(Clone, Debug)]
