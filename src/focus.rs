@@ -586,11 +586,31 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
 
     /// Derp
     pub fn append(&mut self, other: Self) {
-        self.origins.concatenate(other.origins);
+        // The focus part remains the same, but update other bits.
+        self.origins.append(other.origins);
         self.nodes.extend(other.nodes);
         self.len += other.len;
+    }
 
-        // The focus part remains the same
+    /// Derp
+    pub fn prepend(&mut self, mut other: Self) {
+        // The focus part must be updated to point to the new place before the other bits
+        if let Some((ref mut root_id, ref mut root_range)) = self.root {
+            *root_id += other.nodes.len();
+            root_range.end += other.len;
+            root_range.start += other.len;
+            for (_, path_range) in self.path.iter_mut() {
+                path_range.end += other.len;
+                path_range.start += other.len;
+            }
+            self.leaf_range.end += other.len();
+            self.leaf_range.start += other.len();
+        }
+
+        self.origins.prepend(other.origins);
+        mem::swap(&mut self.nodes, &mut other.nodes);
+        self.nodes.extend(other.nodes);
+        self.len += other.len;
     }
 
     /// Narrows the focus so it only represents the given subrange of the focus.

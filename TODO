@@ -1,0 +1,23 @@
+
+Vector
+[] Investigate use of removing Clone bound for some operations
+[] Implement extra functions on the vector
+ [] constant_of_length 
+ [] reverse
+ [] iter_mut
+ [] insert_anywhere
+ [] equal_range
+ [] permute
+ [] slice_extract vs slice_remove
+[] Implement extension traits for nodes
+[] Implement annotation methods for nodes
+[] Remove function improvements
+[] Split_at improvements
+
+Focus
+[] Investigate ZipFocus concept which allows you use a tuple vectors and treat them as a vector of tuples.
+[] Write tests for concatenation and splits
+[] Attempt to use Vector of BorrowNode's for storage
+
+Documentation
+[] Write documentation for methods with stubs

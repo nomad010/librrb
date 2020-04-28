@@ -840,10 +840,10 @@ impl<A: Clone + Debug> Vector<A> {
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::Vector;
     /// let mut v = vector![1, 2, 3];
-    /// v.concatenate(vector![4, 5, 6]);
+    /// v.append(vector![4, 5, 6]);
     /// assert_eq!(v, vector![1, 2, 3, 4, 5, 6]);
     /// ```
-    pub fn concatenate(&mut self, mut other: Self) {
+    pub fn append(&mut self, mut other: Self) {
         // Don't merge too thoroughly
         // 1) Walk down to the leaves
         // 2a) If the number of occupied slots on both sides is more than M than leave both sides
@@ -992,10 +992,10 @@ impl<A: Clone + Debug> Vector<A> {
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::Vector;
     /// let mut v = vector![1, 2, 3];
-    /// v.concatenate(vector![4, 5, 6]);
+    /// v.append(vector![4, 5, 6]);
     /// assert_eq!(v, vector![1, 2, 3, 4, 5, 6]);
     /// ```
-    pub fn concatenate(&mut self, mut other: Self) {
+    pub fn append(&mut self, mut other: Self) {
         // Don't merge too thoroughly
         // 1) Walk down to the leaves
         // 2a) If the number of occupied slots on both sides is more than M than leave both sides
@@ -1209,6 +1209,22 @@ impl<A: Clone + Debug> Vector<A> {
         self.fixup_spine_tops();
     }
 
+    /// Prepends the given vector onto the front of this vector.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![1, 2, 3];
+    /// v.prepend(vector![4, 5, 6]);
+    /// assert_eq!(v, vector![4, 5, 6, 1, 2, 3]);
+    /// ```
+    pub fn prepend(&mut self, other: Self) {
+        let other = mem::replace(self, other);
+        self.append(other)
+    }
+
     /// Slices the vector from the start to the given index exclusive.
     ///
     /// # Examples
@@ -1289,7 +1305,7 @@ impl<A: Clone + Debug> Vector<A> {
 
         let last_bit = self.split_off(range_end);
         let middle_bit = self.split_off(range_start);
-        self.concatenate(last_bit);
+        self.append(last_bit);
         middle_bit
     }
 
@@ -1457,7 +1473,7 @@ impl<A: Clone + Debug> Vector<A> {
         // TODO: This is not really the most efficient way to do this, specialize this function.
         let last_part = self.split_off(index);
         self.push_back(element);
-        self.concatenate(last_part);
+        self.append(last_part);
     }
 
     /// Sorts a range of the sequence by the given comparator.
@@ -1512,12 +1528,15 @@ impl<A: Clone + Debug> Vector<A> {
     /// v.remove(1);
     /// assert_eq!(v, vector![1, 3]);
     /// ```
-    pub fn remove(&mut self, index: usize) {
+    pub fn remove(&mut self, index: usize) -> Option<A> {
         // TODO: This is not really the most efficient way to do this, specialize this function
         if index < self.len {
             let mut last_part = self.split_off(index);
-            last_part.pop_front();
-            self.concatenate(last_part);
+            let item = last_part.pop_front();
+            self.append(last_part);
+            item
+        } else {
+            None
         }
     }
 
@@ -2161,7 +2180,7 @@ mod test {
                             vec.insert(0, item.clone());
                             new_vector.push_front(item.clone());
                         }
-                        new_vector.concatenate(vector);
+                        new_vector.append(vector);
                         vector = new_vector;
                         assert_eq!(vec.len(), vector.len());
                         assert!(vector.equal_vec(&vec));
@@ -2172,7 +2191,7 @@ mod test {
                             vec.push(item.clone());
                             new_vector.push_back(item.clone());
                         }
-                        vector.concatenate(new_vector);
+                        vector.append(new_vector);
                         assert_eq!(vec.len(), vector.len());
                         assert!(vector.equal_vec(&vec));
                     }
@@ -2208,7 +2227,7 @@ mod test {
 
         // Concat
         let mut empty_concat = empty.clone();
-        empty_concat.concatenate(empty.clone());
+        empty_concat.append(empty.clone());
         assert!(empty_concat.is_empty());
         assert_eq!(empty_concat.len(), 0);
 
