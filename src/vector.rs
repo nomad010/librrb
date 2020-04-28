@@ -1676,6 +1676,28 @@ impl<A: Clone + Debug> Vector<A> {
         }
     }
 
+    /// Returns a mutable iterator over the vector.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![1, 2, 3];
+    /// let mut iter = v.iter_mut();
+    /// assert_eq!(iter.next(), Some(&mut 1));
+    /// assert_eq!(iter.next(), Some(&mut 2));
+    /// assert_eq!(iter.next(), Some(&mut 3));
+    /// assert_eq!(iter.next(), None);
+    /// ```
+    pub fn iter_mut(&mut self) -> IterMut<A> {
+        IterMut {
+            front: 0,
+            back: self.len(),
+            focus: self.focus_mut(),
+        }
+    }
+
     /// Checks the internal invariants that are required by the Vector.
     pub(crate) fn assert_invariants(&self) -> bool {
         // Invariant 1
@@ -2055,6 +2077,59 @@ impl<'a, A: Clone + Debug + 'a> DoubleEndedIterator for Iter<'a, A> {
 impl<'a, A: Clone + Debug + 'a> ExactSizeIterator for Iter<'a, A> {}
 
 impl<'a, A: Clone + Debug + 'a> FusedIterator for Iter<'a, A> {}
+
+/// An iterator for a Vector.
+#[derive(Debug)]
+pub struct IterMut<'a, A: Clone + Debug> {
+    front: usize,
+    back: usize,
+    focus: FocusMut<'a, A>,
+}
+
+impl<'a, A: Clone + Debug + 'a> Iterator for IterMut<'a, A> {
+    type Item = &'a mut A;
+
+    fn next(&mut self) -> Option<&'a mut A> {
+        if self.front != self.back {
+            let focus: &'a mut FocusMut<A> = unsafe { &mut *(&mut self.focus as *mut _) };
+            let result = focus.get(self.front).unwrap();
+            self.front += 1;
+            Some(result)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.back - self.front;
+        (len, Some(len))
+    }
+}
+
+impl<'a, A: 'a + Clone + Debug> IntoIterator for &'a mut Vector<A> {
+    type Item = &'a mut A;
+    type IntoIter = IterMut<'a, A>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
+impl<'a, A: Clone + Debug + 'a> DoubleEndedIterator for IterMut<'a, A> {
+    fn next_back(&mut self) -> Option<&'a mut A> {
+        if self.front != self.back {
+            self.back -= 1;
+            let focus: &'a mut FocusMut<A> = unsafe { &mut *(&mut self.focus as *mut _) };
+            focus.get(self.back)
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a, A: Clone + Debug + 'a> ExactSizeIterator for IterMut<'a, A> {}
+
+impl<'a, A: Clone + Debug + 'a> FusedIterator for IterMut<'a, A> {}
 
 #[allow(clippy::cognitive_complexity)]
 #[cfg(test)]
