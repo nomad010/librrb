@@ -8,7 +8,7 @@ Vector
 
 [] Implement extra functions on the vector @started(20-04-28 21:23)
  ✔ constant_of_length @started(20-04-28 21:24) @done(20-04-28 21:28) @lasted(4m6s)
- [] reverse
+ ✔ reverse @started(20-04-28 21:32) @done(20-04-28 21:40) @lasted(8m28s)
  [] iter_mut
  [] insert_anywhere
  [] equal_range
@@ -19,7 +19,7 @@ Vector
 
 [] Implement annotation methods for nodes
 
-[] Remove function improvements
+[] remove function improvements
 
 [] Split_at improvements
 
@@ -27,6 +27,8 @@ Focus
 [] Investigate ZipFocus concept which allows you use a tuple vectors and treat them as a vector of tuples.
 [] Write tests for concatenation and splits
 [] Attempt to use Vector of BorrowNode's for storage
+[] Investigate spine like structure for Focus. (leading to two tracking two positions)
+[] Abstract over Focus or Vector like type
 
 Documentation
 [] Write documentation for methods with stubs

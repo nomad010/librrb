@@ -1489,6 +1489,27 @@ impl<A: Clone + Debug> Vector<A> {
         self.append(last_part);
     }
 
+    /// Derp
+    pub fn reverse_range<R: RangeBounds<usize>>(&mut self, range: R) {
+        let mut focus = self.focus_mut();
+        focus.narrow(range);
+
+        let half_len = focus.len() / 2;
+        let mut right_focus = focus.split_at(half_len);
+        let mut left_focus = focus;
+
+        for i in 0..half_len {
+            let left = left_focus.index(i);
+            let right = right_focus.index(right_focus.len() - 1 - i);
+            mem::swap(left, right);
+        }
+    }
+
+    /// Derp
+    pub fn reverse(&mut self) {
+        self.reverse_range(..)
+    }
+
     /// Sorts a range of the sequence by the given comparator.
     ///
     /// # Examples
