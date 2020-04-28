@@ -6,8 +6,8 @@ Vector
   would allow mutatio without requiring the Clone bound.
   [] Create own Rc type.
 
-[] Implement extra functions on the vector
- [] constant_of_length 
+[] Implement extra functions on the vector @started(20-04-28 21:23)
+ ✔ constant_of_length @started(20-04-28 21:24) @done(20-04-28 21:28) @lasted(4m6s)
  [] reverse
  [] iter_mut
  [] insert_anywhere

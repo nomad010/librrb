@@ -396,6 +396,19 @@ impl<A: Clone + Debug> Vector<A> {
         }
     }
 
+    /// Derp
+    pub fn constant_vec_of_length(item: A, len: usize) -> Self {
+        let mut store = Vector::new();
+        let mut accumulator = Vector::singleton(item);
+        while accumulator.len() <= len {
+            if len & accumulator.len() != 0 {
+                store.append(accumulator.clone());
+            }
+            accumulator.append(accumulator.clone());
+        }
+        store
+    }
+
     /// Returns the length of the vector.
     ///
     /// # Examples
