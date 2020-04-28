@@ -1163,7 +1163,7 @@ impl<A: Clone + Debug> BorrowedNode<A> {
     pub fn split_info(&mut self, index: usize) -> (Vec<Self>, Vec<Self>) {
         if index == 0 {
             let empty = self.empty();
-            std::mem::replace(self, empty);
+            *self = empty;
         } else if index == self.len() {
             let empty = self.empty();
         }

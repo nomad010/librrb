@@ -27,6 +27,7 @@
 //! operations are easier to be implement. The aim is that this translates to a faster data
 //! structure.
 #![deny(missing_docs)]
+#![cfg_attr(feature = "may_dangle", feature(dropck_eyepatch))]
 
 mod circular;
 mod nodes;

@@ -5,10 +5,30 @@
 use crate::nodes::{BorrowedChildList, BorrowedNode, ChildList, Internal, Leaf, NodeRc};
 use crate::vector::Vector;
 use crate::Side;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::mem;
 use std::ops::{Bound, Range, RangeBounds};
 use std::rc::Rc;
+
+#[derive(Debug, Clone)]
+pub(crate) struct RefMutRcByPtr<'a, A>(pub(crate) Rc<&'a mut A>);
+
+impl<'a, A> RefMutRcByPtr<'a, A> {}
+
+impl<'a, A> std::hash::Hash for RefMutRcByPtr<'a, A> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::ptr::hash(*self.0, state);
+    }
+}
+
+impl<'a, A> Eq for RefMutRcByPtr<'a, A> {}
+
+impl<'a, A> PartialEq for RefMutRcByPtr<'a, A> {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
 
 /// A focus for a particular node in the spine.
 ///
@@ -385,7 +405,7 @@ impl<'a, A: Clone + Debug> Focus<'a, A> {
 /// A focus of the elements of a vector. The focus allows mutation of the elements in the vector.
 #[derive(Debug)]
 pub struct FocusMut<'a, A: Clone + Debug> {
-    origin: Rc<&'a mut Vector<A>>,
+    origins: Vector<Rc<&'a mut Vector<A>>>,
     pub(crate) nodes: Vec<BorrowedNode<A>>,
     len: usize,
     // Focus part
@@ -402,7 +422,7 @@ pub struct FocusMut<'a, A: Clone + Debug> {
 impl<'a, A: Clone + Debug> FocusMut<'a, A> {
     fn empty(&mut self) -> Self {
         FocusMut {
-            origin: Rc::clone(&self.origin),
+            origins: self.origins.clone(),
             nodes: vec![],
             len: 0,
             root: None,
@@ -412,14 +432,16 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
         }
     }
 
-    pub(crate) fn from_vector(origin: Rc<&'a mut Vector<A>>, nodes: Vec<BorrowedNode<A>>) -> Self {
+    pub(crate) fn from_vectors(
+        origins: Vector<Rc<&'a mut Vector<A>>>,
+        nodes: Vec<BorrowedNode<A>>,
+    ) -> Self {
         let mut len = 0;
         for node in nodes.iter() {
             len += node.len();
         }
-
         FocusMut {
-            origin,
+            origins,
             nodes,
             len,
             root: None,
@@ -555,11 +577,20 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
         self.leaf = None;
         self.leaf_range = 0..0;
 
-        let result = FocusMut::from_vector(Rc::clone(&self.origin), right_nodes);
+        let result = FocusMut::from_vectors(self.origins.clone(), right_nodes);
         assert_eq!(self.len + result.len, original_len);
         debug_assert!(self.assert_invariants());
         debug_assert!(result.assert_invariants());
         result
+    }
+
+    /// Derp
+    pub fn append(&mut self, other: Self) {
+        self.origins.concatenate(other.origins);
+        self.nodes.extend(other.nodes);
+        self.len += other.len;
+
+        // The focus part remains the same
     }
 
     /// Narrows the focus so it only represents the given subrange of the focus.
@@ -589,7 +620,7 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
         };
         if range_start != 0 {
             let new_focus = self.split_at(range_start);
-            mem::replace(self, new_focus);
+            *self = new_focus;
         }
 
         self.split_at(range_end - range_start);

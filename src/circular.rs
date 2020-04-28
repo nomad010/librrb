@@ -794,7 +794,39 @@ impl<A: Clone + Debug> Clone for CircularBuffer<A> {
     }
 }
 
+#[cfg(not(feature = "may_dangle"))]
 impl<A: Debug> Drop for CircularBuffer<A> {
+    fn drop(&mut self) {
+        let back = (self.front + self.len) % RRB_WIDTH;
+        if self.is_full() {
+            for x in self.data.iter_mut() {
+                unsafe {
+                    mem::replace(x, mem::MaybeUninit::uninit()).assume_init();
+                }
+            }
+        } else if back >= self.front {
+            for x in &mut self.data[self.front..back] {
+                unsafe {
+                    mem::replace(x, mem::MaybeUninit::uninit()).assume_init();
+                }
+            }
+        } else {
+            for x in &mut self.data[..back] {
+                unsafe {
+                    mem::replace(x, mem::MaybeUninit::uninit()).assume_init();
+                }
+            }
+            for x in &mut self.data[self.front..] {
+                unsafe {
+                    mem::replace(x, mem::MaybeUninit::uninit()).assume_init();
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "may_dangle")]
+unsafe impl<#[may_dangle] A: Debug> Drop for CircularBuffer<A> {
     fn drop(&mut self) {
         let back = (self.front + self.len) % RRB_WIDTH;
         if self.is_full() {
@@ -1156,5 +1188,32 @@ mod test {
         assert_eq!(buffer.try_pop_front(), Ok(7));
         assert_eq!(buffer.try_pop_front(), Ok(8));
         assert_eq!(buffer.try_pop_front(), Ok(9));
+    }
+
+    #[test]
+    fn drop() {
+        let mut s = "derp".to_owned();
+        let mut buffer = CircularBuffer::with_item(&mut s);
+        buffer.front_mut().unwrap().push('l');
+        assert_eq!(buffer.front().unwrap(), &"derpl");
+    }
+
+    #[test]
+    fn drop_generics() {
+        let mut s = "derp".to_owned();
+        {
+            let mut buffer = CircularBuffer::with_item(&mut s);
+            buffer.front_mut().unwrap().push('l');
+        }
+        assert_eq!(s, "derpl");
+    }
+
+    #[cfg(feature = "may_dangle")]
+    #[test]
+    fn drop_generics_dangle() {
+        let mut s = "derp".to_owned();
+        let mut buffer = CircularBuffer::with_item(&mut s);
+        buffer.front_mut().unwrap().push('l');
+        assert_eq!(s, "derpl");
     }
 }

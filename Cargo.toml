@@ -16,3 +16,4 @@ proptest-derive = "*"
 
 [features]
 level-concatenations = []
+may_dangle = []
