@@ -5,12 +5,15 @@ Vector
   implement a new Rc type that understands whether or not it has ever been cloned. Uncloned Rc's
   would allow mutatio without requiring the Clone bound.
   [] Create own Rc type.
+    This is pretty hard, we want to add clone only if necessary. Cloning should never be necessary
+    for things aren't clone.
 
 [] Implement extra functions on the vector @started(20-04-28 21:23)
  ✔ constant_of_length @started(20-04-28 21:24) @done(20-04-28 21:28) @lasted(4m6s)
  ✔ reverse @started(20-04-28 21:32) @done(20-04-28 21:40) @lasted(8m28s)
  ✔ iter_mut @started(20-04-29 00:21) @done(20-04-29 00:35) @lasted(14m16s)
  [] insert_anywhere
+   This is less useful for now as it requires set up for whether items have enough space for an item.
  [] equal_range
  [] permute
  [] slice_extract vs slice_remove
@@ -25,6 +28,12 @@ Vector
 
 Focus
 [] Investigate ZipFocus concept which allows you use a tuple vectors and treat them as a vector of tuples.
+  ✔ Look at itertools for zip implementation @started(20-04-29 12:01) @done(20-04-29 14:57) @lasted(2h56m38s)
+    Looks complicated to do easily, rather let's make a trait for things that are trait like. This
+    way we can abstract the sort method
+  [] Trait for foci for sort @started(20-04-29 14:57)
+    This ends up not being entirely necessary. We can write a trait for the Fn comparison to use in
+    the permute.
 [] Write tests for concatenation and splits
 [] Attempt to use Vector of BorrowNode's for storage
 [] Investigate spine like structure for Focus. (leading to two tracking two positions)

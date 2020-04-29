@@ -1531,7 +1531,8 @@ impl<A: Clone + Debug> Vector<A> {
         let mut focus = self.focus_mut();
         focus.narrow(range);
         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
-        do_sort(focus, f, &mut rng);
+        let side_focus: Option<FocusMut<A>> = None;
+        do_sort(focus, side_focus, f, &mut rng);
     }
 
     /// Sorts the entire sequence by the given comparator.
@@ -1859,9 +1860,14 @@ impl<A: Clone + Debug + Eq> PartialEq for Vector<A> {
 
 impl<A: Clone + Debug + Eq> Eq for Vector<A> {}
 
-fn do_sort<A, F, R>(mut focus: FocusMut<A>, comparison: &F, rng: &mut R)
-where
+fn do_sort<A, T, F, R>(
+    mut focus: FocusMut<A>,
+    mut side_focus: Option<FocusMut<T>>,
+    comparison: &F,
+    rng: &mut R,
+) where
     A: Debug + Clone,
+    T: Debug + Clone,
     F: Fn(&A, &A) -> cmp::Ordering,
     R: RngCore,
 {
@@ -1872,10 +1878,18 @@ where
     // We know there are at least 2 elements here
     let pivot_index = rng.next_u64() as usize % focus.len();
     let mut rest = focus.split_at(1);
+    let mut side_rest = side_focus.as_mut().map(|x| x.split_at(1));
     let mut first = focus;
+    let mut side_first = side_focus;
 
     if pivot_index > 0 {
         mem::swap(rest.index(pivot_index - 1), first.index(0));
+        if let Some(ref mut side_rest) = side_rest {
+            mem::swap(
+                side_rest.index(pivot_index),
+                side_first.as_mut().unwrap().index(0),
+            )
+        }
     }
     // Pivot is now always in the first slice
     let pivot_item = first.index(0);
@@ -1897,7 +1911,7 @@ where
     // If by accident we picked the minimum element as a pivot, we just call sort again with the
     // rest of the vector.
     if less_count == 0 {
-        do_sort(rest, comparison, rng);
+        do_sort(rest, side_rest, comparison, rng);
         return;
     }
 
@@ -1908,6 +1922,12 @@ where
     equal_count += 1;
     let first_item = first.index(0);
     mem::swap(first_item, rest.index(less_count));
+    if let Some(ref mut side_rest) = side_rest {
+        mem::swap(
+            side_first.as_mut().unwrap().index(0),
+            side_rest.index(pivot_index),
+        );
+    }
     for index in 0..rest.len() {
         if index == less_count {
             // This is the position we swapped the pivot to. We can't move it from its position, and
@@ -1917,13 +1937,24 @@ where
         let rest_item = rest.index(index);
         if comparison(rest_item, first_item) == cmp::Ordering::Less {
             mem::swap(first_item, rest_item);
+            if let Some(ref mut side_rest) = side_rest {
+                mem::swap(
+                    side_first.as_mut().unwrap().index(0),
+                    side_rest.index(index),
+                );
+            }
         }
     }
 
     // Split the vector up into less_than, equal to and greater than parts.
     let mut greater_focus = rest.split_at(less_count + equal_count);
+    let mut side_greater = side_rest
+        .as_mut()
+        .map(|x| x.split_at(less_count + equal_count));
     let mut equal_focus = rest.split_at(less_count);
+    let mut side_equal = side_rest.as_mut().map(|x| x.split_at(less_count));
     let mut less_focus = rest;
+    let mut side_less = side_rest;
 
     let mut less_position = 0;
     let mut equal_position = 0;
@@ -1967,10 +1998,16 @@ where
 
         if let Some(swap_side) = equal_swap_side {
             // One of the sides is equal to the pivot, advance the pivot
-            let item = if swap_side == cmp::Ordering::Less {
-                less_focus.index(less_position)
+            let (item, side_item) = if swap_side == cmp::Ordering::Less {
+                (
+                    less_focus.index(less_position),
+                    side_less.as_mut().map(|x| x.index(less_position)),
+                )
             } else {
-                greater_focus.index(greater_position)
+                (
+                    greater_focus.index(greater_position),
+                    side_greater.as_mut().map(|x| x.index(greater_position)),
+                )
             };
 
             // We are guaranteed not to hit the end of the equal focus
@@ -1981,6 +2018,12 @@ where
             // Swap the equal position and the desired side, it's important to note that only the
             // equals focus is guaranteed to have made progress so we don't advance the side's index
             mem::swap(item, equal_focus.index(equal_position));
+            if let Some(side_item) = side_item {
+                mem::swap(
+                    side_item,
+                    side_equal.as_mut().unwrap().index(equal_position),
+                );
+            }
         } else if less_position != less_focus.len() && greater_position != greater_focus.len() {
             // Both sides are out of place and not equal to the pivot, this can only happen if there
             // is a greater item in the lesser zone and a lesser item in the greater zone. The
@@ -2003,15 +2046,21 @@ where
                 less_focus.index(less_position),
                 greater_focus.index(greater_position),
             );
+            if let Some(ref mut side_less) = side_less {
+                mem::swap(
+                    side_less.index(less_position),
+                    side_greater.as_mut().unwrap().index(greater_position),
+                )
+            }
             less_position += 1;
             greater_position += 1;
         }
     }
 
     // Now we have partitioned both sides correctly, we just have to recurse now
-    do_sort(less_focus, comparison, rng);
+    do_sort(less_focus, side_less, comparison, rng);
     if !greater_focus.is_empty() {
-        do_sort(greater_focus, comparison, rng);
+        do_sort(greater_focus, side_greater, comparison, rng);
     }
 }
 
