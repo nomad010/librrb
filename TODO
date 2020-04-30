@@ -16,6 +16,7 @@ Vector
    This is less useful for now as it requires set up for whether items have enough space for an item.
  [] equal_range
  [] permute
+ [] sort_by_rank
  [] slice_extract vs slice_remove
 
 [] Implement extension traits for nodes
@@ -27,11 +28,11 @@ Vector
 [] Split_at improvements
 
 Focus
-[] Investigate ZipFocus concept which allows you use a tuple vectors and treat them as a vector of tuples.
+✘ Investigate ZipFocus concept which allows you use a tuple vectors and treat them as a vector of tuples. @cancelled(20-04-30 01:08)
   ✔ Look at itertools for zip implementation @started(20-04-29 12:01) @done(20-04-29 14:57) @lasted(2h56m38s)
     Looks complicated to do easily, rather let's make a trait for things that are trait like. This
     way we can abstract the sort method
-  [] Trait for foci for sort @started(20-04-29 14:57)
+  ✔ Trait for foci for sort @started(20-04-29 14:57) @done(20-04-30 19:31) @lasted(1d4h34m55s)
     This ends up not being entirely necessary. We can write a trait for the Fn comparison to use in
     the permute.
 [] Write tests for concatenation and splits

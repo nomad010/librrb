@@ -1530,9 +1530,12 @@ impl<A: Clone + Debug> Vector<A> {
     ) {
         let mut focus = self.focus_mut();
         focus.narrow(range);
+        let mut focus = SingleFocus {
+            first: focus,
+            comp: &f,
+        };
         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
-        let side_focus: Option<FocusMut<A>> = None;
-        do_sort(focus, side_focus, f, &mut rng);
+        do_sort(focus, &mut rng);
     }
 
     /// Sorts the entire sequence by the given comparator.
@@ -1550,6 +1553,79 @@ impl<A: Clone + Debug> Vector<A> {
     /// ```
     pub fn sort_by<F: Fn(&A, &A) -> cmp::Ordering>(&mut self, f: &F) {
         self.sort_range_by(f, ..);
+    }
+
+    /// Sorts the sequence by the given comparator computing the output permutation that results in
+    /// a sort of the original sequence.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+    /// let permutation = v.sort_by_compute_permutation(&Ord::cmp);
+    /// assert_eq!(v, vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    /// assert_eq!(permutation, vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
+    /// ```
+    pub fn sort_by_compute_permutation<F: Fn(&A, &A) -> cmp::Ordering>(
+        &mut self,
+        f: &F,
+    ) -> Vector<usize> {
+        self.sort_range_by_compute_permutation(f, .., false)
+    }
+
+    /// Sorts a range of the sequence by the given comparator computing the output permutation that
+    /// results in a sort of the original sequence.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+    /// let permutation = v.sort_range_by_compute_permutation(&Ord::cmp, 5.., true);
+    /// assert_eq!(v, vector![9, 8, 7, 6, 5, 0, 1, 2, 3, 4]);
+    /// assert_eq!(permutation, vector![9, 8, 7, 6, 5]);
+    /// let mut v = vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+    /// let permutation = v.sort_range_by_compute_permutation(&Ord::cmp, 5.., false);
+    /// assert_eq!(v, vector![9, 8, 7, 6, 5, 0, 1, 2, 3, 4]);
+    /// assert_eq!(permutation, vector![4, 3, 2, 1, 0]);
+    /// ```
+    pub fn sort_range_by_compute_permutation<
+        F: Fn(&A, &A) -> cmp::Ordering,
+        R: RangeBounds<usize>,
+    >(
+        &mut self,
+        f: &F,
+        range: R,
+        offset_range: bool,
+    ) -> Vector<usize> {
+        let mut result = Vector::new();
+        let initial = if offset_range {
+            match range.start_bound() {
+                Bound::Included(x) => *x,
+                Bound::Excluded(x) => x + 1,
+                Bound::Unbounded => 0,
+            }
+        } else {
+            0
+        };
+
+        let mut focus = self.focus_mut();
+        focus.narrow(range);
+        for i in 0..focus.len() {
+            result.push_back(i + initial);
+        }
+
+        let focus = DualFocus {
+            first: focus,
+            second: result.focus_mut(),
+            comp: &f,
+        };
+        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
+        do_sort(focus, &mut rng);
+        result
     }
 
     /// Removes item from the vector at the given index.
@@ -1790,7 +1866,7 @@ impl<A: Clone + Debug + Ord> Vector<A> {
         self.sort_by(&Ord::cmp)
     }
 
-    /// Sorts the a range of the sequence by the natural comparator on the sequence.
+    /// Sorts the range of the sequence by the natural comparator on the sequence.
     ///
     /// # Examples
     ///
@@ -1800,6 +1876,48 @@ impl<A: Clone + Debug + Ord> Vector<A> {
     /// ```
     pub fn sort_range<R: RangeBounds<usize>>(&mut self, range: R) {
         self.sort_range_by(&Ord::cmp, range)
+    }
+
+    /// Sorts the sequence by the natural comparator on the sequence computing the output
+    /// permutation that results in a sort of the original sequence.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+    /// let permutation = v.sort_compute_permutation();
+    /// assert_eq!(v, vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    /// assert_eq!(permutation, vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
+    /// ```
+    pub fn sort_compute_permutation(&mut self) -> Vector<usize> {
+        self.sort_range_by_compute_permutation(&Ord::cmp, .., false)
+    }
+
+    /// Sorts the range of the sequence by the natural comparator on the sequence computing the
+    /// output permutation that results in a sort of the original sequence.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+    /// let permutation = v.sort_range_compute_permutation(5.., true);
+    /// assert_eq!(v, vector![9, 8, 7, 6, 5, 0, 1, 2, 3, 4]);
+    /// assert_eq!(permutation, vector![9, 8, 7, 6, 5]);
+    /// let mut v = vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+    /// let permutation = v.sort_range_compute_permutation(5.., false);
+    /// assert_eq!(v, vector![9, 8, 7, 6, 5, 0, 1, 2, 3, 4]);
+    /// assert_eq!(permutation, vector![4, 3, 2, 1, 0]);
+    /// ```
+    pub fn sort_range_compute_permutation<R: RangeBounds<usize>>(
+        &mut self,
+        range: R,
+        offset_range: bool,
+    ) -> Vector<usize> {
+        self.sort_range_by_compute_permutation(&Ord::cmp, range, offset_range)
     }
 }
 
@@ -1860,15 +1978,125 @@ impl<A: Clone + Debug + Eq> PartialEq for Vector<A> {
 
 impl<A: Clone + Debug + Eq> Eq for Vector<A> {}
 
-fn do_sort<A, T, F, R>(
-    mut focus: FocusMut<A>,
-    mut side_focus: Option<FocusMut<T>>,
-    comparison: &F,
-    rng: &mut R,
-) where
-    A: Debug + Clone,
-    T: Debug + Clone,
-    F: Fn(&A, &A) -> cmp::Ordering,
+trait SortFocus {
+    fn split_at(&mut self, index: usize) -> Self;
+
+    fn compare(
+        first_focus: &mut Self,
+        first_index: usize,
+        second_focus: &mut Self,
+        second_index: usize,
+    ) -> cmp::Ordering;
+
+    fn swap(
+        first_focus: &mut Self,
+        first_index: usize,
+        second_focus: &mut Self,
+        second_index: usize,
+    );
+
+    fn len(&self) -> usize;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+struct SingleFocus<'a, 'f, A: Clone + Debug, F: Fn(&A, &A) -> cmp::Ordering> {
+    first: FocusMut<'a, A>,
+    comp: &'f F,
+}
+
+impl<'a, 'f, A: Clone + Debug, F: Fn(&A, &A) -> cmp::Ordering> SortFocus
+    for SingleFocus<'a, 'f, A, F>
+{
+    fn split_at(&mut self, index: usize) -> Self {
+        SingleFocus {
+            first: self.first.split_at(index),
+            comp: self.comp,
+        }
+    }
+
+    fn compare(
+        first_focus: &mut Self,
+        first_index: usize,
+        second_focus: &mut Self,
+        second_index: usize,
+    ) -> cmp::Ordering {
+        let first = first_focus.first.index(first_index);
+        let second = second_focus.first.index(second_index);
+        (first_focus.comp)(first, second)
+    }
+
+    fn swap(
+        first_focus: &mut Self,
+        first_index: usize,
+        second_focus: &mut Self,
+        second_index: usize,
+    ) {
+        mem::swap(
+            first_focus.first.index(first_index),
+            second_focus.first.index(second_index),
+        );
+    }
+
+    fn len(&self) -> usize {
+        self.first.len()
+    }
+}
+
+struct DualFocus<'a, 'b, 'f, A: Clone + Debug, B: Clone + Debug, F: Fn(&A, &A) -> cmp::Ordering> {
+    first: FocusMut<'a, A>,
+    second: FocusMut<'b, B>,
+    comp: &'f F,
+}
+
+impl<'a, 'b, 'f, A: Clone + Debug, B: Clone + Debug, F: Fn(&A, &A) -> cmp::Ordering> SortFocus
+    for DualFocus<'a, 'b, 'f, A, B, F>
+{
+    fn split_at(&mut self, index: usize) -> Self {
+        DualFocus {
+            first: self.first.split_at(index),
+            second: self.second.split_at(index),
+            comp: self.comp,
+        }
+    }
+
+    fn compare(
+        first_focus: &mut Self,
+        first_index: usize,
+        second_focus: &mut Self,
+        second_index: usize,
+    ) -> cmp::Ordering {
+        let first = first_focus.first.index(first_index);
+        let second = second_focus.first.index(second_index);
+        (first_focus.comp)(first, second)
+    }
+
+    fn swap(
+        first_focus: &mut Self,
+        first_index: usize,
+        second_focus: &mut Self,
+        second_index: usize,
+    ) {
+        mem::swap(
+            first_focus.first.index(first_index),
+            second_focus.first.index(second_index),
+        );
+        mem::swap(
+            first_focus.second.index(first_index),
+            second_focus.second.index(second_index),
+        );
+    }
+
+    fn len(&self) -> usize {
+        self.first.len()
+    }
+}
+
+fn do_sort<A, R>(mut focus: A, rng: &mut R)
+where
+    A: SortFocus,
     R: RngCore,
 {
     if focus.len() <= 1 {
@@ -1878,29 +2106,20 @@ fn do_sort<A, T, F, R>(
     // We know there are at least 2 elements here
     let pivot_index = rng.next_u64() as usize % focus.len();
     let mut rest = focus.split_at(1);
-    let mut side_rest = side_focus.as_mut().map(|x| x.split_at(1));
     let mut first = focus;
-    let mut side_first = side_focus;
 
     if pivot_index > 0 {
-        mem::swap(rest.index(pivot_index - 1), first.index(0));
-        if let Some(ref mut side_rest) = side_rest {
-            mem::swap(
-                side_rest.index(pivot_index),
-                side_first.as_mut().unwrap().index(0),
-            )
-        }
+        A::swap(&mut rest, pivot_index - 1, &mut first, 0);
     }
     // Pivot is now always in the first slice
-    let pivot_item = first.index(0);
+    // let pivot_item = first.index(0);
 
     // Find the exact place to put the pivot or pivot-equal items
     let mut less_count = 0;
     let mut equal_count = 0;
 
     for index in 0..rest.len() {
-        let item = rest.index(index);
-        let comp = comparison(item, pivot_item);
+        let comp = A::compare(&mut rest, index, &mut first, 0);
         match comp {
             cmp::Ordering::Less => less_count += 1,
             cmp::Ordering::Equal => equal_count += 1,
@@ -1911,7 +2130,7 @@ fn do_sort<A, T, F, R>(
     // If by accident we picked the minimum element as a pivot, we just call sort again with the
     // rest of the vector.
     if less_count == 0 {
-        do_sort(rest, side_rest, comparison, rng);
+        do_sort(rest, rng);
         return;
     }
 
@@ -1920,41 +2139,23 @@ fn do_sort<A, T, F, R>(
     // zone.
     less_count -= 1;
     equal_count += 1;
-    let first_item = first.index(0);
-    mem::swap(first_item, rest.index(less_count));
-    if let Some(ref mut side_rest) = side_rest {
-        mem::swap(
-            side_first.as_mut().unwrap().index(0),
-            side_rest.index(pivot_index),
-        );
-    }
+    A::swap(&mut first, 0, &mut rest, less_count);
     for index in 0..rest.len() {
         if index == less_count {
             // This is the position we swapped the pivot to. We can't move it from its position, and
             // we know its not the minimum.
             continue;
         }
-        let rest_item = rest.index(index);
-        if comparison(rest_item, first_item) == cmp::Ordering::Less {
-            mem::swap(first_item, rest_item);
-            if let Some(ref mut side_rest) = side_rest {
-                mem::swap(
-                    side_first.as_mut().unwrap().index(0),
-                    side_rest.index(index),
-                );
-            }
+        // let rest_item = rest.index(index);
+        if A::compare(&mut rest, index, &mut first, 0) == cmp::Ordering::Less {
+            A::swap(&mut first, 0, &mut rest, index);
         }
     }
 
     // Split the vector up into less_than, equal to and greater than parts.
     let mut greater_focus = rest.split_at(less_count + equal_count);
-    let mut side_greater = side_rest
-        .as_mut()
-        .map(|x| x.split_at(less_count + equal_count));
     let mut equal_focus = rest.split_at(less_count);
-    let mut side_equal = side_rest.as_mut().map(|x| x.split_at(less_count));
     let mut less_focus = rest;
-    let mut side_less = side_rest;
 
     let mut less_position = 0;
     let mut equal_position = 0;
@@ -1962,14 +2163,16 @@ fn do_sort<A, T, F, R>(
 
     while less_position != less_focus.len() || greater_position != greater_focus.len() {
         // At start of this loop, equal_position always points to an equal item
-        let equal_item = equal_focus.index(equal_position);
-
         let mut equal_swap_side = None;
 
         // Advance the less_position until we find an out of place item
         while less_position != less_focus.len() {
-            let less_item = less_focus.index(less_position);
-            match comparison(less_item, equal_item) {
+            match A::compare(
+                &mut less_focus,
+                less_position,
+                &mut equal_focus,
+                equal_position,
+            ) {
                 cmp::Ordering::Equal => {
                     equal_swap_side = Some(cmp::Ordering::Less);
                     break;
@@ -1984,8 +2187,12 @@ fn do_sort<A, T, F, R>(
 
         // Advance the greater until we find an out of place item
         while greater_position != greater_focus.len() {
-            let greater_item = greater_focus.index(greater_position);
-            match comparison(greater_item, equal_item) {
+            match A::compare(
+                &mut greater_focus,
+                greater_position,
+                &mut equal_focus,
+                equal_position,
+            ) {
                 cmp::Ordering::Less => break,
                 cmp::Ordering::Equal => {
                     equal_swap_side = Some(cmp::Ordering::Greater);
@@ -1998,69 +2205,59 @@ fn do_sort<A, T, F, R>(
 
         if let Some(swap_side) = equal_swap_side {
             // One of the sides is equal to the pivot, advance the pivot
-            let (item, side_item) = if swap_side == cmp::Ordering::Less {
-                (
-                    less_focus.index(less_position),
-                    side_less.as_mut().map(|x| x.index(less_position)),
-                )
+            let (focus, position) = if swap_side == cmp::Ordering::Less {
+                (&mut less_focus, less_position)
             } else {
-                (
-                    greater_focus.index(greater_position),
-                    side_greater.as_mut().map(|x| x.index(greater_position)),
-                )
+                (&mut greater_focus, greater_position)
             };
 
             // We are guaranteed not to hit the end of the equal focus
-            while comparison(item, equal_focus.index(equal_position)) == cmp::Ordering::Equal {
+            while A::compare(focus, position, &mut equal_focus, equal_position)
+                == cmp::Ordering::Equal
+            {
                 equal_position += 1;
             }
 
             // Swap the equal position and the desired side, it's important to note that only the
             // equals focus is guaranteed to have made progress so we don't advance the side's index
-            mem::swap(item, equal_focus.index(equal_position));
-            if let Some(side_item) = side_item {
-                mem::swap(
-                    side_item,
-                    side_equal.as_mut().unwrap().index(equal_position),
-                );
-            }
+            A::swap(focus, position, &mut equal_focus, equal_position);
         } else if less_position != less_focus.len() && greater_position != greater_focus.len() {
             // Both sides are out of place and not equal to the pivot, this can only happen if there
             // is a greater item in the lesser zone and a lesser item in the greater zone. The
             // solution is to swap both sides and advance both side's indices.
             debug_assert_ne!(
-                comparison(
-                    less_focus.index(less_position),
-                    equal_focus.index(equal_position)
+                A::compare(
+                    &mut less_focus,
+                    less_position,
+                    &mut equal_focus,
+                    equal_position
                 ),
                 cmp::Ordering::Equal
             );
             debug_assert_ne!(
-                comparison(
-                    greater_focus.index(greater_position),
-                    equal_focus.index(equal_position)
+                A::compare(
+                    &mut greater_focus,
+                    greater_position,
+                    &mut equal_focus,
+                    equal_position
                 ),
                 cmp::Ordering::Equal
             );
-            mem::swap(
-                less_focus.index(less_position),
-                greater_focus.index(greater_position),
+            A::swap(
+                &mut less_focus,
+                less_position,
+                &mut greater_focus,
+                greater_position,
             );
-            if let Some(ref mut side_less) = side_less {
-                mem::swap(
-                    side_less.index(less_position),
-                    side_greater.as_mut().unwrap().index(greater_position),
-                )
-            }
             less_position += 1;
             greater_position += 1;
         }
     }
 
     // Now we have partitioned both sides correctly, we just have to recurse now
-    do_sort(less_focus, side_less, comparison, rng);
+    do_sort(less_focus, rng);
     if !greater_focus.is_empty() {
-        do_sort(greater_focus, side_greater, comparison, rng);
+        do_sort(greater_focus, rng);
     }
 }
 
