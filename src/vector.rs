@@ -249,7 +249,7 @@
 //! [Vector::new]: ./struct.Vector.html#method.new
 //! [Vector::singleton]: ./struct.Vector.html#method.singleton
 
-use crate::focus::{Focus, FocusMut, RefMutRcByPtr};
+use crate::focus::{Focus, FocusMut};
 use crate::nodes::{ChildList, Internal, Leaf, NodeRc};
 use crate::{Side, RRB_WIDTH};
 use rand_core::{RngCore, SeedableRng};
@@ -1523,16 +1523,119 @@ impl<A: Clone + Debug> Vector<A> {
     /// v.sort_range_by(&Ord::cmp, 2..);
     /// assert_eq!(v, vector![9, 8, 0, 1, 2, 3, 4, 5, 6, 7]);
     /// ```
-    pub fn sort_range_by<F: Fn(&A, &A) -> cmp::Ordering, R: RangeBounds<usize>>(
+    pub fn sort_range_by<F, R>(&mut self, f: &F, range: R)
+    where
+        F: Fn(&A, &A) -> cmp::Ordering,
+        R: RangeBounds<usize>,
+    {
+        let mut focus = self.focus_mut();
+        focus.narrow(range);
+        let focus = SingleFocus {
+            first: focus,
+            comp: &f,
+        };
+        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
+        do_sort(focus, &mut rng);
+    }
+
+    /// Sorts a range of the sequence by the given comparator. Any swap that occurs will be made in
+    /// the secondary vector provided.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    /// let mut secondary = vector!['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
+    /// v.dual_sort_range_by(&|x: &i32, y: &i32 | (-x).cmp(&(-y)), .., &mut secondary);
+    /// assert_eq!(v, vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
+    /// assert_eq!(secondary, vector!['j', 'i','h', 'g', 'f', 'e', 'd', 'c', 'b', 'a']);
+    /// v.dual_sort_range_by(&Ord::cmp, 2.., &mut secondary);
+    /// assert_eq!(v, vector![9, 8, 0, 1, 2, 3, 4, 5, 6, 7]);
+    /// assert_eq!(secondary, vector!['j', 'i', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
+    /// ```
+    pub fn dual_sort_range_by<F, R, T>(&mut self, f: &F, range: R, secondary: &mut Vector<T>)
+    where
+        F: Fn(&A, &A) -> cmp::Ordering,
+        R: RangeBounds<usize> + Clone,
+        T: Clone + Debug,
+    {
+        let mut first = self.focus_mut();
+        first.narrow(range.clone());
+        let mut second = secondary.focus_mut();
+        second.narrow(range);
+        let focus = DualFocus {
+            first,
+            second,
+            comp: &f,
+        };
+        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
+        do_sort(focus, &mut rng);
+    }
+
+    /// Sorts a range of the sequence by the given comparator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    /// v.sort_range_by_key(&|&x| -x, ..);
+    /// assert_eq!(v, vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
+    /// v.sort_range_by_key(&|&x| x, 2..);
+    /// assert_eq!(v, vector![9, 8, 0, 1, 2, 3, 4, 5, 6, 7]);
+    /// ```
+    pub fn sort_range_by_key<F: Fn(&A) -> K, K: Ord, R: RangeBounds<usize>>(
         &mut self,
         f: &F,
         range: R,
     ) {
+        let comp = |x: &A, y: &A| f(x).cmp(&f(y));
         let mut focus = self.focus_mut();
         focus.narrow(range);
-        let mut focus = SingleFocus {
+        let focus = SingleFocus {
             first: focus,
-            comp: &f,
+            comp: &comp,
+        };
+        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
+        do_sort(focus, &mut rng);
+    }
+
+    /// Sorts a range of the sequence by the given comparator. Any swap that occurs will be made in
+    /// the secondary vector provided.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    /// let mut secondary = vector!['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
+    /// v.dual_sort_range_by_key(&|&x| -x, .., &mut secondary);
+    /// assert_eq!(v, vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
+    /// assert_eq!(secondary, vector!['j', 'i','h', 'g', 'f', 'e', 'd', 'c', 'b', 'a']);
+    /// v.dual_sort_range_by_key(&|&x| x, 2.., &mut secondary);
+    /// assert_eq!(v, vector![9, 8, 0, 1, 2, 3, 4, 5, 6, 7]);
+    /// assert_eq!(secondary, vector!['j', 'i', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
+    /// ```
+    pub fn dual_sort_range_by_key<F, K, R, T>(&mut self, f: &F, range: R, secondary: &mut Vector<T>)
+    where
+        F: Fn(&A) -> K,
+        K: Ord,
+        R: RangeBounds<usize> + Clone,
+        T: Debug + Clone,
+    {
+        let comp = |x: &A, y: &A| f(x).cmp(&f(y));
+        let mut first = self.focus_mut();
+        first.narrow(range.clone());
+        let mut second = secondary.focus_mut();
+        second.narrow(range);
+        let focus = DualFocus {
+            first,
+            second,
+            comp: &comp,
         };
         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
         do_sort(focus, &mut rng);
@@ -1555,77 +1658,27 @@ impl<A: Clone + Debug> Vector<A> {
         self.sort_range_by(f, ..);
     }
 
-    /// Sorts the sequence by the given comparator computing the output permutation that results in
-    /// a sort of the original sequence.
+    /// Sorts the entire sequence by the given comparator. Any swap that occurs will be made in
+    /// the secondary vector provided.
     ///
     /// # Examples
     ///
     /// ```
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::Vector;
-    /// let mut v = vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
-    /// let permutation = v.sort_by_compute_permutation(&Ord::cmp);
+    /// let mut v = vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    /// let mut secondary = vector!['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
+    /// v.dual_sort_by(&|x: &i32, y: &i32 | (-x).cmp(&(-y)), &mut secondary);
+    /// assert_eq!(v, vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
+    /// v.dual_sort_by(&Ord::cmp, &mut secondary);
     /// assert_eq!(v, vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-    /// assert_eq!(permutation, vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
     /// ```
-    pub fn sort_by_compute_permutation<F: Fn(&A, &A) -> cmp::Ordering>(
-        &mut self,
-        f: &F,
-    ) -> Vector<usize> {
-        self.sort_range_by_compute_permutation(f, .., false)
-    }
-
-    /// Sorts a range of the sequence by the given comparator computing the output permutation that
-    /// results in a sort of the original sequence.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #[macro_use] extern crate librrb;
-    /// # use librrb::Vector;
-    /// let mut v = vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
-    /// let permutation = v.sort_range_by_compute_permutation(&Ord::cmp, 5.., true);
-    /// assert_eq!(v, vector![9, 8, 7, 6, 5, 0, 1, 2, 3, 4]);
-    /// assert_eq!(permutation, vector![9, 8, 7, 6, 5]);
-    /// let mut v = vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
-    /// let permutation = v.sort_range_by_compute_permutation(&Ord::cmp, 5.., false);
-    /// assert_eq!(v, vector![9, 8, 7, 6, 5, 0, 1, 2, 3, 4]);
-    /// assert_eq!(permutation, vector![4, 3, 2, 1, 0]);
-    /// ```
-    pub fn sort_range_by_compute_permutation<
+    pub fn dual_sort_by<F, T>(&mut self, f: &F, secondary: &mut Vector<T>)
+    where
         F: Fn(&A, &A) -> cmp::Ordering,
-        R: RangeBounds<usize>,
-    >(
-        &mut self,
-        f: &F,
-        range: R,
-        offset_range: bool,
-    ) -> Vector<usize> {
-        let mut result = Vector::new();
-        let initial = if offset_range {
-            match range.start_bound() {
-                Bound::Included(x) => *x,
-                Bound::Excluded(x) => x + 1,
-                Bound::Unbounded => 0,
-            }
-        } else {
-            0
-        };
-
-        let mut focus = self.focus_mut();
-        focus.narrow(range);
-        for i in 0..focus.len() {
-            result.push_back(i + initial);
-        }
-
-        let focus = DualFocus {
-            first: focus,
-            second: result.focus_mut(),
-            comp: &f,
-        };
-        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
-        do_sort(focus, &mut rng);
-        result
+        T: Debug + Clone,
+    {
+        self.dual_sort_range_by(f, .., secondary);
     }
 
     /// Removes item from the vector at the given index.
@@ -1858,6 +1911,9 @@ impl<A: Clone + Debug + Ord> Vector<A> {
     ///
     /// # Examples
     ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
     /// let mut v = vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
     /// v.sort();
     /// assert_eq!(v, vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
@@ -1866,20 +1922,47 @@ impl<A: Clone + Debug + Ord> Vector<A> {
         self.sort_by(&Ord::cmp)
     }
 
+    /// Sorts the entire sequence by the natural comparator on the sequence. Any swap that occurs
+    /// will be made in the secondary vector provided.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+    /// let mut secondary = vector!['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
+    /// v.dual_sort(&mut secondary);
+    /// assert_eq!(v, vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    /// assert_eq!(secondary, vector!['j', 'i','h', 'g', 'f', 'e', 'd', 'c', 'b', 'a']);
+    /// ```
+    pub fn dual_sort<T>(&mut self, secondary: &mut Vector<T>)
+    where
+        T: Debug + Clone,
+    {
+        self.dual_sort_by(&Ord::cmp, secondary)
+    }
+
     /// Sorts the range of the sequence by the natural comparator on the sequence.
     ///
     /// # Examples
     ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
     /// let mut v = vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
     /// v.sort_range(5..);
     /// assert_eq!(v, vector![9, 8, 7, 6, 5, 0, 1, 2, 3, 4]);
     /// ```
-    pub fn sort_range<R: RangeBounds<usize>>(&mut self, range: R) {
+    pub fn sort_range<R>(&mut self, range: R)
+    where
+        R: RangeBounds<usize>,
+    {
         self.sort_range_by(&Ord::cmp, range)
     }
 
-    /// Sorts the sequence by the natural comparator on the sequence computing the output
-    /// permutation that results in a sort of the original sequence.
+    /// Sorts the range of the sequence by the natural comparator on the sequence. Any swap that
+    /// occurs will be made in the secondary vector provided.
     ///
     /// # Examples
     ///
@@ -1887,37 +1970,17 @@ impl<A: Clone + Debug + Ord> Vector<A> {
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::Vector;
     /// let mut v = vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
-    /// let permutation = v.sort_compute_permutation();
-    /// assert_eq!(v, vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-    /// assert_eq!(permutation, vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
-    /// ```
-    pub fn sort_compute_permutation(&mut self) -> Vector<usize> {
-        self.sort_range_by_compute_permutation(&Ord::cmp, .., false)
-    }
-
-    /// Sorts the range of the sequence by the natural comparator on the sequence computing the
-    /// output permutation that results in a sort of the original sequence.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #[macro_use] extern crate librrb;
-    /// # use librrb::Vector;
-    /// let mut v = vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
-    /// let permutation = v.sort_range_compute_permutation(5.., true);
+    /// let mut secondary = vector!['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
+    /// v.dual_sort_range(5.., &mut secondary);
     /// assert_eq!(v, vector![9, 8, 7, 6, 5, 0, 1, 2, 3, 4]);
-    /// assert_eq!(permutation, vector![9, 8, 7, 6, 5]);
-    /// let mut v = vector![9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
-    /// let permutation = v.sort_range_compute_permutation(5.., false);
-    /// assert_eq!(v, vector![9, 8, 7, 6, 5, 0, 1, 2, 3, 4]);
-    /// assert_eq!(permutation, vector![4, 3, 2, 1, 0]);
+    /// assert_eq!(secondary, vector!['a', 'b', 'c', 'd', 'e', 'j', 'i','h', 'g', 'f']);
     /// ```
-    pub fn sort_range_compute_permutation<R: RangeBounds<usize>>(
-        &mut self,
-        range: R,
-        offset_range: bool,
-    ) -> Vector<usize> {
-        self.sort_range_by_compute_permutation(&Ord::cmp, range, offset_range)
+    pub fn dual_sort_range<R, T>(&mut self, range: R, secondary: &mut Vector<T>)
+    where
+        R: RangeBounds<usize> + Clone,
+        T: Debug + Clone,
+    {
+        self.dual_sort_range_by(&Ord::cmp, range, secondary)
     }
 }
 

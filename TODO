@@ -15,8 +15,8 @@ Vector
  [] insert_anywhere
    This is less useful for now as it requires set up for whether items have enough space for an item.
  [] equal_range
- [] permute
- [] sort_by_rank
+ ✘ permute @started(20-04-30 21:46) @cancelled(20-05-01 16:48) @wasted(19h2m52s)
+ ✔ Better sort function names @started(20-05-01 16:48) @done(20-05-01 17:00) @lasted(12m5s)
  [] slice_extract vs slice_remove
 
 [] Implement extension traits for nodes
@@ -37,7 +37,7 @@ Focus
     the permute.
 [] Write tests for concatenation and splits
 [] Attempt to use Vector of BorrowNode's for storage
-[] Investigate spine like structure for Focus. (leading to two tracking two positions)
+[] Investigate spine like structure for Focus. (leading to tracking two positions)
 [] Abstract over Focus or Vector like type
 
 Documentation
