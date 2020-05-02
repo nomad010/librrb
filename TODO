@@ -1,10 +1,10 @@
 
 Vector
-[] Investigate use of removing Clone bound for some operations @started(20-04-28 20:42)
+✘ Investigate use of removing Clone bound for some operations @started(20-04-28 20:42) @cancelled(20-05-01 17:11) @wasted(2d20h29m4s)
   We can remove the Clone bounds on the Leaf but Internal is going to require work. We need to
   implement a new Rc type that understands whether or not it has ever been cloned. Uncloned Rc's
   would allow mutatio without requiring the Clone bound.
-  [] Create own Rc type.
+  ✘ Create own Rc type. @cancelled(20-05-02 15:57)
     This is pretty hard, we want to add clone only if necessary. Cloning should never be necessary
     for things aren't clone.
 
@@ -14,7 +14,7 @@ Vector
  ✔ iter_mut @started(20-04-29 00:21) @done(20-04-29 00:35) @lasted(14m16s)
  [] insert_anywhere
    This is less useful for now as it requires set up for whether items have enough space for an item.
- [] equal_range
+ ✔ equal_range @started(20-05-01 17:32) @done(20-05-02 15:57) @lasted(22h25m31s)
  ✘ permute @started(20-04-30 21:46) @cancelled(20-05-01 16:48) @wasted(19h2m52s)
  ✔ Better sort function names @started(20-05-01 16:48) @done(20-05-01 17:00) @lasted(12m5s)
  [] slice_extract vs slice_remove

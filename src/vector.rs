@@ -258,7 +258,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::iter::{self, FromIterator, FusedIterator};
 use std::mem;
-use std::ops::{Bound, RangeBounds};
+use std::ops::{Bound, Range, RangeBounds};
 use std::rc::Rc;
 
 /// Construct a vector.
@@ -1510,6 +1510,255 @@ impl<A: Clone + Debug> Vector<A> {
         self.reverse_range(..)
     }
 
+    /// Finds the range in the given subrange of the vector that corresponds to Ordering::Equal.
+    /// The given index must corresponds to a single element that compares equal. For this method to
+    /// work the subrange must be sorted with respect to the given comparator.
+    ///
+    /// If the index does not compare equal this will return an empty range. Otherwise, this will
+    /// return the range that covers the equal elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// # use std::cmp::Ordering;
+    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
+    /// let f = |x: &i32| {
+    ///     if *x < 0 {
+    ///         Ordering::Less
+    ///     } else if *x > 5 {
+    ///         Ordering::Greater
+    ///     } else {
+    ///         Ordering::Equal
+    ///     }
+    /// };
+    /// assert_eq!(v.equal_range_for_index_in_range_by(1, &f, 1..), 1..6);
+    /// ```
+    pub fn equal_range_for_index_in_range_by<F, R>(
+        &self,
+        index: usize,
+        f: &F,
+        range: R,
+    ) -> Range<usize>
+    where
+        F: Fn(&A) -> cmp::Ordering,
+        R: RangeBounds<usize>,
+    {
+        let mut start = match range.start_bound() {
+            Bound::Included(x) => *x,
+            Bound::Excluded(x) => x + 1,
+            Bound::Unbounded => 0,
+        };
+
+        let mut end = match range.end_bound() {
+            Bound::Included(x) => x - 1,
+            Bound::Excluded(x) => *x,
+            Bound::Unbounded => self.len,
+        };
+
+        if index < start || index >= end {
+            return 0..0;
+        }
+
+        let mut focus = self.focus();
+        if f(focus.index(index)) != cmp::Ordering::Equal {
+            return 0..0;
+        }
+
+        let avg = |x: usize, y: usize| (x / 2) + (y / 2) + (x % 2 + y % 2) / 2;
+
+        // We know that there is at least one equal that lies at index in [start, end). Our
+        // goal now is to expand that midpoint to cover the entire equal range. We can only return
+        // Ok from here on out.
+        let mut equals_start = index;
+        let mut equals_end_inclusive = index;
+        // First, we'll find the first less point in the range.
+        if equals_start != start {
+            loop {
+                // println!("rawr start {} {} {}", start, equals_start, end);
+                if start + 1 == equals_start {
+                    let comparison = f(focus.index(start));
+                    if comparison == cmp::Ordering::Equal {
+                        equals_start = start;
+                    }
+                    break;
+                } else {
+                    let mid = avg(start, equals_start);
+                    let comparison = f(focus.index(mid));
+                    if comparison == cmp::Ordering::Equal {
+                        equals_start = mid;
+                    } else {
+                        start = mid;
+                    }
+                }
+            }
+        }
+
+        // Second, we'll find the first greater point in the range.
+        loop {
+            // println!("rawr end {} {} {}", start, equals_end_inclusive, end);
+            if equals_end_inclusive + 1 == end {
+                break;
+            } else {
+                let mid = avg(equals_end_inclusive, end);
+                let comparison = f(focus.index(mid));
+                if comparison == cmp::Ordering::Equal {
+                    equals_end_inclusive = mid;
+                } else {
+                    end = mid;
+                }
+            }
+        }
+
+        equals_start..equals_end_inclusive + 1
+    }
+
+    /// Finds the range in the vector that corresponds to Ordering::Equal. The given index must
+    /// corresponds to a single element that compares equal. For this method to work the subrange
+    /// must be sorted with respect to the given comparator.
+    ///
+    /// If the index does not compare equal this will return an empty range. Otherwise, this will
+    /// return the range that covers the equal elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// # use std::cmp::Ordering;
+    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
+    /// let f = |x: &i32| {
+    ///     if *x < 0 {
+    ///         Ordering::Less
+    ///     } else if *x > 5 {
+    ///         Ordering::Greater
+    ///     } else {
+    ///         Ordering::Equal
+    ///     }
+    /// };
+    /// assert_eq!(v.equal_range_for_index_by(1, &f), 0..6);
+    /// ```
+    pub fn equal_range_for_index_by<F>(&self, index: usize, f: &F) -> Range<usize>
+    where
+        F: Fn(&A) -> cmp::Ordering,
+    {
+        self.equal_range_for_index_in_range_by(index, f, ..)
+    }
+
+    /// Finds the range in the given subrange of the vector that corresponds to Ordering::Equal. For
+    /// this method to work the subrange must be sorted with respect to the given comparator. If
+    /// there is a range which corresponds to Ordering::Equal, the answer will be Ok(range),
+    /// otherwise the result is Err(position) corresponding to the position that the maintains the
+    /// sorted order of the Vector with respect to the given comparator.  
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// # use std::cmp::Ordering;
+    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
+    /// let f = |x: &i32| {
+    ///     if *x < 0 {
+    ///         Ordering::Less
+    ///     } else if *x > 5 {
+    ///         Ordering::Greater
+    ///     } else {
+    ///         Ordering::Equal
+    ///     }
+    /// };
+    /// assert_eq!(v.equal_range_in_range_by(&f, 1..), Ok(1..6));
+    /// ```
+    pub fn equal_range_in_range_by<F, R>(&self, f: &F, range: R) -> Result<Range<usize>, usize>
+    where
+        F: Fn(&A) -> cmp::Ordering,
+        R: RangeBounds<usize>,
+    {
+        let mut start = match range.start_bound() {
+            Bound::Included(x) => *x,
+            Bound::Excluded(x) => x + 1,
+            Bound::Unbounded => 0,
+        };
+
+        let mut end = match range.end_bound() {
+            Bound::Included(x) => x - 1,
+            Bound::Excluded(x) => *x,
+            Bound::Unbounded => self.len,
+        };
+
+        let avg = |x: usize, y: usize| (x / 2) + (y / 2) + (x % 2 + y % 2) / 2;
+        let mut focus = self.focus();
+
+        // Find an equal item, we maintain an invariant that [start, end) should be the only
+        // possible equal elements. We binary search down to narrow the range. We stop if we find
+        // an equal item for the next step.
+        loop {
+            if start + 1 == end {
+                let comparison = f(focus.index(start));
+                match comparison {
+                    cmp::Ordering::Less => {
+                        return Err(start + 1);
+                    }
+                    cmp::Ordering::Greater => {
+                        return Err(start);
+                    }
+                    cmp::Ordering::Equal => {
+                        return Ok(start..end);
+                    }
+                }
+            } else {
+                let mid = avg(start, end);
+                let comparison = f(focus.index(mid));
+                match comparison {
+                    cmp::Ordering::Less => {
+                        start = mid;
+                    }
+                    cmp::Ordering::Greater => {
+                        end = mid;
+                    }
+                    cmp::Ordering::Equal => {
+                        // We know that there is at least one equal that lies in the midpoint of [start, end). Our
+                        // goal now is to expand that midpoint to cover the entire equal range. We can only return
+                        // Ok from here on out.
+                        return Ok(self.equal_range_for_index_in_range_by(mid, f, start..end));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Finds the range in the given subrange of the vector that corresponds to Ordering::Equal. For
+    /// this method to work the subrange must be sorted with respect to the given comparator. If
+    /// there is a range which corresponds to Ordering::Equal, the answer will be Ok(range),
+    /// otherwise the result is Err(position) corresponding to the position that the maintains the
+    /// sorted order of the Vector with respect to the given comparator.  
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// # use std::cmp::Ordering;
+    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
+    /// let f = |x: &i32| {
+    ///     if *x < 0 {
+    ///         Ordering::Less
+    ///     } else if *x > 5 {
+    ///         Ordering::Greater
+    ///     } else {
+    ///         Ordering::Equal
+    ///     }
+    /// };
+    /// assert_eq!(v.equal_range_by(&f), Ok(0..6));
+    /// ```
+    pub fn equal_range_by<F>(&self, f: &F) -> Result<Range<usize>, usize>
+    where
+        F: Fn(&A) -> cmp::Ordering,
+    {
+        self.equal_range_in_range_by(f, ..)
+    }
+
     /// Sorts a range of the sequence by the given comparator.
     ///
     /// # Examples
@@ -1981,6 +2230,120 @@ impl<A: Clone + Debug + Ord> Vector<A> {
         T: Debug + Clone,
     {
         self.dual_sort_range_by(&Ord::cmp, range, secondary)
+    }
+
+    /// Finds the range in the given subrange of the vector that is equal to the given value. The
+    /// given index must corresponds to a single element that compares equal. For this method to
+    /// work the subrange must be sorted with respect to the natural ordering.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// # use std::cmp::Ordering;
+    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
+    /// assert_eq!(v.equal_range_in_range(&1, 0..3), Ok(1..3));
+    /// ```
+    pub fn equal_range_in_range<R>(&self, value: &A, range: R) -> Result<Range<usize>, usize>
+    where
+        R: RangeBounds<usize>,
+    {
+        let f = |x: &A| x.cmp(value);
+        self.equal_range_in_range_by(&f, range)
+    }
+
+    /// Finds the range in the given subrange of the vector that corresponds to Ordering::Equal.
+    /// The given index must corresponds to a single element that compares equal. For this method to
+    /// work the subrange must be sorted with respect to the natural ordering.
+    ///
+    /// If the index does not compare equal this will return an empty range. Otherwise, this will
+    /// return the range that covers the equal elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// # use std::cmp::Ordering;
+    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
+    /// assert_eq!(v.equal_range(&1), Ok(1..3));
+    /// ```
+    pub fn equal_range(&self, value: &A) -> Result<Range<usize>, usize> {
+        let f = |x: &A| x.cmp(value);
+        self.equal_range_in_range_by(&f, ..)
+    }
+
+    /// Finds the range in the subbrange of the vector that corresponds that is between the two
+    /// given bounds. For this method to work the subrange must be sorted with respect to the
+    /// natural ordering.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// # use std::cmp::Ordering;
+    /// # use std::ops::Bound;
+    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
+    /// assert_eq!(v.between_range_in_range(Bound::Included(&1), Bound::Unbounded, 0..3), Ok(1..3));
+    /// ```
+    pub fn between_range_in_range<R>(
+        &self,
+        start: Bound<&A>,
+        end: Bound<&A>,
+        range: R,
+    ) -> Result<Range<usize>, usize>
+    where
+        R: RangeBounds<usize>,
+    {
+        let f = |x: &A| {
+            match start {
+                Bound::Excluded(b) => {
+                    if x <= b {
+                        return cmp::Ordering::Less;
+                    }
+                }
+                Bound::Included(b) => {
+                    if x < b {
+                        return cmp::Ordering::Less;
+                    }
+                }
+                _ => {}
+            }
+            match end {
+                Bound::Excluded(b) => {
+                    if x >= b {
+                        return cmp::Ordering::Greater;
+                    }
+                }
+                Bound::Included(b) => {
+                    if x > b {
+                        return cmp::Ordering::Greater;
+                    }
+                }
+                _ => {}
+            }
+            cmp::Ordering::Equal
+        };
+        self.equal_range_in_range_by(&f, range)
+    }
+
+    /// Finds the range in the vector that corresponds that is between the two given bounds. For
+    /// this method to work the subrange must be sorted with respect to the natural ordering.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// # use std::cmp::Ordering;
+    /// # use std::ops::Bound;
+    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
+    /// assert_eq!(v.between_range(Bound::Included(&3), Bound::Unbounded), Ok(4..9));
+    /// ```
+    pub fn between_range(&self, start: Bound<&A>, end: Bound<&A>) -> Result<Range<usize>, usize> {
+        self.between_range_in_range(start, end, ..)
     }
 }
 
@@ -2830,5 +3193,11 @@ mod test {
             vector.sort();
             assert!(vec.iter().eq(vector.iter()));
         }
+    }
+
+    #[test]
+    fn test_equal_range() {
+        let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
+        assert_eq!(v.equal_range_in_range(&1, 0..3), Ok(1..3));
     }
 }
