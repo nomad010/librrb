@@ -29,6 +29,7 @@
 #![deny(missing_docs)]
 #![cfg_attr(feature = "may_dangle", feature(dropck_eyepatch))]
 
+mod annotation_table;
 mod circular;
 mod nodes;
 mod size_table;
@@ -44,11 +45,11 @@ pub use vector::{Iter, Vector};
 pub use focus::{Focus, FocusMut};
 
 /// The width of the RRB tree nodes. The maximum number of elements in a leaf or internal node.
-const RRB_WIDTH: usize = 64;
+pub const RRB_WIDTH: usize = 64;
 
 /// Represents a side of a container.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum Side {
+enum Side {
     Front,
     Back,
 }
