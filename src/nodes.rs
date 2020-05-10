@@ -163,18 +163,26 @@ impl<'a, A: Debug> BorrowedLeaf<A> {
     pub fn update(&mut self, idx: usize, item: A) {
         *self.buffer.get_mut(idx).unwrap() = item;
     }
-
     pub fn split_at(&mut self, idx: usize) -> Self {
         let buffer = self.buffer.split_at(idx);
         BorrowedLeaf { buffer }
     }
-
     pub fn len(&self) -> usize {
         self.buffer.len()
     }
-
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+    pub fn level(&self) -> usize {
+        0
+    }
+
+    pub fn from_same_source(&self, other: &Self) -> bool {
+        self.buffer.from_same_source(&other.buffer)
+    }
+
+    pub fn combine(&mut self, other: Self) {
+        self.buffer.combine(other.buffer)
     }
 
     pub fn get(&self, idx: usize) -> Option<&A> {
@@ -340,6 +348,84 @@ pub(crate) enum BorrowedChildList<A: Clone + Debug> {
 }
 
 impl<'a, A: Clone + Debug> BorrowedChildList<A> {
+    /// Consumes `self` and returns the list as a list of leaf nodes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` is not a list of leaf nodes.
+    pub fn leaves(self) -> BorrowBufferMut<Rc<Leaf<A>>> {
+        if let BorrowedChildList::Leaves(x) = self {
+            x
+        } else {
+            panic!("Failed to unwrap a child list as a leaves list")
+        }
+    }
+
+    /// Consumes `self` and returns the list as a list of internal nodes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` is not a list of internal nodes.
+    pub fn internals(self) -> BorrowBufferMut<Rc<Internal<A>>> {
+        if let BorrowedChildList::Internals(x) = self {
+            x
+        } else {
+            panic!("Failed to unwrap a child list as an internals list")
+        }
+    }
+
+    /// Returns a reference to the list as a list of leaf nodes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` is not a list of leaf nodes.
+    pub fn leaves_ref(&self) -> &BorrowBufferMut<Rc<Leaf<A>>> {
+        if let BorrowedChildList::Leaves(x) = self {
+            x
+        } else {
+            panic!("Failed to unwrap a child list as a leaves list")
+        }
+    }
+
+    /// Returns a reference to the list as a list of internal nodes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` is not a list of internal nodes.
+    pub fn internals_ref(&self) -> &BorrowBufferMut<Rc<Internal<A>>> {
+        if let BorrowedChildList::Internals(x) = self {
+            x
+        } else {
+            panic!("Failed to unwrap a child list as an internals list")
+        }
+    }
+
+    /// Returns a mutable reference to the list as a list of leaf nodes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` is not a list of leaf nodes.
+    pub fn leaves_mut(&mut self) -> &mut BorrowBufferMut<Rc<Leaf<A>>> {
+        if let BorrowedChildList::Leaves(x) = self {
+            x
+        } else {
+            panic!("Failed to unwrap a child list as a leaves list")
+        }
+    }
+
+    /// Returns a mutable reference to the list as a list of internal nodes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` is not a list of internal nodes.
+    pub fn internals_mut(&mut self) -> &mut BorrowBufferMut<Rc<Internal<A>>> {
+        if let BorrowedChildList::Internals(x) = self {
+            x
+        } else {
+            panic!("Failed to unwrap a child list as an internals list")
+        }
+    }
+
     fn empty(&mut self) -> Self {
         match self {
             BorrowedChildList::Internals(children) => {
@@ -366,6 +452,26 @@ impl<'a, A: Clone + Debug> BorrowedChildList<A> {
         match self {
             BorrowedChildList::Internals(children) => children.len(),
             BorrowedChildList::Leaves(children) => children.len(),
+        }
+    }
+
+    pub fn from_same_source(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                BorrowedChildList::Internals(children),
+                BorrowedChildList::Internals(other_children),
+            ) => children.from_same_source(other_children),
+            (BorrowedChildList::Leaves(children), BorrowedChildList::Leaves(other_children)) => {
+                children.from_same_source(other_children)
+            }
+            _ => false,
+        }
+    }
+
+    pub fn combine(&mut self, other: Self) {
+        match self {
+            BorrowedChildList::Internals(children) => children.combine(other.internals()),
+            BorrowedChildList::Leaves(children) => children.combine(other.leaves()),
         }
     }
 
@@ -799,6 +905,18 @@ impl<'a, A: Clone + Debug> BorrowedInternal<A> {
         self.len() == 0
     }
 
+    pub fn level(&self) -> usize {
+        self.sizes.level()
+    }
+
+    pub fn from_same_source(&self, other: &Self) -> bool {
+        self.children.from_same_source(&other.children)
+    }
+
+    pub fn combine(&mut self, other: Self) {
+        self.children.combine(other.children)
+    }
+
     pub fn position_info_for(&self, idx: usize) -> Option<(usize, usize)> {
         let position = self.sizes.position_info_for(self.left_size() + idx);
         if let Some((child_number, subidx)) = position {
@@ -1129,6 +1247,13 @@ impl<A: Clone + Debug> BorrowedNode<A> {
         }
     }
 
+    pub fn level(&self) -> usize {
+        match self {
+            BorrowedNode::Internal(internal) => internal.level(),
+            BorrowedNode::Leaf(leaf) => leaf.level(),
+        }
+    }
+
     pub fn make_spine(&mut self, side: Side) -> Vec<NodeRc<A>> {
         let mut spine = Vec::new();
         if let BorrowedNode::Internal(ref mut internal) = self {
@@ -1249,6 +1374,23 @@ impl<A: Clone + Debug> BorrowedNode<A> {
             x
         } else {
             panic!("Failed to unwrap a node as an internal node")
+        }
+    }
+
+    pub fn from_same_source(&self, other: &Self) -> bool {
+        match (self, other) {
+            (BorrowedNode::Internal(node), BorrowedNode::Internal(other)) => {
+                node.from_same_source(other)
+            }
+            (BorrowedNode::Leaf(node), BorrowedNode::Leaf(other)) => node.from_same_source(other),
+            _ => false,
+        }
+    }
+
+    pub fn combine(&mut self, other: Self) {
+        match self {
+            BorrowedNode::Internal(internal) => internal.combine(other.internal()),
+            BorrowedNode::Leaf(internal) => internal.combine(other.leaf()),
         }
     }
 

@@ -33,6 +33,7 @@ mod annotation_table;
 mod circular;
 mod nodes;
 mod size_table;
+mod sort;
 
 #[macro_use]
 pub mod vector;

@@ -27,9 +27,14 @@ Vector
   [] Annotated Vector with type parameters for A, F annotation functions.
     
   ✔ Annotation table with a type parameter for the value type of the aggregation. @done(20-05-04 18:53)
-  [] Internal nodes that store the partial sum table as well the regular SizeTable.
+  [] Internal nodes that store the annotation table as well the regular SizeTable.
   [] Leaf nodes that can look up by annotation value.
   [] FocusMut problems? Need to update the annotation tables when the original Vector is updated
+    We could make split accept two functions that get run on the left and right splits.
+    We could focus_mut do the same thing for annotations.
+    We could have split return a single wrapper struct that when dropped makes the necessary adjustments
+  ✔ Redo FocusMut implementation to use closures and Fn to be able to apply RAII logic to Focus. @done(20-05-10 17:48)
+    This is done but it complicates certain things a bit. This is probably a necessary change anyway though.
 
 [] remove function improvements
   We can detect cases where concatenation of the left and right sides of the tree would not make any progress.
@@ -48,6 +53,9 @@ Focus
 [] Attempt to use Vector of BorrowNode's for storage
 [] Investigate spine like structure for Focus. (leading to tracking two positions)
 [] Abstract over Focus or Vector like type
+
+Sort
+[] Simplify sort functions into a singular function so we don't have too much duplicated code.
 
 Documentation
 [] Write documentation for methods with stubs

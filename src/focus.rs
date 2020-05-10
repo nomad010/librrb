@@ -8,7 +8,7 @@ use crate::Side;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::mem;
-use std::ops::{Bound, Range, RangeBounds};
+use std::ops::{Bound, Deref, DerefMut, Range, RangeBounds};
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
@@ -405,7 +405,7 @@ impl<'a, A: Clone + Debug> Focus<'a, A> {
 /// A focus of the elements of a vector. The focus allows mutation of the elements in the vector.
 #[derive(Debug)]
 pub struct FocusMut<'a, A: Clone + Debug> {
-    origins: Vector<Rc<&'a mut Vector<A>>>,
+    origins: Vec<Rc<&'a mut Vector<A>>>,
     pub(crate) nodes: Vec<BorrowedNode<A>>,
     len: usize,
     // Focus part
@@ -433,7 +433,7 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
     }
 
     pub(crate) fn from_vectors(
-        origins: Vector<Rc<&'a mut Vector<A>>>,
+        origins: Vec<Rc<&'a mut Vector<A>>>,
         nodes: Vec<BorrowedNode<A>>,
     ) -> Self {
         let mut len = 0;
@@ -460,9 +460,10 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
     /// # use librrb::Vector;
     /// let mut v = vector![1, 2, 3];
     /// let mut focus_1 = v.focus_mut();
-    /// let mut focus_2 = focus_1.split_at(1);
-    /// assert_eq!(focus_1.len(), 1);
-    /// assert_eq!(focus_2.len(), 2);
+    /// focus_1.split_at_fn(1, |focus_1, focus_2| {
+    ///     assert_eq!(focus_1.len(), 1);
+    ///     assert_eq!(focus_2.len(), 2);
+    /// });
     /// ```
     pub fn len(&self) -> usize {
         self.len
@@ -477,9 +478,10 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
     /// # use librrb::Vector;
     /// let mut v = vector![1, 2, 3];
     /// let mut focus_1 = v.focus_mut();
-    /// let mut focus_2 = focus_1.split_at(0);
-    /// assert!(focus_1.is_empty());
-    /// assert!(!focus_2.is_empty());
+    /// focus_1.split_at_fn(0, |focus_1, focus_2| {
+    ///     assert!(focus_1.is_empty());
+    ///     assert!(!focus_2.is_empty());
+    /// });
     /// ```
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -489,24 +491,11 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
     /// everything up to (excluding) the index. The return result is a focus that represents
     /// everything after (including) the index.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #[macro_use] extern crate librrb;
-    /// # use librrb::Vector;
-    /// let mut v = vector![1, 2, 3];
-    /// let mut focus_1 = v.focus_mut();
-    /// let mut focus_2 = focus_1.split_at(1);
-    /// assert_eq!(focus_1.get(0), Some(&mut 1));
-    /// assert_eq!(focus_1.get(1), None);
-    /// assert_eq!(focus_2.get(0), Some(&mut 2));
-    /// assert_eq!(focus_2.get(1), Some(&mut 3));
-    /// ```
     /// # Panics
     ///
     /// Panics if the given index is greater than the focus' length.
     ///
-    pub fn split_at(&mut self, index: usize) -> Self {
+    fn split_at(&mut self, index: usize) -> Self {
         // We split the vector in two at the position, we need to find the two positions that denote
         // the last of this vector and the first of the next vector.
         let original_len = self.len;
@@ -584,10 +573,110 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
         result
     }
 
+    /// Splits the focus into two foci. Then calls the given function with the two foci as
+    /// arguments. This focus is replaced with a focus that represents everything up to
+    /// (excluding) the index. The return result is a focus that represents everything after
+    /// (including) the index. Afterwards, the original focus is reconstituted.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![1, 2, 3];
+    /// let mut focus_1 = v.focus_mut();
+    /// focus_1.split_at_fn(1, |focus_1, focus_2| {
+    ///     assert_eq!(focus_1.get(0), Some(&mut 1));
+    ///     assert_eq!(focus_1.get(1), None);
+    ///     assert_eq!(focus_2.get(0), Some(&mut 2));
+    ///     assert_eq!(focus_2.get(1), Some(&mut 3));
+    /// });
+    /// ```
+    /// # Panics
+    ///
+    /// Panics if the given index is greater than the focus' length.
+    ///
+    pub fn split_at_fn<F: FnMut(&mut Self, &mut Self)>(&mut self, index: usize, mut f: F) {
+        let mut result = self.split_at(index);
+        f(self, &mut result);
+        self.combine(result);
+    }
+
+    fn combine(&mut self, mut other: Self) {
+        // Recombine both side FocusMuts into back into the original FocusMut
+        let total_len = self.len() + other.len();
+        if self.is_empty() {
+            mem::replace(self, other);
+            return;
+        } else if other.is_empty() {
+            return;
+        }
+        // println!(
+        //     "Recombine called\n{:?}\n{:?}\nn\n\n\n",
+        //     self.nodes, other.nodes
+        // );
+
+        other.nodes.reverse();
+
+        // let mut combined_nodes = Vec::new();
+
+        while !self.nodes.is_empty() && !other.nodes.is_empty() {
+            let mut left_node = self.nodes.pop().unwrap();
+            let right_node = other.nodes.pop().unwrap();
+            let right_level = right_node.level();
+            // println!(
+            //     "loop {} {}\n{:?}\n{:?}",
+            //     self.nodes.len(),
+            //     other.nodes.len(),
+            //     left_node,
+            //     right_node
+            // );
+
+            if !left_node.from_same_source(&right_node) {
+                self.nodes.push(left_node);
+                other.nodes.push(right_node);
+                // println!("break here");
+                break;
+            }
+
+            left_node.combine(right_node);
+            if let Some(right_parent) = other.nodes.last_mut() {
+                // If we have a borrowed Leaf as the root then we could have exhausted the list.
+                if right_level + 1 == right_parent.level() {
+                    // The parent range must be updated to include the whole borrowed node now.
+                    // println!(
+                    //     "lel b {} {:?} {}",
+                    //     right_parent.len(),
+                    //     right_parent.internal_mut().children.range_mut(),
+                    //     right_level
+                    // );
+                    right_parent.internal_mut().children.range_mut().start -= 1;
+                // println!("lel a {}", right_parent.len());
+                } else {
+                    other.nodes.push(left_node);
+                    // println!("Should be breaking here")
+                }
+            } else {
+                other.nodes.push(left_node);
+                // println!("Should be breaking here")
+            }
+        }
+        other.nodes.reverse();
+        self.nodes.append(&mut other.nodes);
+        self.len += other.len;
+
+        // println!(
+        //     "Recombine result\n{:?}\n{:?}\n{}\n\n\n",
+        //     self.nodes,
+        //     other.nodes,
+        //     self.len()
+        // );
+    }
+
     /// Derp
     pub fn append(&mut self, other: Self) {
         // The focus part remains the same, but update other bits.
-        self.origins.append(other.origins);
+        self.origins.extend(other.origins);
         self.nodes.extend(other.nodes);
         self.len += other.len;
     }
@@ -606,8 +695,10 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
             self.leaf_range.end += other.len();
             self.leaf_range.start += other.len();
         }
-
-        self.origins.prepend(other.origins);
+        self.origins.reverse();
+        other.origins.reverse();
+        self.origins.extend(other.origins);
+        self.origins.reverse();
         mem::swap(&mut self.nodes, &mut other.nodes);
         self.nodes.extend(other.nodes);
         self.len += other.len;
@@ -622,12 +713,17 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
     /// # use librrb::Vector;
     /// let mut v = vector![1, 2, 3];
     /// let mut focus = v.focus_mut();
-    /// focus.narrow(1..3);
-    /// assert_eq!(focus.get(0), Some(&mut 2));
-    /// assert_eq!(focus.get(1), Some(&mut 3));
-    /// assert_eq!(focus.get(2), None);
+    /// focus.narrow(1..3, |focus| {
+    ///     assert_eq!(focus.get(0), Some(&mut 2));
+    ///     assert_eq!(focus.get(1), Some(&mut 3));
+    ///     assert_eq!(focus.get(2), None);
+    /// });
     /// ```
-    pub fn narrow<R: RangeBounds<usize>>(&mut self, range: R) {
+    pub fn narrow<R: RangeBounds<usize>, F: FnMut(&mut FocusMut<A>)>(
+        &mut self,
+        range: R,
+        mut f: F,
+    ) {
         let range_start = match range.start_bound() {
             Bound::Unbounded => 0,
             Bound::Included(x) => *x,
@@ -638,12 +734,9 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
             Bound::Included(x) => x + 1,
             Bound::Excluded(x) => *x,
         };
-        if range_start != 0 {
-            let new_focus = self.split_at(range_start);
-            *self = new_focus;
-        }
-
-        self.split_at(range_end - range_start);
+        self.split_at_fn(range_end, |left, _right| {
+            left.split_at_fn(range_start, |_left, right| f(right))
+        });
     }
 
     fn move_focus(&mut self, mut idx: usize) {
@@ -900,5 +993,151 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
             cumulative += node.assert_size_invariants();
         }
         cumulative == self.len
+    }
+}
+
+/*
+trait Container<A: Clone + Debug>: DerefMut<Target = A> {
+    fn into_inner(inner: Self) -> A;
+
+    fn swap(left: &mut Self, right: &mut Self);
+}
+
+trait FocusLike<A: Clone + Debug> {
+    type Item: Container<A>;
+
+    fn get(&self) -> Self::Item;
+
+    fn split_at<F: Fn(&mut Self, &mut Self)>(&mut self, f: F);
+}
+
+struct DualFocusMut<'a, 'b, A: Clone + Debug, B: Clone + Debug> {
+    first: &'b mut FocusMut<'a, A>,
+    second: &'b mut FocusMut<'a, B>,
+}
+
+impl<'a, 'b, A: Clone + Debug, B: Clone + Debug> FocusLike<(A, B)> for DualFocusMut<'a, 'b, A, B> {
+    type Item = Dual<'a, A, B>;
+
+    // fn get(&mut self)
+}
+
+struct Single<A: Clone + Debug> {
+    item: A,
+}
+
+impl<A: Clone + Debug> Deref for Single<A> {
+    type Target = A;
+
+    fn deref(&self) -> &A {
+        &mut self.item
+    }
+}
+
+impl<A: Clone + Debug> DerefMut for Single<A> {
+    fn deref_mut(&mut self) -> &mut A {
+        &mut self.item
+    }
+}
+
+impl<A: Clone + Debug> Container<A> for Single<A> {
+    fn into_inner(inner: Self) -> A {
+        inner.item
+    }
+
+    fn swap(left: &mut Self, right: &mut Self) {
+        mem::swap(left, right)
+    }
+}
+
+struct Dual<'a, A: Clone + Debug, B: Clone + Debug> {
+    item: (&'a mut A, &'a mut B),
+}
+
+impl<'a, A: Clone + Debug, B: Clone + Debug> Deref for Dual<'a, A, B> {
+    type Target = (A, B);
+
+    fn deref(&self) -> &(A, B) {
+        &self.item
+    }
+}
+
+impl<A: Clone + Debug, B: Clone + Debug> DerefMut for Dual<A, B> {
+    fn deref_mut(&mut self) -> &mut (A, B) {
+        &mut self.item
+    }
+}
+
+impl<A: Clone + Debug, B: Clone + Debug> Container<(A, B)> for Dual<A, B> {
+    fn into_inner(inner: Self) -> (A, B) {
+        inner.item
+    }
+
+    fn swap(left: &mut Self, right: &mut Self) {
+        mem::swap(left, right)
+    }
+}
+*/
+mod test {
+
+    use crate::Vector;
+
+    #[test]
+    pub fn single_focus_mut() {
+        let mut v = Vector::new();
+        const N: usize = 1_000;
+        for i in 0..N {
+            v.push_back(i);
+        }
+
+        let mut focus = v.focus_mut();
+        for i in 0..N {
+            let thing = focus.index(i);
+            *thing = 0;
+        }
+        for v in v.iter() {
+            assert_eq!(v, &0);
+        }
+    }
+
+    #[test]
+    pub fn split_focus_mut() {
+        let mut v = Vector::new();
+        const N: usize = 1_000;
+        for i in 0..N {
+            v.push_back(i);
+        }
+
+        const S: usize = N / 2;
+        let mut focus = v.focus_mut();
+        focus.split_at_fn(S, |left, right| {
+            for i in 0..S {
+                let thing = left.get(i);
+                if let Some(thing) = thing {
+                    *thing = 0;
+                }
+            }
+
+            for i in 0..N - S {
+                let thing = right.get(i);
+                if let Some(thing) = thing {
+                    *thing = 1;
+                }
+            }
+        });
+        for i in 0..N {
+            if i < S {
+                assert_eq!(focus.get(i), Some(&mut 0));
+            } else {
+                assert_eq!(focus.get(i), Some(&mut 1));
+            }
+        }
+        for (i, v) in v.iter().enumerate() {
+            if i < S {
+                assert_eq!(v, &0);
+            } else {
+                assert_eq!(v, &1);
+            }
+        }
     }
 }

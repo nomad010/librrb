@@ -14,7 +14,7 @@ pub(crate) struct BorrowBufferMut<A: Debug> {
     pub(crate) range: Range<usize>,
     data: *mut mem::MaybeUninit<A>,
     front: usize,
-    // len: usize,
+    len: usize,
 }
 
 impl<A: Debug> Debug for BorrowBufferMut<A> {
@@ -36,8 +36,18 @@ impl<'a, A: Debug> BorrowBufferMut<A> {
             range: self.range.start..self.range.start,
             data: self.data,
             front: 0,
-            // len: 0,
+            len: self.len,
         }
+    }
+
+    pub fn from_same_source(&self, other: &Self) -> bool {
+        self.data == other.data
+    }
+
+    pub fn combine(&mut self, mut other: Self) {
+        assert!(self.from_same_source(&other));
+        assert!(other.range.start == self.range.end);
+        self.range.end = other.range.end;
     }
 
     pub fn len(&self) -> usize {
@@ -158,6 +168,7 @@ impl<'a, A: Debug> BorrowBufferMut<A> {
             data: self.data,
             range: first_end..self.range.end,
             front: self.front,
+            len: self.len,
         };
         self.range.end = first_end;
         other
@@ -701,10 +712,12 @@ impl<A: Debug> CircularBuffer<A> {
     }
 
     pub(crate) fn mutable_view(&mut self) -> BorrowBufferMut<A> {
+        assert_ne!(self.len(), 0);
         BorrowBufferMut {
             range: 0..self.len(),
             data: self.data.as_mut_ptr(),
             front: self.front,
+            len: self.len,
         }
     }
 }

@@ -251,6 +251,7 @@
 
 use crate::focus::{Focus, FocusMut};
 use crate::nodes::{ChildList, Internal, Leaf, NodeRc};
+use crate::sort::{do_dual_sort, do_single_sort};
 use crate::{Side, RRB_WIDTH};
 use rand_core::{RngCore, SeedableRng};
 use std::cmp;
@@ -1491,23 +1492,46 @@ impl<A: Clone + Debug> Vector<A> {
 
     /// Derp
     pub fn reverse_range<R: RangeBounds<usize>>(&mut self, range: R) {
+        let range = self.arbitrary_range_to_range(range);
         let mut focus = self.focus_mut();
-        focus.narrow(range);
 
-        let half_len = focus.len() / 2;
-        let mut right_focus = focus.split_at(half_len);
-        let mut left_focus = focus;
-
-        for i in 0..half_len {
-            let left = left_focus.index(i);
-            let right = right_focus.index(right_focus.len() - 1 - i);
-            mem::swap(left, right);
-        }
+        focus.narrow(range, |focus| {
+            let half_len = focus.len() / 2;
+            focus.split_at_fn(half_len, |left, right| {
+                let right_len = right.len();
+                for i in 0..half_len {
+                    let left = left.index(i);
+                    let right = right.index(right_len - 1 - i);
+                    mem::swap(left, right);
+                }
+            })
+            // let mut split_focus = focus.split_at(half_len);
+        })
+        // focus.get(0);
+        // {
+        //     let split = focus.split_at(range.end);
+        // }
+        // focus.get(0);
+        // focus.narrow(range);
     }
 
     /// Derp
     pub fn reverse(&mut self) {
         self.reverse_range(..)
+    }
+
+    fn arbitrary_range_to_range<R: RangeBounds<usize>>(&self, range: R) -> Range<usize> {
+        let range_start = match range.start_bound() {
+            Bound::Unbounded => 0,
+            Bound::Included(x) => *x,
+            Bound::Excluded(x) => x + 1,
+        };
+        let range_end = match range.end_bound() {
+            Bound::Unbounded => self.len(),
+            Bound::Included(x) => x + 1,
+            Bound::Excluded(x) => *x,
+        };
+        range_start..range_end
     }
 
     /// Finds the range in the given subrange of the vector that corresponds to Ordering::Equal.
@@ -1778,13 +1802,10 @@ impl<A: Clone + Debug> Vector<A> {
         R: RangeBounds<usize>,
     {
         let mut focus = self.focus_mut();
-        focus.narrow(range);
-        let focus = SingleFocus {
-            first: focus,
-            comp: &f,
-        };
-        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
-        do_sort(focus, &mut rng);
+        focus.narrow(range, |focus| {
+            let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
+            do_single_sort(focus, &mut rng, f);
+        });
     }
 
     /// Sorts a range of the sequence by the given comparator. Any swap that occurs will be made in
@@ -1810,17 +1831,14 @@ impl<A: Clone + Debug> Vector<A> {
         R: RangeBounds<usize> + Clone,
         T: Clone + Debug,
     {
-        let mut first = self.focus_mut();
-        first.narrow(range.clone());
-        let mut second = secondary.focus_mut();
-        second.narrow(range);
-        let focus = DualFocus {
-            first,
-            second,
-            comp: &f,
-        };
-        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
-        do_sort(focus, &mut rng);
+        let mut focus = self.focus_mut();
+        focus.narrow(range.clone(), |focus| {
+            let mut dual = secondary.focus_mut();
+            dual.narrow(range.clone(), |dual| {
+                let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
+                do_dual_sort(focus, dual, &mut rng, &f);
+            });
+        });
     }
 
     /// Sorts a range of the sequence by the given comparator.
@@ -1841,15 +1859,12 @@ impl<A: Clone + Debug> Vector<A> {
         f: &F,
         range: R,
     ) {
-        let comp = |x: &A, y: &A| f(x).cmp(&f(y));
         let mut focus = self.focus_mut();
-        focus.narrow(range);
-        let focus = SingleFocus {
-            first: focus,
-            comp: &comp,
-        };
-        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
-        do_sort(focus, &mut rng);
+        focus.narrow(range, |focus| {
+            let comp = |x: &A, y: &A| f(x).cmp(&f(y));
+            let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
+            do_single_sort(focus, &mut rng, &comp);
+        });
     }
 
     /// Sorts a range of the sequence by the given comparator. Any swap that occurs will be made in
@@ -1877,17 +1892,14 @@ impl<A: Clone + Debug> Vector<A> {
         T: Debug + Clone,
     {
         let comp = |x: &A, y: &A| f(x).cmp(&f(y));
-        let mut first = self.focus_mut();
-        first.narrow(range.clone());
-        let mut second = secondary.focus_mut();
-        second.narrow(range);
-        let focus = DualFocus {
-            first,
-            second,
-            comp: &comp,
-        };
-        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
-        do_sort(focus, &mut rng);
+        let mut focus = self.focus_mut();
+        focus.narrow(range.clone(), |focus| {
+            let mut dual = secondary.focus_mut();
+            dual.narrow(range.clone(), |dual| {
+                let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
+                do_dual_sort(focus, dual, &mut rng, &comp);
+            });
+        });
     }
 
     /// Sorts the entire sequence by the given comparator.
@@ -2024,13 +2036,38 @@ impl<A: Clone + Debug> Vector<A> {
     pub fn focus_mut(&mut self) -> FocusMut<A> {
         let mut nodes = Vec::new();
         for node in self.left_spine.iter_mut() {
+            if !node.is_empty() {
+                nodes.push(node.borrow());
+            }
+        }
+        if !self.root.is_empty() {
+            nodes.push(self.root.borrow());
+        }
+        for node in self.right_spine.iter_mut().rev() {
+            if !node.is_empty() {
+                nodes.push(node.borrow());
+            }
+        }
+        FocusMut::from_vectors(vec![Rc::new(self)], nodes)
+    }
+
+    /// Returns a mutable focus over the vector. A focus tracks the last leaf and positions which
+    /// was read. The path down this tree is saved in the focus and is used to accelerate lookups in
+    /// nearby locations.
+    pub fn focus_mut_fn<F>(&mut self, f: &F)
+    where
+        F: Fn(&mut FocusMut<A>),
+    {
+        let mut nodes = Vec::new();
+        for node in self.left_spine.iter_mut() {
             nodes.push(node.borrow());
         }
         nodes.push(self.root.borrow());
         for node in self.right_spine.iter_mut().rev() {
             nodes.push(node.borrow());
         }
-        FocusMut::from_vectors(Vector::singleton(Rc::new(self)), nodes)
+        let mut focus = FocusMut::from_vectors(vec![Rc::new(self)], nodes);
+        f(&mut focus);
     }
 
     /// Returns an iterator over the vector.
@@ -2404,8 +2441,11 @@ impl<A: Clone + Debug + Eq> PartialEq for Vector<A> {
 
 impl<A: Clone + Debug + Eq> Eq for Vector<A> {}
 
+/*
 trait SortFocus {
-    fn split_at(&mut self, index: usize) -> Self;
+    fn split_at<S>(&mut self, index: usize, f: S)
+    where
+        for<'l, 'r> S: Fn(&'l mut Self, &'r mut Self);
 
     fn compare(
         first_focus: &mut Self,
@@ -2422,27 +2462,35 @@ trait SortFocus {
     );
 
     fn len(&self) -> usize;
-
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
 }
 
-struct SingleFocus<'a, 'f, A: Clone + Debug, F: Fn(&A, &A) -> cmp::Ordering> {
-    first: FocusMut<'a, A>,
+struct SingleFocus<'a, 'b, 'f, A: Clone + Debug, F: Fn(&A, &A) -> cmp::Ordering> {
+    first: &'b mut FocusMut<'a, A>,
     comp: &'f F,
 }
 
-impl<'a, 'f, A: Clone + Debug, F: Fn(&A, &A) -> cmp::Ordering> SortFocus
-    for SingleFocus<'a, 'f, A, F>
+impl<'a, 'b, 'f, A: Clone + Debug, F: Fn(&A, &A) -> cmp::Ordering> SortFocus
+    for SingleFocus<'a, 'b, 'f, A, F>
 {
-    fn split_at(&mut self, index: usize) -> Self {
-        SingleFocus {
-            first: self.first.split_at(index),
-            comp: self.comp,
-        }
+    fn split_at<S>(&mut self, index: usize, f: S)
+    where
+        for<'l, 'r> S: Fn(&'l mut Self, &'r mut Self),
+    {
+        self.first.split_at_fn(index, |left, right| {
+            let left = SingleFocus::<'a, 'b, 'f> {
+                first: left,
+                comp: self.comp,
+            };
+            let right = SingleFocus {
+                first: right,
+                comp: self.comp,
+            };
+            f(&mut left, &mut right);
+        })
     }
-
     fn compare(
         first_focus: &mut Self,
         first_index: usize,
@@ -2453,7 +2501,6 @@ impl<'a, 'f, A: Clone + Debug, F: Fn(&A, &A) -> cmp::Ordering> SortFocus
         let second = second_focus.first.index(second_index);
         (first_focus.comp)(first, second)
     }
-
     fn swap(
         first_focus: &mut Self,
         first_index: usize,
@@ -2465,7 +2512,6 @@ impl<'a, 'f, A: Clone + Debug, F: Fn(&A, &A) -> cmp::Ordering> SortFocus
             second_focus.first.index(second_index),
         );
     }
-
     fn len(&self) -> usize {
         self.first.len()
     }
@@ -2686,7 +2732,7 @@ where
         do_sort(greater_focus, rng);
     }
 }
-
+*/
 impl<A: Clone + Debug> FromIterator<A> for Vector<A> {
     fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self {
         let mut result = Vector::new();
@@ -3110,56 +3156,6 @@ mod test {
     }
 
     #[test]
-    pub fn single_focus_mut() {
-        let mut v = Vector::new();
-        const N: usize = 1_000;
-        for i in 0..N {
-            v.push_back(i);
-        }
-
-        // let mut focus = v.focus_mut();
-        // for i in 0..N {
-        //     let thing = focus.index(i);
-        //     *thing = 0;
-        // }
-        // for v in v.iter() {
-        //     assert_eq!(v, &0);
-        // }
-    }
-
-    #[test]
-    pub fn split_focus_mut() {
-        let mut v = Vector::new();
-        const N: usize = 1_000;
-        for i in 0..N {
-            v.push_back(i);
-        }
-
-        const S: usize = N / 2;
-        let mut focus = v.focus_mut();
-        let mut focus_2 = focus.split_at(S);
-        for i in 0..S {
-            let thing = focus.get(i);
-            if let Some(thing) = thing {
-                *thing = 0;
-            }
-        }
-        for i in 0..N - S {
-            let thing = focus_2.get(i);
-            if let Some(thing) = thing {
-                *thing = 1;
-            }
-        }
-        // for (i, v) in v.iter().enumerate() {
-        //     if i < S {
-        //         assert_eq!(v, &0);
-        //     } else {
-        //         assert_eq!(v, &1);
-        //     }
-        // }
-    }
-
-    #[test]
     pub fn inserts() {
         let mut v = Vector::new();
         const N: usize = 1_000;
@@ -3177,22 +3173,6 @@ mod test {
         assert_eq!(v.iter().copied().collect::<Vec<usize>>(), vector);
 
         println!("{} {}", v.len(), v.height());
-    }
-    use ::proptest::num::i32;
-
-    proptest! {
-        #[test]
-        fn test_quicksort(ref input in proptest::collection::vec(i32::ANY, 0..10_000)) {
-            let mut vec = input.clone();
-            let mut vector = Vector::new();
-            for i in vec.iter() {
-                vector.push_back(*i);
-            }
-            assert!(vec.iter().eq(vector.iter()));
-            vec.sort();
-            vector.sort();
-            assert!(vec.iter().eq(vector.iter()));
-        }
     }
 
     #[test]
