@@ -1,6 +1,7 @@
 //! Collection of nodes used for the RRB tree.
 
 use crate::circular::{BorrowBufferMut, CircularBuffer};
+use crate::nodes::{BorrowedLeaf, Leaf};
 use crate::size_table::SizeTable;
 use crate::{Side, RRB_WIDTH};
 use std::cmp;
@@ -8,205 +9,21 @@ use std::fmt::Debug;
 use std::ops::{Deref, DerefMut, Range};
 use std::rc::Rc;
 
-/// A leaf indicates a terminal node in the tree.
-#[derive(Debug)]
-pub(crate) struct Leaf<A: Debug> {
-    pub buffer: CircularBuffer<A>,
-}
-
-impl<A: Debug> Leaf<A> {
-    /// Sorts the leaf by the given comparator.
-    pub fn sort_by<F: FnMut(&A, &A) -> cmp::Ordering>(&mut self, range: Range<usize>, f: &mut F) {
-        self.buffer.sort_by(range, f)
-    }
-
-    /// Constructs a new empty leaf.
-    pub fn empty() -> Self {
-        Leaf {
-            buffer: CircularBuffer::new(),
-        }
-    }
-
-    /// Constructs a new leaf with a single item.
-    pub fn with_item(item: A) -> Self {
-        Leaf {
-            buffer: CircularBuffer::with_item(item),
-        }
-    }
-
-    /// Constructs a new leaf from the given items.
-    ///
-    /// # Panics
-    ///
-    /// This will panic if the length of items is greater than `RRB_WIDTH`.
-    pub fn with_items(items: Vec<A>) -> Self {
-        Leaf {
-            buffer: CircularBuffer::with_items(items),
-        }
-    }
-
-    /// Removes elements from `self` and inserts these elements into `destination`. At most `len`
-    /// elements will be removed. The actual number of elements decanted is returned. Elements are
-    /// popped from `share_side` but pushed into the destination via `share_side.negate()`
-    pub fn share_children_with(
-        &mut self,
-        destination: &mut Self,
-        share_side: Side,
-        len: usize,
-    ) -> usize {
-        self.buffer.decant_into(destination, share_side, len)
-    }
-
-    /// Returns the level of the node. Always 0 in the case of leaves.
-    pub fn level(&self) -> usize {
-        0
-    }
-
-    /// Returns whether the node is a leaf. Always true in the case of leaves.
-    pub fn is_leaf(&self) -> bool {
-        true
-    }
-
-    /// Updates an element in the leaf.
-    pub fn update(&mut self, idx: usize, item: A) {
-        *self.buffer.get_mut(idx).unwrap() = item;
-    }
-
-    /// Checks whether the node corresponds to its size table, Leaves do not have these tables so
-    /// this never fails.
-    pub fn debug_check_lens_size_table(&self) -> (usize, bool) {
-        (self.len(), true)
-    }
-
-    /// Returns the number of used positions in the node. This is equivalent to len in leaves.
-    pub fn slots(&self) -> usize {
-        self.len()
-    }
-
-    /// Returns the number of unused positions in the node. This is equivalent to the amount of
-    /// space left in the leaf.
-    pub fn free_slots(&self) -> usize {
-        self.free_space()
-    }
-
-    pub fn borrow(&mut self) -> BorrowedLeaf<A> {
-        BorrowedLeaf {
-            buffer: self.buffer.mutable_view(),
-        }
-    }
-
-    /// Checks whether the node's heights and heights of its children make sense. This never fails
-    /// for leaves.
-    pub(crate) fn debug_check_child_heights(&self) -> usize {
-        debug_assert_eq!(self.level(), 0);
-        debug_assert!(self.is_leaf());
-        self.level()
-    }
-}
-
-impl<A: Debug + PartialEq> Leaf<A> {
-    /// Tests whether the node is compatible with the given iterator. This is mainly used for
-    /// debugging purposes.
-    pub(crate) fn equal_iter<'a>(&self, iter: &mut std::slice::Iter<'a, A>) -> bool {
-        for value in &self.buffer {
-            if value != iter.next().unwrap() {
-                return false;
-            }
-        }
-        true
-    }
-
-    /// Tests whether the node is compatible with the given iterator. This is mainly used for
-    /// debugging purposes.
-    pub(crate) fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, A>) {
-        for value in &self.buffer {
-            let iter_value = iter.next().unwrap();
-            println!("{:?} == {:?} = {} ", value, iter_value, value == iter_value);
-        }
-    }
-}
-
-impl<A: Clone + Debug> Clone for Leaf<A> {
-    fn clone(&self) -> Self {
-        Leaf {
-            buffer: self.buffer.clone(),
-        }
-    }
-}
-
-impl<A: Debug> Deref for Leaf<A> {
-    type Target = CircularBuffer<A>;
-
-    fn deref(&self) -> &CircularBuffer<A> {
-        &self.buffer
-    }
-}
-
-impl<A: Debug> DerefMut for Leaf<A> {
-    fn deref_mut(&mut self) -> &mut CircularBuffer<A> {
-        &mut self.buffer
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct BorrowedLeaf<A: Debug> {
-    buffer: BorrowBufferMut<A>,
-}
-
-impl<'a, A: Debug> BorrowedLeaf<A> {
-    pub fn empty(&mut self) -> Self {
-        BorrowedLeaf {
-            buffer: self.buffer.empty(),
-        }
-    }
-
-    pub fn update(&mut self, idx: usize, item: A) {
-        *self.buffer.get_mut(idx).unwrap() = item;
-    }
-    pub fn split_at(&mut self, idx: usize) -> Self {
-        let buffer = self.buffer.split_at(idx);
-        BorrowedLeaf { buffer }
-    }
-    pub fn len(&self) -> usize {
-        self.buffer.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-    pub fn level(&self) -> usize {
-        0
-    }
-
-    pub fn from_same_source(&self, other: &Self) -> bool {
-        self.buffer.from_same_source(&other.buffer)
-    }
-
-    pub fn combine(&mut self, other: Self) {
-        self.buffer.combine(other.buffer)
-    }
-
-    pub fn get(&self, idx: usize) -> Option<&A> {
-        self.buffer.get(idx)
-    }
-
-    pub fn get_mut(&mut self, idx: usize) -> Option<&mut A> {
-        self.buffer.get_mut(idx)
-    }
-}
-
 /// Represents a homogenous list of nodes.
 #[derive(Clone, Debug)]
-pub(crate) enum ChildList<A: Clone + Debug> {
+pub(crate) enum AnnotatedChildList<A: Clone + Debug> {
     Leaves(CircularBuffer<Rc<Leaf<A>>>),
-    Internals(CircularBuffer<Rc<Internal<A>>>),
+    Internals(CircularBuffer<Rc<AnnotatedInternal<A>>>),
 }
 
-impl<A: Clone + Debug> ChildList<A> {
+impl<A: Clone + Debug> AnnotatedChildList<A> {
     /// Constructs a new empty list of nodes.
     pub fn new_empty(&self) -> Self {
         match self {
-            ChildList::Internals(_) => ChildList::Internals(CircularBuffer::new()),
-            ChildList::Leaves(_) => ChildList::Leaves(CircularBuffer::new()),
+            AnnotatedChildList::Internals(_) => {
+                AnnotatedChildList::Internals(CircularBuffer::new())
+            }
+            AnnotatedChildList::Leaves(_) => AnnotatedChildList::Leaves(CircularBuffer::new()),
         }
     }
 
@@ -216,7 +33,7 @@ impl<A: Clone + Debug> ChildList<A> {
     ///
     /// Panics if `self` is not a list of leaf nodes.
     pub fn leaves(self) -> CircularBuffer<Rc<Leaf<A>>> {
-        if let ChildList::Leaves(x) = self {
+        if let AnnotatedChildList::Leaves(x) = self {
             x
         } else {
             panic!("Failed to unwrap a child list as a leaves list")
@@ -228,8 +45,8 @@ impl<A: Clone + Debug> ChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals(self) -> CircularBuffer<Rc<Internal<A>>> {
-        if let ChildList::Internals(x) = self {
+    pub fn internals(self) -> CircularBuffer<Rc<AnnotatedInternal<A>>> {
+        if let AnnotatedChildList::Internals(x) = self {
             x
         } else {
             panic!("Failed to unwrap a child list as an internals list")
@@ -242,7 +59,7 @@ impl<A: Clone + Debug> ChildList<A> {
     ///
     /// Panics if `self` is not a list of leaf nodes.
     pub fn leaves_ref(&self) -> &CircularBuffer<Rc<Leaf<A>>> {
-        if let ChildList::Leaves(x) = self {
+        if let AnnotatedChildList::Leaves(x) = self {
             x
         } else {
             panic!("Failed to unwrap a child list as a leaves list")
@@ -254,8 +71,8 @@ impl<A: Clone + Debug> ChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals_ref(&self) -> &CircularBuffer<Rc<Internal<A>>> {
-        if let ChildList::Internals(x) = self {
+    pub fn internals_ref(&self) -> &CircularBuffer<Rc<AnnotatedInternal<A>>> {
+        if let AnnotatedChildList::Internals(x) = self {
             x
         } else {
             panic!("Failed to unwrap a child list as an internals list")
@@ -268,7 +85,7 @@ impl<A: Clone + Debug> ChildList<A> {
     ///
     /// Panics if `self` is not a list of leaf nodes.
     pub fn leaves_mut(&mut self) -> &mut CircularBuffer<Rc<Leaf<A>>> {
-        if let ChildList::Leaves(x) = self {
+        if let AnnotatedChildList::Leaves(x) = self {
             x
         } else {
             panic!("Failed to unwrap a child list as a leaves list")
@@ -280,18 +97,22 @@ impl<A: Clone + Debug> ChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals_mut(&mut self) -> &mut CircularBuffer<Rc<Internal<A>>> {
-        if let ChildList::Internals(x) = self {
+    pub fn internals_mut(&mut self) -> &mut CircularBuffer<Rc<AnnotatedInternal<A>>> {
+        if let AnnotatedChildList::Internals(x) = self {
             x
         } else {
             panic!("Failed to unwrap a child list as an internals list")
         }
     }
 
-    pub fn borrow(&mut self) -> BorrowedChildList<A> {
+    pub fn borrow(&mut self) -> BorrowedAnnotatedChildList<A> {
         match self {
-            ChildList::Internals(children) => BorrowedChildList::Internals(children.mutable_view()),
-            ChildList::Leaves(children) => BorrowedChildList::Leaves(children.mutable_view()),
+            AnnotatedChildList::Internals(children) => {
+                BorrowedAnnotatedChildList::Internals(children.mutable_view())
+            }
+            AnnotatedChildList::Leaves(children) => {
+                BorrowedAnnotatedChildList::Leaves(children.mutable_view())
+            }
         }
     }
 
@@ -302,36 +123,38 @@ impl<A: Clone + Debug> ChildList<A> {
     /// Panics if `self` is not a list of internal nodes.
     pub fn get(&self, child_idx: usize, idx: usize) -> Option<&A> {
         match self {
-            ChildList::Leaves(children) => children.get(child_idx).unwrap().get(idx),
-            ChildList::Internals(children) => children.get(child_idx).unwrap().get(idx),
+            AnnotatedChildList::Leaves(children) => children.get(child_idx).unwrap().get(idx),
+            AnnotatedChildList::Internals(children) => children.get(child_idx).unwrap().get(idx),
         }
     }
 
     pub fn get_mut(&mut self, child_idx: usize, idx: usize) -> Option<&mut A> {
         match self {
-            ChildList::Leaves(children) => {
+            AnnotatedChildList::Leaves(children) => {
                 Rc::make_mut(children.get_mut(child_idx).unwrap()).get_mut(idx)
             }
-            ChildList::Internals(children) => {
+            AnnotatedChildList::Internals(children) => {
                 Rc::make_mut(children.get_mut(child_idx).unwrap()).get_mut(idx)
             }
         }
     }
 
     /// Returns a copy of the Rc of the node at the given position in the node.
-    pub fn get_child_node(&self, idx: usize) -> Option<NodeRc<A>> {
+    pub fn get_child_node(&self, idx: usize) -> Option<AnnotatedNodeRc<A>> {
         // TODO: Get rid of this function
         match self {
-            ChildList::Leaves(children) => children.get(idx).map(|x| Rc::clone(x).into()),
-            ChildList::Internals(children) => children.get(idx).map(|x| Rc::clone(x).into()),
+            AnnotatedChildList::Leaves(children) => children.get(idx).map(|x| Rc::clone(x).into()),
+            AnnotatedChildList::Internals(children) => {
+                children.get(idx).map(|x| Rc::clone(x).into())
+            }
         }
     }
 
     /// Returns the length of the child list.
     pub fn slots(&self) -> usize {
         match self {
-            ChildList::Leaves(children) => children.len(),
-            ChildList::Internals(children) => children.len(),
+            AnnotatedChildList::Leaves(children) => children.len(),
+            AnnotatedChildList::Internals(children) => children.len(),
         }
     }
 
@@ -342,19 +165,19 @@ impl<A: Clone + Debug> ChildList<A> {
 }
 
 #[derive(Debug)]
-pub(crate) enum BorrowedChildList<A: Clone + Debug> {
-    Internals(BorrowBufferMut<Rc<Internal<A>>>),
+pub(crate) enum BorrowedAnnotatedChildList<A: Clone + Debug> {
+    Internals(BorrowBufferMut<Rc<AnnotatedInternal<A>>>),
     Leaves(BorrowBufferMut<Rc<Leaf<A>>>),
 }
 
-impl<'a, A: Clone + Debug> BorrowedChildList<A> {
+impl<'a, A: Clone + Debug> BorrowedAnnotatedChildList<A> {
     /// Consumes `self` and returns the list as a list of leaf nodes.
     ///
     /// # Panics
     ///
     /// Panics if `self` is not a list of leaf nodes.
     pub fn leaves(self) -> BorrowBufferMut<Rc<Leaf<A>>> {
-        if let BorrowedChildList::Leaves(x) = self {
+        if let BorrowedAnnotatedChildList::Leaves(x) = self {
             x
         } else {
             panic!("Failed to unwrap a child list as a leaves list")
@@ -366,8 +189,8 @@ impl<'a, A: Clone + Debug> BorrowedChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals(self) -> BorrowBufferMut<Rc<Internal<A>>> {
-        if let BorrowedChildList::Internals(x) = self {
+    pub fn internals(self) -> BorrowBufferMut<Rc<AnnotatedInternal<A>>> {
+        if let BorrowedAnnotatedChildList::Internals(x) = self {
             x
         } else {
             panic!("Failed to unwrap a child list as an internals list")
@@ -380,7 +203,7 @@ impl<'a, A: Clone + Debug> BorrowedChildList<A> {
     ///
     /// Panics if `self` is not a list of leaf nodes.
     pub fn leaves_ref(&self) -> &BorrowBufferMut<Rc<Leaf<A>>> {
-        if let BorrowedChildList::Leaves(x) = self {
+        if let BorrowedAnnotatedChildList::Leaves(x) = self {
             x
         } else {
             panic!("Failed to unwrap a child list as a leaves list")
@@ -392,8 +215,8 @@ impl<'a, A: Clone + Debug> BorrowedChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals_ref(&self) -> &BorrowBufferMut<Rc<Internal<A>>> {
-        if let BorrowedChildList::Internals(x) = self {
+    pub fn internals_ref(&self) -> &BorrowBufferMut<Rc<AnnotatedInternal<A>>> {
+        if let BorrowedAnnotatedChildList::Internals(x) = self {
             x
         } else {
             panic!("Failed to unwrap a child list as an internals list")
@@ -406,7 +229,7 @@ impl<'a, A: Clone + Debug> BorrowedChildList<A> {
     ///
     /// Panics if `self` is not a list of leaf nodes.
     pub fn leaves_mut(&mut self) -> &mut BorrowBufferMut<Rc<Leaf<A>>> {
-        if let BorrowedChildList::Leaves(x) = self {
+        if let BorrowedAnnotatedChildList::Leaves(x) = self {
             x
         } else {
             panic!("Failed to unwrap a child list as a leaves list")
@@ -418,8 +241,8 @@ impl<'a, A: Clone + Debug> BorrowedChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals_mut(&mut self) -> &mut BorrowBufferMut<Rc<Internal<A>>> {
-        if let BorrowedChildList::Internals(x) = self {
+    pub fn internals_mut(&mut self) -> &mut BorrowBufferMut<Rc<AnnotatedInternal<A>>> {
+        if let BorrowedAnnotatedChildList::Internals(x) = self {
             x
         } else {
             panic!("Failed to unwrap a child list as an internals list")
@@ -428,81 +251,84 @@ impl<'a, A: Clone + Debug> BorrowedChildList<A> {
 
     fn empty(&mut self) -> Self {
         match self {
-            BorrowedChildList::Internals(children) => {
-                BorrowedChildList::Internals(children.empty())
+            BorrowedAnnotatedChildList::Internals(children) => {
+                BorrowedAnnotatedChildList::Internals(children.empty())
             }
-            BorrowedChildList::Leaves(children) => BorrowedChildList::Leaves(children.empty()),
+            BorrowedAnnotatedChildList::Leaves(children) => {
+                BorrowedAnnotatedChildList::Leaves(children.empty())
+            }
         }
     }
 
     fn split_at(&mut self, index: usize) -> Self {
         match self {
-            BorrowedChildList::Internals(ref mut children) => {
+            BorrowedAnnotatedChildList::Internals(ref mut children) => {
                 let new_children = children.split_at(index);
-                BorrowedChildList::Internals(new_children)
+                BorrowedAnnotatedChildList::Internals(new_children)
             }
-            BorrowedChildList::Leaves(ref mut children) => {
+            BorrowedAnnotatedChildList::Leaves(ref mut children) => {
                 let new_children = children.split_at(index);
-                BorrowedChildList::Leaves(new_children)
+                BorrowedAnnotatedChildList::Leaves(new_children)
             }
         }
     }
 
     fn len(&self) -> usize {
         match self {
-            BorrowedChildList::Internals(children) => children.len(),
-            BorrowedChildList::Leaves(children) => children.len(),
+            BorrowedAnnotatedChildList::Internals(children) => children.len(),
+            BorrowedAnnotatedChildList::Leaves(children) => children.len(),
         }
     }
 
     pub fn from_same_source(&self, other: &Self) -> bool {
         match (self, other) {
             (
-                BorrowedChildList::Internals(children),
-                BorrowedChildList::Internals(other_children),
+                BorrowedAnnotatedChildList::Internals(children),
+                BorrowedAnnotatedChildList::Internals(other_children),
             ) => children.from_same_source(other_children),
-            (BorrowedChildList::Leaves(children), BorrowedChildList::Leaves(other_children)) => {
-                children.from_same_source(other_children)
-            }
+            (
+                BorrowedAnnotatedChildList::Leaves(children),
+                BorrowedAnnotatedChildList::Leaves(other_children),
+            ) => children.from_same_source(other_children),
             _ => false,
         }
     }
 
     pub fn combine(&mut self, other: Self) {
         match self {
-            BorrowedChildList::Internals(children) => children.combine(other.internals()),
-            BorrowedChildList::Leaves(children) => children.combine(other.leaves()),
+            BorrowedAnnotatedChildList::Internals(children) => children.combine(other.internals()),
+            BorrowedAnnotatedChildList::Leaves(children) => children.combine(other.leaves()),
         }
     }
 
     pub(crate) fn range(&self) -> &Range<usize> {
         match self {
-            BorrowedChildList::Internals(children) => &children.range,
-            BorrowedChildList::Leaves(children) => &children.range,
+            BorrowedAnnotatedChildList::Internals(children) => &children.range,
+            BorrowedAnnotatedChildList::Leaves(children) => &children.range,
         }
     }
 
     pub(crate) fn range_mut(&mut self) -> &mut Range<usize> {
         match self {
-            BorrowedChildList::Internals(children) => &mut children.range,
-            BorrowedChildList::Leaves(children) => &mut children.range,
+            BorrowedAnnotatedChildList::Internals(children) => &mut children.range,
+            BorrowedAnnotatedChildList::Leaves(children) => &mut children.range,
         }
     }
 }
 
 /// An internal node indicates a non-terminal node in the tree.
 #[derive(Clone, Debug)]
-pub(crate) struct Internal<A: Clone + Debug> {
+pub(crate) struct AnnotatedInternal<A: Clone + Debug> {
     pub sizes: Rc<SizeTable>,
-    pub children: ChildList<A>,
+    pub children: AnnotatedChildList<A>,
 }
 
-impl<A: Clone + Debug> Internal<A> {
+impl<A: Clone + Debug> AnnotatedInternal<A> {
     /// Constructs a new empty internal node that is at level 1 in the tree.
     pub fn empty_leaves() -> Self {
-        Internal {
+        AnnotatedInternal {
             sizes: Rc::new(SizeTable::new(1)),
-            children: ChildList::Leaves(CircularBuffer::new()),
+            children: AnnotatedChildList::Leaves(CircularBuffer::new()),
         }
     }
 
@@ -512,16 +338,16 @@ impl<A: Clone + Debug> Internal<A> {
         if level == 1 {
             Self::empty_leaves()
         } else {
-            Internal {
+            AnnotatedInternal {
                 sizes: Rc::new(SizeTable::new(level)),
-                children: ChildList::Internals(CircularBuffer::new()),
+                children: AnnotatedChildList::Internals(CircularBuffer::new()),
             }
         }
     }
 
     /// Constructs a new internal node of the same level, but with no children.
     pub fn new_empty(&self) -> Self {
-        Internal {
+        AnnotatedInternal {
             sizes: Rc::new(SizeTable::new(self.sizes.level())),
             children: self.children.new_empty(),
         }
@@ -539,11 +365,11 @@ impl<A: Clone + Debug> Internal<A> {
     ) -> usize {
         debug_assert_eq!(self.level(), destination.level());
         let shared = match self.children {
-            ChildList::Internals(ref mut children) => {
+            AnnotatedChildList::Internals(ref mut children) => {
                 debug_assert_eq!(children.len(), self.sizes.len());
                 children.decant_into(destination.children.internals_mut(), share_side, len)
             }
-            ChildList::Leaves(ref mut children) => {
+            AnnotatedChildList::Leaves(ref mut children) => {
                 debug_assert_eq!(children.len(), self.sizes.len());
                 children.decant_into(destination.children.leaves_mut(), share_side, len)
             }
@@ -575,7 +401,7 @@ impl<A: Clone + Debug> Internal<A> {
         let mut write_position = 0;
         let mut read_position = write_position + 1;
         match self.children {
-            ChildList::Internals(ref mut children) => {
+            AnnotatedChildList::Internals(ref mut children) => {
                 while read_position < children.len() {
                     if read_position == write_position {
                         read_position += 1;
@@ -605,7 +431,7 @@ impl<A: Clone + Debug> Internal<A> {
                     sizes.push_child(Side::Back, child.len());
                 }
             }
-            ChildList::Leaves(ref mut children) => {
+            AnnotatedChildList::Leaves(ref mut children) => {
                 while read_position < children.len() {
                     if read_position == write_position {
                         read_position += 1;
@@ -667,10 +493,10 @@ impl<A: Clone + Debug> Internal<A> {
         let (array_idx, new_idx) = self.sizes.position_info_for(idx).unwrap();
 
         match &mut self.children {
-            ChildList::Internals(children) => {
+            AnnotatedChildList::Internals(children) => {
                 Rc::make_mut(children.get_mut(array_idx).unwrap()).update(new_idx, item)
             }
-            ChildList::Leaves(children) => {
+            AnnotatedChildList::Leaves(children) => {
                 Rc::make_mut(children.get_mut(array_idx).unwrap()).update(new_idx, item)
             }
         }
@@ -684,7 +510,7 @@ impl<A: Clone + Debug> Internal<A> {
     pub fn sort_by<F: FnMut(&A, &A) -> cmp::Ordering>(&mut self, range: Range<usize>, f: &mut F) {
         let mut start = 0;
         match self.children {
-            ChildList::Internals(ref mut children) => {
+            AnnotatedChildList::Internals(ref mut children) => {
                 for child in children {
                     let end = start + child.len();
                     if end > range.start && start < range.end {
@@ -695,7 +521,7 @@ impl<A: Clone + Debug> Internal<A> {
                     start = end;
                 }
             }
-            ChildList::Leaves(ref mut children) => {
+            AnnotatedChildList::Leaves(ref mut children) => {
                 for child in children {
                     let end = start + child.len();
                     if end > range.start && start < range.end {
@@ -708,8 +534,8 @@ impl<A: Clone + Debug> Internal<A> {
         }
     }
 
-    pub fn borrow(&mut self) -> BorrowedInternal<A> {
-        BorrowedInternal {
+    pub fn borrow(&mut self) -> BorrowedAnnotatedInternal<A> {
+        BorrowedAnnotatedInternal {
             children: self.children.borrow(),
             sizes: Rc::clone(&self.sizes),
         }
@@ -775,7 +601,7 @@ impl<A: Clone + Debug> Internal<A> {
     pub fn debug_check_lens_size_table(&self) -> usize {
         let mut cumulative_size = 0;
         match &self.children {
-            ChildList::Internals(children) => {
+            AnnotatedChildList::Internals(children) => {
                 debug_assert_eq!(self.sizes.len(), children.len());
                 for i in 0..children.len() {
                     debug_assert_eq!(
@@ -786,7 +612,7 @@ impl<A: Clone + Debug> Internal<A> {
                 }
                 cumulative_size
             }
-            ChildList::Leaves(children) => {
+            AnnotatedChildList::Leaves(children) => {
                 debug_assert_eq!(self.sizes.len(), children.len());
                 for i in 0..children.len() {
                     debug_assert_eq!(
@@ -803,12 +629,12 @@ impl<A: Clone + Debug> Internal<A> {
     /// Checks whether the node's heights and heights of its children make sense.
     pub fn debug_check_child_heights(&self) -> usize {
         match &self.children {
-            ChildList::Internals(children) => {
+            AnnotatedChildList::Internals(children) => {
                 for i in children {
                     debug_assert_eq!(i.debug_check_child_heights() + 1, self.level());
                 }
             }
-            ChildList::Leaves(children) => {
+            AnnotatedChildList::Leaves(children) => {
                 for i in children {
                     debug_assert_eq!(i.debug_check_child_heights() + 1, self.level());
                 }
@@ -825,19 +651,19 @@ impl<A: Clone + Debug> Internal<A> {
     }
 }
 
-impl<A: Clone + Debug + PartialEq> Internal<A> {
+impl<A: Clone + Debug + PartialEq> AnnotatedInternal<A> {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
     pub(crate) fn equal_iter<'a>(&self, iter: &mut std::slice::Iter<'a, A>) -> bool {
         match self.children {
-            ChildList::Internals(ref children) => {
+            AnnotatedChildList::Internals(ref children) => {
                 for child in children {
                     if !child.equal_iter(iter) {
                         return false;
                     }
                 }
             }
-            ChildList::Leaves(ref children) => {
+            AnnotatedChildList::Leaves(ref children) => {
                 for child in children {
                     if !child.equal_iter(iter) {
                         return false;
@@ -852,12 +678,12 @@ impl<A: Clone + Debug + PartialEq> Internal<A> {
     /// debugging purposes.
     pub(crate) fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, A>) {
         match self.children {
-            ChildList::Internals(ref children) => {
+            AnnotatedChildList::Internals(ref children) => {
                 for child in children {
                     child.equal_iter_debug(iter);
                 }
             }
-            ChildList::Leaves(ref children) => {
+            AnnotatedChildList::Leaves(ref children) => {
                 for child in children {
                     child.equal_iter_debug(iter);
                 }
@@ -867,14 +693,14 @@ impl<A: Clone + Debug + PartialEq> Internal<A> {
 }
 
 #[derive(Debug)]
-pub(crate) struct BorrowedInternal<A: Clone + Debug> {
+pub(crate) struct BorrowedAnnotatedInternal<A: Clone + Debug> {
     pub(crate) sizes: Rc<SizeTable>,
-    pub(crate) children: BorrowedChildList<A>,
+    pub(crate) children: BorrowedAnnotatedChildList<A>,
 }
 
-impl<'a, A: Clone + Debug> BorrowedInternal<A> {
+impl<'a, A: Clone + Debug> BorrowedAnnotatedInternal<A> {
     fn empty(&mut self) -> Self {
-        BorrowedInternal {
+        BorrowedAnnotatedInternal {
             sizes: Rc::clone(&self.sizes),
             children: self.children.empty(),
         }
@@ -932,7 +758,7 @@ impl<'a, A: Clone + Debug> BorrowedInternal<A> {
 
     pub fn split_at_child(&mut self, index: usize) -> Self {
         let new_children = self.children.split_at(index);
-        BorrowedInternal {
+        BorrowedAnnotatedInternal {
             children: new_children,
             sizes: Rc::clone(&self.sizes),
         }
@@ -941,7 +767,7 @@ impl<'a, A: Clone + Debug> BorrowedInternal<A> {
     pub fn debug_check_lens_size_table(&self) -> usize {
         let mut cumulative_size = 0;
         match &self.children {
-            BorrowedChildList::Internals(children) => {
+            BorrowedAnnotatedChildList::Internals(children) => {
                 // debug_assert_eq!(self.sizes.len(), children.len());
                 for i in 0..children.len() {
                     // println!(
@@ -957,7 +783,7 @@ impl<'a, A: Clone + Debug> BorrowedInternal<A> {
                 }
                 cumulative_size
             }
-            BorrowedChildList::Leaves(children) => {
+            BorrowedAnnotatedChildList::Leaves(children) => {
                 // debug_assert_eq!(self.sizes.len(), children.len());
                 for i in 0..children.len() {
                     // println!(
@@ -979,17 +805,17 @@ impl<'a, A: Clone + Debug> BorrowedInternal<A> {
 
 /// Represents an arbitrary node in the tree.
 #[derive(Clone, Debug)]
-pub(crate) enum NodeRc<A: Clone + Debug> {
+pub(crate) enum AnnotatedNodeRc<A: Clone + Debug> {
     Leaf(Rc<Leaf<A>>),
-    Internal(Rc<Internal<A>>),
+    Internal(Rc<AnnotatedInternal<A>>),
 }
 
-impl<A: Clone + Debug> NodeRc<A> {
+impl<A: Clone + Debug> AnnotatedNodeRc<A> {
     /// Constructs a new empty of the same level.
     pub fn new_empty(&self) -> Self {
         match self {
-            NodeRc::Internal(x) => Rc::new(x.new_empty()).into(),
-            NodeRc::Leaf(_) => Rc::new(Leaf::empty()).into(),
+            AnnotatedNodeRc::Internal(x) => Rc::new(x.new_empty()).into(),
+            AnnotatedNodeRc::Leaf(_) => Rc::new(Leaf::empty()).into(),
         }
     }
 
@@ -1004,7 +830,7 @@ impl<A: Clone + Debug> NodeRc<A> {
         len: usize,
     ) -> usize {
         match self {
-            NodeRc::Internal(ref mut origin_internal) => {
+            AnnotatedNodeRc::Internal(ref mut origin_internal) => {
                 let destination_internal = Rc::make_mut(destination.internal_mut());
                 Rc::make_mut(origin_internal).share_children_with(
                     destination_internal,
@@ -1012,7 +838,7 @@ impl<A: Clone + Debug> NodeRc<A> {
                     len,
                 )
             }
-            NodeRc::Leaf(ref mut origin_leaf) => {
+            AnnotatedNodeRc::Leaf(ref mut origin_leaf) => {
                 let destination_leaf = Rc::make_mut(destination.leaf_mut());
                 Rc::make_mut(origin_leaf).share_children_with(destination_leaf, share_side, len)
             }
@@ -1022,23 +848,23 @@ impl<A: Clone + Debug> NodeRc<A> {
     /// Returns the size of the of node.
     pub fn len(&self) -> usize {
         match self {
-            NodeRc::Leaf(x) => x.len(),
-            NodeRc::Internal(x) => x.len(),
+            AnnotatedNodeRc::Leaf(x) => x.len(),
+            AnnotatedNodeRc::Internal(x) => x.len(),
         }
     }
 
     /// Returns a reference to the size table if it has one.
     pub fn size_table_ref(&self) -> Option<&SizeTable> {
         match self {
-            NodeRc::Leaf(_) => None,
-            NodeRc::Internal(x) => Some(&x.sizes),
+            AnnotatedNodeRc::Leaf(_) => None,
+            AnnotatedNodeRc::Internal(x) => Some(&x.sizes),
         }
     }
 
     /// Returns the number of direct children of the node.
     pub fn slots(&self) -> usize {
         match self {
-            NodeRc::Leaf(x) => x.len(),
+            AnnotatedNodeRc::Leaf(x) => x.len(),
             _ => self.size_table_ref().unwrap().len(),
         }
     }
@@ -1046,56 +872,56 @@ impl<A: Clone + Debug> NodeRc<A> {
     /// Returns whether the node is completely empty.
     pub fn is_empty(&self) -> bool {
         match self {
-            NodeRc::Leaf(x) => x.is_empty(),
-            NodeRc::Internal(x) => x.is_empty(),
+            AnnotatedNodeRc::Leaf(x) => x.is_empty(),
+            AnnotatedNodeRc::Internal(x) => x.is_empty(),
         }
     }
 
     /// Returns the level of the node.
     pub fn level(&self) -> usize {
         match self {
-            NodeRc::Leaf(x) => x.level(),
-            NodeRc::Internal(x) => x.level(),
+            AnnotatedNodeRc::Leaf(x) => x.level(),
+            AnnotatedNodeRc::Internal(x) => x.level(),
         }
     }
 
     /// Tests whether the node is a leaf.
     pub fn is_leaf(&self) -> bool {
         match self {
-            NodeRc::Leaf(x) => x.is_leaf(),
-            NodeRc::Internal(x) => x.is_leaf(),
+            AnnotatedNodeRc::Leaf(x) => x.is_leaf(),
+            AnnotatedNodeRc::Internal(x) => x.is_leaf(),
         }
     }
 
     /// Returns the element at the given position in the node.
     pub fn get(&self, idx: usize) -> Option<&A> {
         match self {
-            NodeRc::Leaf(x) => x.get(idx),
-            NodeRc::Internal(x) => x.get(idx),
+            AnnotatedNodeRc::Leaf(x) => x.get(idx),
+            AnnotatedNodeRc::Internal(x) => x.get(idx),
         }
     }
 
     /// Returns the element at the given position in the node.
     pub fn get_mut(&mut self, idx: usize) -> Option<&mut A> {
         match self {
-            NodeRc::Leaf(ref mut x) => Rc::make_mut(x).get_mut(idx),
-            NodeRc::Internal(ref mut x) => Rc::make_mut(x).get_mut(idx),
+            AnnotatedNodeRc::Leaf(ref mut x) => Rc::make_mut(x).get_mut(idx),
+            AnnotatedNodeRc::Internal(ref mut x) => Rc::make_mut(x).get_mut(idx),
         }
     }
 
     /// Returns the number of elements that can be inserted into this node.
     pub fn free_space(&self) -> usize {
         match self {
-            NodeRc::Leaf(x) => x.free_space(),
-            NodeRc::Internal(x) => x.free_space(),
+            AnnotatedNodeRc::Leaf(x) => x.free_space(),
+            AnnotatedNodeRc::Internal(x) => x.free_space(),
         }
     }
 
     /// Returns the number of children that can be inserted into this node.
     pub fn free_slots(&self) -> usize {
         match self {
-            NodeRc::Leaf(x) => x.free_slots(),
-            NodeRc::Internal(x) => x.free_slots(),
+            AnnotatedNodeRc::Leaf(x) => x.free_slots(),
+            AnnotatedNodeRc::Internal(x) => x.free_slots(),
         }
     }
 
@@ -1105,7 +931,7 @@ impl<A: Clone + Debug> NodeRc<A> {
     ///
     /// Panics if `self` is not a leaf node.
     pub fn leaf(self) -> Rc<Leaf<A>> {
-        if let NodeRc::Leaf(x) = self {
+        if let AnnotatedNodeRc::Leaf(x) = self {
             x
         } else {
             panic!("Failed to unwrap a node as a leaf node")
@@ -1117,8 +943,8 @@ impl<A: Clone + Debug> NodeRc<A> {
     /// # Panics
     ///
     /// Panics if `self` is not an internal node.
-    pub fn internal(self) -> Rc<Internal<A>> {
-        if let NodeRc::Internal(x) = self {
+    pub fn internal(self) -> Rc<AnnotatedInternal<A>> {
+        if let AnnotatedNodeRc::Internal(x) = self {
             x
         } else {
             panic!("Failed to unwrap a node as an internal node")
@@ -1131,7 +957,7 @@ impl<A: Clone + Debug> NodeRc<A> {
     ///
     /// Panics if `self` is not a leaf node.
     pub fn leaf_ref(&self) -> &Rc<Leaf<A>> {
-        if let NodeRc::Leaf(x) = self {
+        if let AnnotatedNodeRc::Leaf(x) = self {
             x
         } else {
             panic!("Failed to unwrap a node as a leaf node")
@@ -1143,8 +969,8 @@ impl<A: Clone + Debug> NodeRc<A> {
     /// # Panics
     ///
     /// Panics if `self` is not an internal node.
-    pub fn internal_ref(&self) -> &Rc<Internal<A>> {
-        if let NodeRc::Internal(x) = self {
+    pub fn internal_ref(&self) -> &Rc<AnnotatedInternal<A>> {
+        if let AnnotatedNodeRc::Internal(x) = self {
             x
         } else {
             panic!("Failed to unwrap a node as an internal node")
@@ -1157,7 +983,7 @@ impl<A: Clone + Debug> NodeRc<A> {
     ///
     /// Panics if `self` is not a leaf node.
     pub fn leaf_mut(&mut self) -> &mut Rc<Leaf<A>> {
-        if let NodeRc::Leaf(x) = self {
+        if let AnnotatedNodeRc::Leaf(x) = self {
             x
         } else {
             panic!("Failed to unwrap a node as a leaf node")
@@ -1169,24 +995,26 @@ impl<A: Clone + Debug> NodeRc<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a internal node.
-    pub fn internal_mut(&mut self) -> &mut Rc<Internal<A>> {
-        if let NodeRc::Internal(x) = self {
+    pub fn internal_mut(&mut self) -> &mut Rc<AnnotatedInternal<A>> {
+        if let AnnotatedNodeRc::Internal(x) = self {
             x
         } else {
             panic!("Failed to unwrap a node as an internal node")
         }
     }
 
-    pub fn borrow(&mut self) -> BorrowedNode<A> {
+    pub fn borrow(&mut self) -> BorrowedAnnotatedNode<A> {
         match self {
-            NodeRc::Internal(internal) => BorrowedNode::Internal(Rc::make_mut(internal).borrow()),
-            NodeRc::Leaf(leaf) => BorrowedNode::Leaf(Rc::make_mut(leaf).borrow()),
+            AnnotatedNodeRc::Internal(internal) => {
+                BorrowedAnnotatedNode::Internal(Rc::make_mut(internal).borrow())
+            }
+            AnnotatedNodeRc::Leaf(leaf) => BorrowedAnnotatedNode::Leaf(Rc::make_mut(leaf).borrow()),
         }
     }
 
     /// Checks internal invariants of the node.
     pub fn debug_check_invariants(&self) -> bool {
-        if let NodeRc::Internal(internal) = self {
+        if let AnnotatedNodeRc::Internal(internal) = self {
             internal.debug_check_invariants()
         } else {
             true
@@ -1194,13 +1022,13 @@ impl<A: Clone + Debug> NodeRc<A> {
     }
 }
 
-impl<A: Clone + Debug + PartialEq> NodeRc<A> {
+impl<A: Clone + Debug + PartialEq> AnnotatedNodeRc<A> {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
     pub(crate) fn equal_iter<'a>(&self, iter: &mut std::slice::Iter<'a, A>) -> bool {
         match self {
-            NodeRc::Internal(ref internal) => internal.equal_iter(iter),
-            NodeRc::Leaf(ref leaf) => leaf.equal_iter(iter),
+            AnnotatedNodeRc::Internal(ref internal) => internal.equal_iter(iter),
+            AnnotatedNodeRc::Leaf(ref leaf) => leaf.equal_iter(iter),
         }
     }
 
@@ -1208,55 +1036,57 @@ impl<A: Clone + Debug + PartialEq> NodeRc<A> {
     /// debugging purposes.
     pub(crate) fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, A>) {
         match self {
-            NodeRc::Internal(ref internal) => internal.equal_iter_debug(iter),
-            NodeRc::Leaf(ref leaf) => leaf.equal_iter_debug(iter),
+            AnnotatedNodeRc::Internal(ref internal) => internal.equal_iter_debug(iter),
+            AnnotatedNodeRc::Leaf(ref leaf) => leaf.equal_iter_debug(iter),
         }
     }
 }
 
-impl<A: Clone + Debug> From<Rc<Leaf<A>>> for NodeRc<A> {
-    fn from(t: Rc<Leaf<A>>) -> NodeRc<A> {
-        NodeRc::Leaf(t)
+impl<A: Clone + Debug> From<Rc<Leaf<A>>> for AnnotatedNodeRc<A> {
+    fn from(t: Rc<Leaf<A>>) -> AnnotatedNodeRc<A> {
+        AnnotatedNodeRc::Leaf(t)
     }
 }
 
-impl<A: Clone + Debug> From<Rc<Internal<A>>> for NodeRc<A> {
-    fn from(t: Rc<Internal<A>>) -> NodeRc<A> {
-        NodeRc::Internal(t)
+impl<A: Clone + Debug> From<Rc<AnnotatedInternal<A>>> for AnnotatedNodeRc<A> {
+    fn from(t: Rc<AnnotatedInternal<A>>) -> AnnotatedNodeRc<A> {
+        AnnotatedNodeRc::Internal(t)
     }
 }
 
 #[derive(Debug)]
-pub(crate) enum BorrowedNode<A: Clone + Debug> {
-    Internal(BorrowedInternal<A>),
+pub(crate) enum BorrowedAnnotatedNode<A: Clone + Debug> {
+    Internal(BorrowedAnnotatedInternal<A>),
     Leaf(BorrowedLeaf<A>),
 }
 
-impl<A: Clone + Debug> BorrowedNode<A> {
+impl<A: Clone + Debug> BorrowedAnnotatedNode<A> {
     pub fn empty(&mut self) -> Self {
         match self {
-            BorrowedNode::Internal(internal) => BorrowedNode::Internal(internal.empty()),
-            BorrowedNode::Leaf(leaf) => BorrowedNode::Leaf(leaf.empty()),
+            BorrowedAnnotatedNode::Internal(internal) => {
+                BorrowedAnnotatedNode::Internal(internal.empty())
+            }
+            BorrowedAnnotatedNode::Leaf(leaf) => BorrowedAnnotatedNode::Leaf(leaf.empty()),
         }
     }
 
     pub fn len(&self) -> usize {
         match self {
-            BorrowedNode::Internal(internal) => internal.len(),
-            BorrowedNode::Leaf(leaf) => leaf.len(),
+            BorrowedAnnotatedNode::Internal(internal) => internal.len(),
+            BorrowedAnnotatedNode::Leaf(leaf) => leaf.len(),
         }
     }
 
     pub fn level(&self) -> usize {
         match self {
-            BorrowedNode::Internal(internal) => internal.level(),
-            BorrowedNode::Leaf(leaf) => leaf.level(),
+            BorrowedAnnotatedNode::Internal(internal) => internal.level(),
+            BorrowedAnnotatedNode::Leaf(leaf) => leaf.level(),
         }
     }
 
-    pub fn make_spine(&mut self, side: Side) -> Vec<NodeRc<A>> {
+    pub fn make_spine(&mut self, side: Side) -> Vec<AnnotatedNodeRc<A>> {
         let mut spine = Vec::new();
-        if let BorrowedNode::Internal(ref mut internal) = self {
+        if let BorrowedAnnotatedNode::Internal(ref mut internal) = self {
             let idx = if side == Side::Front {
                 0
             } else {
@@ -1264,15 +1094,17 @@ impl<A: Clone + Debug> BorrowedNode<A> {
             };
             unsafe {
                 let child = match &mut internal.children {
-                    BorrowedChildList::Internals(children) => {
-                        NodeRc::Internal(children.take_item(idx))
+                    BorrowedAnnotatedChildList::Internals(children) => {
+                        AnnotatedNodeRc::Internal(children.take_item(idx))
                     }
-                    BorrowedChildList::Leaves(children) => NodeRc::Leaf(children.take_item(idx)),
+                    BorrowedAnnotatedChildList::Leaves(children) => {
+                        AnnotatedNodeRc::Leaf(children.take_item(idx))
+                    }
                 };
                 spine.push(child);
             }
         }
-        while let NodeRc::Internal(internal) = spine.last_mut().unwrap() {
+        while let AnnotatedNodeRc::Internal(internal) = spine.last_mut().unwrap() {
             let idx = if side == Side::Front {
                 0
             } else {
@@ -1280,10 +1112,12 @@ impl<A: Clone + Debug> BorrowedNode<A> {
             };
             unsafe {
                 let child = match Rc::make_mut(internal).children {
-                    ChildList::Internals(ref mut children) => {
-                        NodeRc::Internal(children.take_item(idx))
+                    AnnotatedChildList::Internals(ref mut children) => {
+                        AnnotatedNodeRc::Internal(children.take_item(idx))
                     }
-                    ChildList::Leaves(ref mut children) => NodeRc::Leaf(children.take_item(idx)),
+                    AnnotatedChildList::Leaves(ref mut children) => {
+                        AnnotatedNodeRc::Leaf(children.take_item(idx))
+                    }
                 };
                 spine.push(child);
             }
@@ -1300,12 +1134,12 @@ impl<A: Clone + Debug> BorrowedNode<A> {
         }
         let shared: Vec<Self> = Vec::new();
         // let result
-        if let BorrowedNode::Internal(internal) = self {}
+        if let BorrowedAnnotatedNode::Internal(internal) = self {}
         unimplemented!();
     }
 
     pub fn leaf(self) -> BorrowedLeaf<A> {
-        if let BorrowedNode::Leaf(x) = self {
+        if let BorrowedAnnotatedNode::Leaf(x) = self {
             x
         } else {
             panic!("Failed to unwrap a node as a leaf node")
@@ -1317,8 +1151,8 @@ impl<A: Clone + Debug> BorrowedNode<A> {
     /// # Panics
     ///
     /// Panics if `self` is not an internal node.
-    pub fn internal(self) -> BorrowedInternal<A> {
-        if let BorrowedNode::Internal(x) = self {
+    pub fn internal(self) -> BorrowedAnnotatedInternal<A> {
+        if let BorrowedAnnotatedNode::Internal(x) = self {
             x
         } else {
             panic!("Failed to unwrap a node as an internal node")
@@ -1331,7 +1165,7 @@ impl<A: Clone + Debug> BorrowedNode<A> {
     ///
     /// Panics if `self` is not a leaf node.
     pub fn leaf_ref(&self) -> &BorrowedLeaf<A> {
-        if let BorrowedNode::Leaf(x) = self {
+        if let BorrowedAnnotatedNode::Leaf(x) = self {
             x
         } else {
             panic!("Failed to unwrap a node as a leaf node")
@@ -1343,8 +1177,8 @@ impl<A: Clone + Debug> BorrowedNode<A> {
     /// # Panics
     ///
     /// Panics if `self` is not an internal node.
-    pub fn internal_ref(&self) -> &BorrowedInternal<A> {
-        if let BorrowedNode::Internal(x) = self {
+    pub fn internal_ref(&self) -> &BorrowedAnnotatedInternal<A> {
+        if let BorrowedAnnotatedNode::Internal(x) = self {
             x
         } else {
             panic!("Failed to unwrap a node as an internal node")
@@ -1357,7 +1191,7 @@ impl<A: Clone + Debug> BorrowedNode<A> {
     ///
     /// Panics if `self` is not a leaf node.
     pub fn leaf_mut(&mut self) -> &mut BorrowedLeaf<A> {
-        if let BorrowedNode::Leaf(x) = self {
+        if let BorrowedAnnotatedNode::Leaf(x) = self {
             x
         } else {
             panic!("Failed to unwrap a node as a leaf node")
@@ -1369,8 +1203,8 @@ impl<A: Clone + Debug> BorrowedNode<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a internal node.
-    pub fn internal_mut(&mut self) -> &mut BorrowedInternal<A> {
-        if let BorrowedNode::Internal(x) = self {
+    pub fn internal_mut(&mut self) -> &mut BorrowedAnnotatedInternal<A> {
+        if let BorrowedAnnotatedNode::Internal(x) = self {
             x
         } else {
             panic!("Failed to unwrap a node as an internal node")
@@ -1379,25 +1213,27 @@ impl<A: Clone + Debug> BorrowedNode<A> {
 
     pub fn from_same_source(&self, other: &Self) -> bool {
         match (self, other) {
-            (BorrowedNode::Internal(node), BorrowedNode::Internal(other)) => {
+            (BorrowedAnnotatedNode::Internal(node), BorrowedAnnotatedNode::Internal(other)) => {
                 node.from_same_source(other)
             }
-            (BorrowedNode::Leaf(node), BorrowedNode::Leaf(other)) => node.from_same_source(other),
+            (BorrowedAnnotatedNode::Leaf(node), BorrowedAnnotatedNode::Leaf(other)) => {
+                node.from_same_source(other)
+            }
             _ => false,
         }
     }
 
     pub fn combine(&mut self, other: Self) {
         match self {
-            BorrowedNode::Internal(internal) => internal.combine(other.internal()),
-            BorrowedNode::Leaf(internal) => internal.combine(other.leaf()),
+            BorrowedAnnotatedNode::Internal(internal) => internal.combine(other.internal()),
+            BorrowedAnnotatedNode::Leaf(internal) => internal.combine(other.leaf()),
         }
     }
 
     pub fn assert_size_invariants(&self) -> usize {
         match self {
-            BorrowedNode::Internal(internal) => internal.debug_check_lens_size_table(),
-            BorrowedNode::Leaf(leaf) => leaf.len(),
+            BorrowedAnnotatedNode::Internal(internal) => internal.debug_check_lens_size_table(),
+            BorrowedAnnotatedNode::Leaf(leaf) => leaf.len(),
         }
     }
 }

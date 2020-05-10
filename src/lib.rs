@@ -29,6 +29,7 @@
 #![deny(missing_docs)]
 #![cfg_attr(feature = "may_dangle", feature(dropck_eyepatch))]
 
+mod annotated_nodes;
 mod annotation_table;
 mod circular;
 mod nodes;

@@ -1229,4 +1229,13 @@ mod test {
         buffer.front_mut().unwrap().push('l');
         assert_eq!(s, "derpl");
     }
+
+    #[test]
+    fn zst_buffer() {
+        let mut buffer: CircularBuffer<()> = CircularBuffer::new();
+        assert_eq!(mem::size_of_val(&buffer), 16); // We need to allocate 2 usizes for front and len
+        buffer.push_back(());
+        assert_eq!(buffer.try_pop_back(), Ok(()));
+        assert_eq!(buffer.try_pop_back(), Err(()));
+    }
 }
