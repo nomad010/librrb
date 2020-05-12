@@ -1788,6 +1788,132 @@ impl<A: Clone + Debug> Vector<A> {
         self.equal_range_in_range_by(f, ..)
     }
 
+    /// Finds the range in the given subrange of the vector that is equal to the given value. The
+    /// given index must corresponds to a single element that compares equal. For this method to
+    /// work the subrange must be sorted with respect to the natural ordering.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// # use std::cmp::Ordering;
+    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
+    /// assert_eq!(v.equal_range_in_range(&1, 0..3), Ok(1..3));
+    /// ```
+    pub fn equal_range_in_range<K, R>(&self, value: &K, range: R) -> Result<Range<usize>, usize>
+    where
+        A: Borrow<K>,
+        K: Ord,
+        R: RangeBounds<usize>,
+    {
+        let f = |x: &K| x.cmp(value);
+        self.equal_range_in_range_by(&f, range)
+    }
+
+    /// Finds the range in the given subrange of the vector that corresponds to Ordering::Equal.
+    /// The given index must corresponds to a single element that compares equal. For this method to
+    /// work the subrange must be sorted with respect to the natural ordering.
+    ///
+    /// If the index does not compare equal this will return an empty range. Otherwise, this will
+    /// return the range that covers the equal elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// # use std::cmp::Ordering;
+    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
+    /// assert_eq!(v.equal_range(&1), Ok(1..3));
+    /// ```
+    pub fn equal_range<K>(&self, value: &K) -> Result<Range<usize>, usize>
+    where
+        A: Borrow<K>,
+        K: Ord,
+    {
+        let f = |x: &K| x.cmp(value);
+        self.equal_range_in_range_by(&f, ..)
+    }
+
+    /// Finds the range in the subbrange of the vector that corresponds that is between the two
+    /// given bounds. For this method to work the subrange must be sorted with respect to the
+    /// natural ordering.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// # use std::cmp::Ordering;
+    /// # use std::ops::Bound;
+    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
+    /// assert_eq!(v.between_range_in_range(Bound::Included(&1), Bound::Unbounded, 0..3), Ok(1..3));
+    /// ```
+    pub fn between_range_in_range<K, R>(
+        &self,
+        start: Bound<&K>,
+        end: Bound<&K>,
+        range: R,
+    ) -> Result<Range<usize>, usize>
+    where
+        A: Borrow<K>,
+        K: Ord,
+        R: RangeBounds<usize>,
+    {
+        let f = |x: &K| {
+            match start {
+                Bound::Excluded(b) => {
+                    if x <= b {
+                        return cmp::Ordering::Less;
+                    }
+                }
+                Bound::Included(b) => {
+                    if x < b {
+                        return cmp::Ordering::Less;
+                    }
+                }
+                _ => {}
+            }
+            match end {
+                Bound::Excluded(b) => {
+                    if x >= b {
+                        return cmp::Ordering::Greater;
+                    }
+                }
+                Bound::Included(b) => {
+                    if x > b {
+                        return cmp::Ordering::Greater;
+                    }
+                }
+                _ => {}
+            }
+            cmp::Ordering::Equal
+        };
+        self.equal_range_in_range_by(&f, range)
+    }
+
+    /// Finds the range in the vector that corresponds that is between the two given bounds. For
+    /// this method to work the subrange must be sorted with respect to the natural ordering.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// # use std::cmp::Ordering;
+    /// # use std::ops::Bound;
+    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
+    /// assert_eq!(v.between_range(Bound::Included(&3), Bound::Unbounded), Ok(4..9));
+    /// ```
+    pub fn between_range<K>(&self, start: Bound<&K>, end: Bound<&K>) -> Result<Range<usize>, usize>
+    where
+        A: Borrow<K>,
+        K: Ord,
+    {
+        self.between_range_in_range(start, end, ..)
+    }
+
     /// Sorts a range of the sequence by the given comparator.
     ///
     /// # Examples
@@ -2273,120 +2399,6 @@ impl<A: Clone + Debug + Ord> Vector<A> {
     {
         self.dual_sort_range_by(&Ord::cmp, range, secondary)
     }
-
-    /// Finds the range in the given subrange of the vector that is equal to the given value. The
-    /// given index must corresponds to a single element that compares equal. For this method to
-    /// work the subrange must be sorted with respect to the natural ordering.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #[macro_use] extern crate librrb;
-    /// # use librrb::Vector;
-    /// # use std::cmp::Ordering;
-    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
-    /// assert_eq!(v.equal_range_in_range(&1, 0..3), Ok(1..3));
-    /// ```
-    pub fn equal_range_in_range<R>(&self, value: &A, range: R) -> Result<Range<usize>, usize>
-    where
-        R: RangeBounds<usize>,
-    {
-        let f = |x: &A| x.cmp(value);
-        self.equal_range_in_range_by(&f, range)
-    }
-
-    /// Finds the range in the given subrange of the vector that corresponds to Ordering::Equal.
-    /// The given index must corresponds to a single element that compares equal. For this method to
-    /// work the subrange must be sorted with respect to the natural ordering.
-    ///
-    /// If the index does not compare equal this will return an empty range. Otherwise, this will
-    /// return the range that covers the equal elements.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #[macro_use] extern crate librrb;
-    /// # use librrb::Vector;
-    /// # use std::cmp::Ordering;
-    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
-    /// assert_eq!(v.equal_range(&1), Ok(1..3));
-    /// ```
-    pub fn equal_range(&self, value: &A) -> Result<Range<usize>, usize> {
-        let f = |x: &A| x.cmp(value);
-        self.equal_range_in_range_by(&f, ..)
-    }
-
-    /// Finds the range in the subbrange of the vector that corresponds that is between the two
-    /// given bounds. For this method to work the subrange must be sorted with respect to the
-    /// natural ordering.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #[macro_use] extern crate librrb;
-    /// # use librrb::Vector;
-    /// # use std::cmp::Ordering;
-    /// # use std::ops::Bound;
-    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
-    /// assert_eq!(v.between_range_in_range(Bound::Included(&1), Bound::Unbounded, 0..3), Ok(1..3));
-    /// ```
-    pub fn between_range_in_range<R>(
-        &self,
-        start: Bound<&A>,
-        end: Bound<&A>,
-        range: R,
-    ) -> Result<Range<usize>, usize>
-    where
-        R: RangeBounds<usize>,
-    {
-        let f = |x: &A| {
-            match start {
-                Bound::Excluded(b) => {
-                    if x <= b {
-                        return cmp::Ordering::Less;
-                    }
-                }
-                Bound::Included(b) => {
-                    if x < b {
-                        return cmp::Ordering::Less;
-                    }
-                }
-                _ => {}
-            }
-            match end {
-                Bound::Excluded(b) => {
-                    if x >= b {
-                        return cmp::Ordering::Greater;
-                    }
-                }
-                Bound::Included(b) => {
-                    if x > b {
-                        return cmp::Ordering::Greater;
-                    }
-                }
-                _ => {}
-            }
-            cmp::Ordering::Equal
-        };
-        self.equal_range_in_range_by(&f, range)
-    }
-
-    /// Finds the range in the vector that corresponds that is between the two given bounds. For
-    /// this method to work the subrange must be sorted with respect to the natural ordering.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #[macro_use] extern crate librrb;
-    /// # use librrb::Vector;
-    /// # use std::cmp::Ordering;
-    /// # use std::ops::Bound;
-    /// let v = vector![0, 1, 1, 2, 3, 4, 7, 9, 10];
-    /// assert_eq!(v.between_range(Bound::Included(&3), Bound::Unbounded), Ok(4..9));
-    /// ```
-    pub fn between_range(&self, start: Bound<&A>, end: Bound<&A>) -> Result<Range<usize>, usize> {
-        self.between_range_in_range(start, end, ..)
-    }
 }
 
 impl<A: Clone + Debug + PartialEq> Vector<A> {
@@ -2446,298 +2458,6 @@ impl<A: Clone + Debug + Eq> PartialEq for Vector<A> {
 
 impl<A: Clone + Debug + Eq> Eq for Vector<A> {}
 
-/*
-trait SortFocus {
-    fn split_at<S>(&mut self, index: usize, f: S)
-    where
-        for<'l, 'r> S: Fn(&'l mut Self, &'r mut Self);
-
-    fn compare(
-        first_focus: &mut Self,
-        first_index: usize,
-        second_focus: &mut Self,
-        second_index: usize,
-    ) -> cmp::Ordering;
-
-    fn swap(
-        first_focus: &mut Self,
-        first_index: usize,
-        second_focus: &mut Self,
-        second_index: usize,
-    );
-
-    fn len(&self) -> usize;
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
-
-struct SingleFocus<'a, 'b, 'f, A: Clone + Debug, F: Fn(&A, &A) -> cmp::Ordering> {
-    first: &'b mut FocusMut<'a, A>,
-    comp: &'f F,
-}
-
-impl<'a, 'b, 'f, A: Clone + Debug, F: Fn(&A, &A) -> cmp::Ordering> SortFocus
-    for SingleFocus<'a, 'b, 'f, A, F>
-{
-    fn split_at<S>(&mut self, index: usize, f: S)
-    where
-        for<'l, 'r> S: Fn(&'l mut Self, &'r mut Self),
-    {
-        self.first.split_at_fn(index, |left, right| {
-            let left = SingleFocus::<'a, 'b, 'f> {
-                first: left,
-                comp: self.comp,
-            };
-            let right = SingleFocus {
-                first: right,
-                comp: self.comp,
-            };
-            f(&mut left, &mut right);
-        })
-    }
-    fn compare(
-        first_focus: &mut Self,
-        first_index: usize,
-        second_focus: &mut Self,
-        second_index: usize,
-    ) -> cmp::Ordering {
-        let first = first_focus.first.index(first_index);
-        let second = second_focus.first.index(second_index);
-        (first_focus.comp)(first, second)
-    }
-    fn swap(
-        first_focus: &mut Self,
-        first_index: usize,
-        second_focus: &mut Self,
-        second_index: usize,
-    ) {
-        mem::swap(
-            first_focus.first.index(first_index),
-            second_focus.first.index(second_index),
-        );
-    }
-    fn len(&self) -> usize {
-        self.first.len()
-    }
-}
-
-struct DualFocus<'a, 'b, 'f, A: Clone + Debug, B: Clone + Debug, F: Fn(&A, &A) -> cmp::Ordering> {
-    first: FocusMut<'a, A>,
-    second: FocusMut<'b, B>,
-    comp: &'f F,
-}
-
-impl<'a, 'b, 'f, A: Clone + Debug, B: Clone + Debug, F: Fn(&A, &A) -> cmp::Ordering> SortFocus
-    for DualFocus<'a, 'b, 'f, A, B, F>
-{
-    fn split_at(&mut self, index: usize) -> Self {
-        DualFocus {
-            first: self.first.split_at(index),
-            second: self.second.split_at(index),
-            comp: self.comp,
-        }
-    }
-
-    fn compare(
-        first_focus: &mut Self,
-        first_index: usize,
-        second_focus: &mut Self,
-        second_index: usize,
-    ) -> cmp::Ordering {
-        let first = first_focus.first.index(first_index);
-        let second = second_focus.first.index(second_index);
-        (first_focus.comp)(first, second)
-    }
-
-    fn swap(
-        first_focus: &mut Self,
-        first_index: usize,
-        second_focus: &mut Self,
-        second_index: usize,
-    ) {
-        mem::swap(
-            first_focus.first.index(first_index),
-            second_focus.first.index(second_index),
-        );
-        mem::swap(
-            first_focus.second.index(first_index),
-            second_focus.second.index(second_index),
-        );
-    }
-
-    fn len(&self) -> usize {
-        self.first.len()
-    }
-}
-
-fn do_sort<A, R>(mut focus: A, rng: &mut R)
-where
-    A: SortFocus,
-    R: RngCore,
-{
-    if focus.len() <= 1 {
-        return;
-    }
-
-    // We know there are at least 2 elements here
-    let pivot_index = rng.next_u64() as usize % focus.len();
-    let mut rest = focus.split_at(1);
-    let mut first = focus;
-
-    if pivot_index > 0 {
-        A::swap(&mut rest, pivot_index - 1, &mut first, 0);
-    }
-    // Pivot is now always in the first slice
-    // let pivot_item = first.index(0);
-
-    // Find the exact place to put the pivot or pivot-equal items
-    let mut less_count = 0;
-    let mut equal_count = 0;
-
-    for index in 0..rest.len() {
-        let comp = A::compare(&mut rest, index, &mut first, 0);
-        match comp {
-            cmp::Ordering::Less => less_count += 1,
-            cmp::Ordering::Equal => equal_count += 1,
-            cmp::Ordering::Greater => {}
-        }
-    }
-
-    // If by accident we picked the minimum element as a pivot, we just call sort again with the
-    // rest of the vector.
-    if less_count == 0 {
-        do_sort(rest, rng);
-        return;
-    }
-
-    // We know here that there is at least one item before the pivot, so we move the minimum to the
-    // beginning part of the vector. First, however we swap the pivot to the start of the equal
-    // zone.
-    less_count -= 1;
-    equal_count += 1;
-    A::swap(&mut first, 0, &mut rest, less_count);
-    for index in 0..rest.len() {
-        if index == less_count {
-            // This is the position we swapped the pivot to. We can't move it from its position, and
-            // we know its not the minimum.
-            continue;
-        }
-        // let rest_item = rest.index(index);
-        if A::compare(&mut rest, index, &mut first, 0) == cmp::Ordering::Less {
-            A::swap(&mut first, 0, &mut rest, index);
-        }
-    }
-
-    // Split the vector up into less_than, equal to and greater than parts.
-    let mut greater_focus = rest.split_at(less_count + equal_count);
-    let mut equal_focus = rest.split_at(less_count);
-    let mut less_focus = rest;
-
-    let mut less_position = 0;
-    let mut equal_position = 0;
-    let mut greater_position = 0;
-
-    while less_position != less_focus.len() || greater_position != greater_focus.len() {
-        // At start of this loop, equal_position always points to an equal item
-        let mut equal_swap_side = None;
-
-        // Advance the less_position until we find an out of place item
-        while less_position != less_focus.len() {
-            match A::compare(
-                &mut less_focus,
-                less_position,
-                &mut equal_focus,
-                equal_position,
-            ) {
-                cmp::Ordering::Equal => {
-                    equal_swap_side = Some(cmp::Ordering::Less);
-                    break;
-                }
-                cmp::Ordering::Greater => {
-                    break;
-                }
-                _ => {}
-            }
-            less_position += 1;
-        }
-
-        // Advance the greater until we find an out of place item
-        while greater_position != greater_focus.len() {
-            match A::compare(
-                &mut greater_focus,
-                greater_position,
-                &mut equal_focus,
-                equal_position,
-            ) {
-                cmp::Ordering::Less => break,
-                cmp::Ordering::Equal => {
-                    equal_swap_side = Some(cmp::Ordering::Greater);
-                    break;
-                }
-                _ => {}
-            }
-            greater_position += 1;
-        }
-
-        if let Some(swap_side) = equal_swap_side {
-            // One of the sides is equal to the pivot, advance the pivot
-            let (focus, position) = if swap_side == cmp::Ordering::Less {
-                (&mut less_focus, less_position)
-            } else {
-                (&mut greater_focus, greater_position)
-            };
-
-            // We are guaranteed not to hit the end of the equal focus
-            while A::compare(focus, position, &mut equal_focus, equal_position)
-                == cmp::Ordering::Equal
-            {
-                equal_position += 1;
-            }
-
-            // Swap the equal position and the desired side, it's important to note that only the
-            // equals focus is guaranteed to have made progress so we don't advance the side's index
-            A::swap(focus, position, &mut equal_focus, equal_position);
-        } else if less_position != less_focus.len() && greater_position != greater_focus.len() {
-            // Both sides are out of place and not equal to the pivot, this can only happen if there
-            // is a greater item in the lesser zone and a lesser item in the greater zone. The
-            // solution is to swap both sides and advance both side's indices.
-            debug_assert_ne!(
-                A::compare(
-                    &mut less_focus,
-                    less_position,
-                    &mut equal_focus,
-                    equal_position
-                ),
-                cmp::Ordering::Equal
-            );
-            debug_assert_ne!(
-                A::compare(
-                    &mut greater_focus,
-                    greater_position,
-                    &mut equal_focus,
-                    equal_position
-                ),
-                cmp::Ordering::Equal
-            );
-            A::swap(
-                &mut less_focus,
-                less_position,
-                &mut greater_focus,
-                greater_position,
-            );
-            less_position += 1;
-            greater_position += 1;
-        }
-    }
-
-    // Now we have partitioned both sides correctly, we just have to recurse now
-    do_sort(less_focus, rng);
-    if !greater_focus.is_empty() {
-        do_sort(greater_focus, rng);
-    }
-}
-*/
 impl<A: Clone + Debug> FromIterator<A> for Vector<A> {
     fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self {
         let mut result = Vector::new();
