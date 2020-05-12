@@ -89,7 +89,7 @@ impl<A: Debug> Leaf<A> {
         self.free_space()
     }
 
-    pub fn borrow(&mut self) -> BorrowedLeaf<A> {
+    pub fn borrow_node(&mut self) -> BorrowedLeaf<A> {
         BorrowedLeaf {
             buffer: self.buffer.mutable_view(),
         }
@@ -708,7 +708,7 @@ impl<A: Clone + Debug> Internal<A> {
         }
     }
 
-    pub fn borrow(&mut self) -> BorrowedInternal<A> {
+    pub fn borrow_node(&mut self) -> BorrowedInternal<A> {
         BorrowedInternal {
             children: self.children.borrow(),
             sizes: Rc::clone(&self.sizes),
@@ -1177,10 +1177,12 @@ impl<A: Clone + Debug> NodeRc<A> {
         }
     }
 
-    pub fn borrow(&mut self) -> BorrowedNode<A> {
+    pub fn borrow_node(&mut self) -> BorrowedNode<A> {
         match self {
-            NodeRc::Internal(internal) => BorrowedNode::Internal(Rc::make_mut(internal).borrow()),
-            NodeRc::Leaf(leaf) => BorrowedNode::Leaf(Rc::make_mut(leaf).borrow()),
+            NodeRc::Internal(internal) => {
+                BorrowedNode::Internal(Rc::make_mut(internal).borrow_node())
+            }
+            NodeRc::Leaf(leaf) => BorrowedNode::Leaf(Rc::make_mut(leaf).borrow_node()),
         }
     }
 

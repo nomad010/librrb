@@ -19,7 +19,7 @@ Vector
  ✔ Better sort function names @started(20-05-01 16:48) @done(20-05-01 17:00) @lasted(12m5s)
  [] slice_extract vs slice_remove
 
-[] Implement extension traits for nodes
+[] Implement extension traits for nodes OR have the user be able to define custom Internal/Leaf nodes and control their behaviour via traits
 
 [] Implement annotation methods for nodes
   Create a shadow Vector where the nodes have additional data for the aggregate of all the nodes

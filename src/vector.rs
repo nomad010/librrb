@@ -254,6 +254,7 @@ use crate::nodes::{ChildList, Internal, Leaf, NodeRc};
 use crate::sort::{do_dual_sort, do_single_sort};
 use crate::{Side, RRB_WIDTH};
 use rand_core::{RngCore, SeedableRng};
+use std::borrow::Borrow;
 use std::cmp;
 use std::collections::HashSet;
 use std::fmt::Debug;
@@ -1559,14 +1560,15 @@ impl<A: Clone + Debug> Vector<A> {
     /// };
     /// assert_eq!(v.equal_range_for_index_in_range_by(1, &f, 1..), 1..6);
     /// ```
-    pub fn equal_range_for_index_in_range_by<F, R>(
+    pub fn equal_range_for_index_in_range_by<K, F, R>(
         &self,
         index: usize,
         f: &F,
         range: R,
     ) -> Range<usize>
     where
-        F: Fn(&A) -> cmp::Ordering,
+        A: Borrow<K>,
+        F: Fn(&K) -> cmp::Ordering,
         R: RangeBounds<usize>,
     {
         let mut start = match range.start_bound() {
@@ -1586,7 +1588,7 @@ impl<A: Clone + Debug> Vector<A> {
         }
 
         let mut focus = self.focus();
-        if f(focus.index(index)) != cmp::Ordering::Equal {
+        if f(focus.index(index).borrow()) != cmp::Ordering::Equal {
             return 0..0;
         }
 
@@ -1602,14 +1604,14 @@ impl<A: Clone + Debug> Vector<A> {
             loop {
                 // println!("rawr start {} {} {}", start, equals_start, end);
                 if start + 1 == equals_start {
-                    let comparison = f(focus.index(start));
+                    let comparison = f(focus.index(start).borrow());
                     if comparison == cmp::Ordering::Equal {
                         equals_start = start;
                     }
                     break;
                 } else {
                     let mid = avg(start, equals_start);
-                    let comparison = f(focus.index(mid));
+                    let comparison = f(focus.index(mid).borrow());
                     if comparison == cmp::Ordering::Equal {
                         equals_start = mid;
                     } else {
@@ -1626,7 +1628,7 @@ impl<A: Clone + Debug> Vector<A> {
                 break;
             } else {
                 let mid = avg(equals_end_inclusive, end);
-                let comparison = f(focus.index(mid));
+                let comparison = f(focus.index(mid).borrow());
                 if comparison == cmp::Ordering::Equal {
                     equals_end_inclusive = mid;
                 } else {
@@ -1663,9 +1665,10 @@ impl<A: Clone + Debug> Vector<A> {
     /// };
     /// assert_eq!(v.equal_range_for_index_by(1, &f), 0..6);
     /// ```
-    pub fn equal_range_for_index_by<F>(&self, index: usize, f: &F) -> Range<usize>
+    pub fn equal_range_for_index_by<K, F>(&self, index: usize, f: &F) -> Range<usize>
     where
-        F: Fn(&A) -> cmp::Ordering,
+        A: Borrow<K>,
+        F: Fn(&K) -> cmp::Ordering,
     {
         self.equal_range_for_index_in_range_by(index, f, ..)
     }
@@ -1694,9 +1697,10 @@ impl<A: Clone + Debug> Vector<A> {
     /// };
     /// assert_eq!(v.equal_range_in_range_by(&f, 1..), Ok(1..6));
     /// ```
-    pub fn equal_range_in_range_by<F, R>(&self, f: &F, range: R) -> Result<Range<usize>, usize>
+    pub fn equal_range_in_range_by<K, F, R>(&self, f: &F, range: R) -> Result<Range<usize>, usize>
     where
-        F: Fn(&A) -> cmp::Ordering,
+        A: Borrow<K>,
+        F: Fn(&K) -> cmp::Ordering,
         R: RangeBounds<usize>,
     {
         let mut start = match range.start_bound() {
@@ -1719,7 +1723,7 @@ impl<A: Clone + Debug> Vector<A> {
         // an equal item for the next step.
         loop {
             if start + 1 == end {
-                let comparison = f(focus.index(start));
+                let comparison = f(focus.index(start).borrow());
                 match comparison {
                     cmp::Ordering::Less => {
                         return Err(start + 1);
@@ -1733,7 +1737,7 @@ impl<A: Clone + Debug> Vector<A> {
                 }
             } else {
                 let mid = avg(start, end);
-                let comparison = f(focus.index(mid));
+                let comparison = f(focus.index(mid).borrow());
                 match comparison {
                     cmp::Ordering::Less => {
                         start = mid;
@@ -1776,9 +1780,10 @@ impl<A: Clone + Debug> Vector<A> {
     /// };
     /// assert_eq!(v.equal_range_by(&f), Ok(0..6));
     /// ```
-    pub fn equal_range_by<F>(&self, f: &F) -> Result<Range<usize>, usize>
+    pub fn equal_range_by<K, F>(&self, f: &F) -> Result<Range<usize>, usize>
     where
-        F: Fn(&A) -> cmp::Ordering,
+        A: Borrow<K>,
+        F: Fn(&K) -> cmp::Ordering,
     {
         self.equal_range_in_range_by(f, ..)
     }
@@ -2037,15 +2042,15 @@ impl<A: Clone + Debug> Vector<A> {
         let mut nodes = Vec::new();
         for node in self.left_spine.iter_mut() {
             if !node.is_empty() {
-                nodes.push(node.borrow());
+                nodes.push(node.borrow_node());
             }
         }
         if !self.root.is_empty() {
-            nodes.push(self.root.borrow());
+            nodes.push(self.root.borrow_node());
         }
         for node in self.right_spine.iter_mut().rev() {
             if !node.is_empty() {
-                nodes.push(node.borrow());
+                nodes.push(node.borrow_node());
             }
         }
         FocusMut::from_vectors(vec![Rc::new(self)], nodes)
@@ -2060,11 +2065,11 @@ impl<A: Clone + Debug> Vector<A> {
     {
         let mut nodes = Vec::new();
         for node in self.left_spine.iter_mut() {
-            nodes.push(node.borrow());
+            nodes.push(node.borrow_node());
         }
-        nodes.push(self.root.borrow());
+        nodes.push(self.root.borrow_node());
         for node in self.right_spine.iter_mut().rev() {
-            nodes.push(node.borrow());
+            nodes.push(node.borrow_node());
         }
         let mut focus = FocusMut::from_vectors(vec![Rc::new(self)], nodes);
         f(&mut focus);

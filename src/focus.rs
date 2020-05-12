@@ -532,11 +532,11 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
                     // Know how to do this, we borrow the child node.
                     let child = match new_internal.children {
                         BorrowedChildList::Internals(ref mut children) => BorrowedNode::Internal(
-                            Rc::make_mut(children.front_mut().unwrap()).borrow(),
+                            Rc::make_mut(children.front_mut().unwrap()).borrow_node(),
                         ),
-                        BorrowedChildList::Leaves(ref mut children) => {
-                            BorrowedNode::Leaf(Rc::make_mut(children.front_mut().unwrap()).borrow())
-                        }
+                        BorrowedChildList::Leaves(ref mut children) => BorrowedNode::Leaf(
+                            Rc::make_mut(children.front_mut().unwrap()).borrow_node(),
+                        ),
                     };
                     new_internal.children.range_mut().start += 1;
                     if !internal.is_empty() {

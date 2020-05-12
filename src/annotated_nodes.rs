@@ -1008,7 +1008,9 @@ impl<A: Clone + Debug> AnnotatedNodeRc<A> {
             AnnotatedNodeRc::Internal(internal) => {
                 BorrowedAnnotatedNode::Internal(Rc::make_mut(internal).borrow())
             }
-            AnnotatedNodeRc::Leaf(leaf) => BorrowedAnnotatedNode::Leaf(Rc::make_mut(leaf).borrow()),
+            AnnotatedNodeRc::Leaf(leaf) => {
+                BorrowedAnnotatedNode::Leaf(Rc::make_mut(leaf).borrow_node())
+            }
         }
     }
 
