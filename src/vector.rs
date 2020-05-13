@@ -258,6 +258,7 @@ use std::borrow::Borrow;
 use std::cmp;
 use std::collections::HashSet;
 use std::fmt::Debug;
+use std::hash::{Hash, Hasher};
 use std::iter::{self, FromIterator, FusedIterator};
 use std::mem;
 use std::ops::{Bound, Range, RangeBounds};
@@ -2454,19 +2455,39 @@ impl<A: Clone + Debug + PartialEq> Vector<A> {
     }
 }
 
-impl<A: Clone + Debug + Eq> PartialEq for Vector<A> {
-    fn eq(&self, other: &Self) -> bool {
-        self.len() == other.len() && self.iter().eq(other.iter())
-    }
-}
-
 impl<A: Clone + Debug> Default for Vector<A> {
     fn default() -> Self {
         Self::new()
     }
 }
 
+impl<A: Clone + Debug + PartialEq> PartialEq for Vector<A> {
+    fn eq(&self, other: &Self) -> bool {
+        self.len() == other.len() && self.iter().eq(other.iter())
+    }
+}
+
 impl<A: Clone + Debug + Eq> Eq for Vector<A> {}
+
+impl<A: Clone + Debug + PartialOrd> PartialOrd for Vector<A> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        self.iter().partial_cmp(other.iter())
+    }
+}
+
+impl<A: Clone + Debug + Ord> Ord for Vector<A> {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.iter().cmp(other.iter())
+    }
+}
+
+impl<A: Clone + Debug + Hash> Hash for Vector<A> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for i in self {
+            i.hash(state)
+        }
+    }
+}
 
 impl<A: Clone + Debug> FromIterator<A> for Vector<A> {
     fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self {
