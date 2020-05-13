@@ -1568,6 +1568,7 @@ impl<A: Clone + Debug> Vector<A> {
     ) -> Range<usize>
     where
         A: Borrow<K>,
+        K: ?Sized,
         F: Fn(&K) -> cmp::Ordering,
         R: RangeBounds<usize>,
     {
@@ -1668,6 +1669,7 @@ impl<A: Clone + Debug> Vector<A> {
     pub fn equal_range_for_index_by<K, F>(&self, index: usize, f: &F) -> Range<usize>
     where
         A: Borrow<K>,
+        K: ?Sized,
         F: Fn(&K) -> cmp::Ordering,
     {
         self.equal_range_for_index_in_range_by(index, f, ..)
@@ -1700,6 +1702,7 @@ impl<A: Clone + Debug> Vector<A> {
     pub fn equal_range_in_range_by<K, F, R>(&self, f: &F, range: R) -> Result<Range<usize>, usize>
     where
         A: Borrow<K>,
+        K: ?Sized,
         F: Fn(&K) -> cmp::Ordering,
         R: RangeBounds<usize>,
     {
@@ -1783,6 +1786,7 @@ impl<A: Clone + Debug> Vector<A> {
     pub fn equal_range_by<K, F>(&self, f: &F) -> Result<Range<usize>, usize>
     where
         A: Borrow<K>,
+        K: ?Sized,
         F: Fn(&K) -> cmp::Ordering,
     {
         self.equal_range_in_range_by(f, ..)
@@ -1804,7 +1808,7 @@ impl<A: Clone + Debug> Vector<A> {
     pub fn equal_range_in_range<K, R>(&self, value: &K, range: R) -> Result<Range<usize>, usize>
     where
         A: Borrow<K>,
-        K: Ord,
+        K: Ord + ?Sized,
         R: RangeBounds<usize>,
     {
         let f = |x: &K| x.cmp(value);
@@ -1830,7 +1834,7 @@ impl<A: Clone + Debug> Vector<A> {
     pub fn equal_range<K>(&self, value: &K) -> Result<Range<usize>, usize>
     where
         A: Borrow<K>,
-        K: Ord,
+        K: Ord + ?Sized,
     {
         let f = |x: &K| x.cmp(value);
         self.equal_range_in_range_by(&f, ..)
@@ -1858,7 +1862,7 @@ impl<A: Clone + Debug> Vector<A> {
     ) -> Result<Range<usize>, usize>
     where
         A: Borrow<K>,
-        K: Ord,
+        K: Ord + ?Sized,
         R: RangeBounds<usize>,
     {
         let f = |x: &K| {
@@ -1909,7 +1913,7 @@ impl<A: Clone + Debug> Vector<A> {
     pub fn between_range<K>(&self, start: Bound<&K>, end: Bound<&K>) -> Result<Range<usize>, usize>
     where
         A: Borrow<K>,
-        K: Ord,
+        K: Ord + ?Sized,
     {
         self.between_range_in_range(start, end, ..)
     }
