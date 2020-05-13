@@ -869,6 +869,9 @@ unsafe impl<#[may_dangle] A: Debug> Drop for CircularBuffer<A> {
     }
 }
 
+unsafe impl<A: Clone + Debug + Send> Send for CircularBuffer<A> {}
+unsafe impl<A: Clone + Debug + Sync> Sync for CircularBuffer<A> {}
+
 /// An iterator over a buffer that is obtained by the `CircularBuffer::iter()` method.
 pub struct Iter<'a, A: 'a + Debug> {
     consumed: usize,
