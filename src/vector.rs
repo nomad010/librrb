@@ -2460,6 +2460,12 @@ impl<A: Clone + Debug + Eq> PartialEq for Vector<A> {
     }
 }
 
+impl<A: Clone + Debug> Default for Vector<A> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<A: Clone + Debug + Eq> Eq for Vector<A> {}
 
 impl<A: Clone + Debug> FromIterator<A> for Vector<A> {
