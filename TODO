@@ -59,3 +59,7 @@ Sort
 
 Documentation
 [] Write documentation for methods with stubs
+
+Errors
+✔ thiserrorify everything @started(20-05-27 22:24) @done(20-05-27 22:49) @lasted(25m8s)
+[] Remove thiserror in favour of a single error enum because the errors are quite sparse.

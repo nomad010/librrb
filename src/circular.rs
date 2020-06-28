@@ -8,6 +8,19 @@ use std::fmt::{self, Debug, Formatter};
 use std::iter::FusedIterator;
 use std::mem;
 use std::ops::Range;
+use thiserror::Error;
+
+#[derive(Debug, Error, Eq, PartialEq)]
+pub enum CircularBufferError {
+    #[error("Tried to pop an element from an empty buffer")]
+    EmptyBuffer,
+    #[error("tried to insert an element into a full buffer")]
+    FullBuffer,
+    #[error("tried to access an element past the end of the buffer")]
+    IndexOutOfBounds,
+}
+
+type Result<T> = std::result::Result<T, CircularBufferError>;
 
 // #[derive(Debug)]
 pub(crate) struct BorrowBufferMut<A: Debug> {
@@ -18,7 +31,7 @@ pub(crate) struct BorrowBufferMut<A: Debug> {
 }
 
 impl<A: Debug> Debug for BorrowBufferMut<A> {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
+    fn fmt(&self, f: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
         f.write_str("[")?;
         if !self.is_empty() {
             for i in 0..self.len() {
@@ -242,10 +255,10 @@ impl<A: Debug> CircularBuffer<A> {
 
     /// Attempts to add an element to the end of the buffer.
     ///
-    /// Returns Err(()) in the event the buffer is full.
-    pub fn try_push_back(&mut self, item: A) -> Result<(), ()> {
+    /// Returns Err() in the event the buffer is full.
+    pub fn try_push_back(&mut self, item: A) -> Result<()> {
         if self.is_full() {
-            Err(())
+            Err(CircularBufferError::FullBuffer)
         } else {
             let back = (self.front + self.len) % RRB_WIDTH;
             self.data[back] = mem::MaybeUninit::new(item);
@@ -258,15 +271,15 @@ impl<A: Debug> CircularBuffer<A> {
     ///
     /// Panics in the event the buffer is full.
     pub fn push_back(&mut self, item: A) {
-        self.try_push_back(item).expect("Circular buffer is full")
+        self.try_push_back(item).unwrap()
     }
 
     /// Attempts to remove an element from the end of the buffer.
     ///
     /// Returns Err(()) if the buffer is empty.
-    pub fn try_pop_back(&mut self) -> Result<A, ()> {
+    pub fn try_pop_back(&mut self) -> Result<A> {
         if self.is_empty() {
-            Err(())
+            Err(CircularBufferError::EmptyBuffer)
         } else {
             self.len -= 1;
             let back = (self.front + self.len) % RRB_WIDTH;
@@ -287,9 +300,9 @@ impl<A: Debug> CircularBuffer<A> {
     /// Attempts to add an element to the front of the buffer.
     ///
     /// Returns Err(()) in the event the buffer is already full.
-    pub fn try_push_front(&mut self, item: A) -> Result<(), ()> {
+    pub fn try_push_front(&mut self, item: A) -> Result<()> {
         if self.is_full() {
-            Err(())
+            Err(CircularBufferError::FullBuffer)
         } else {
             self.front = (self.front + RRB_WIDTH - 1) % RRB_WIDTH;
             self.len += 1;
@@ -302,15 +315,15 @@ impl<A: Debug> CircularBuffer<A> {
     ///
     /// Panics in the event the buffer is full.
     pub fn push_front(&mut self, item: A) {
-        self.try_push_front(item).expect("Circular buffer is full")
+        self.try_push_front(item).unwrap()
     }
 
     /// Attempts to remove an element from the front of the buffer.
     ///
     /// Returns Err(()) if the buffer is empty.
-    pub fn try_pop_front(&mut self) -> Result<A, ()> {
+    pub fn try_pop_front(&mut self) -> Result<A> {
         if self.is_empty() {
-            Err(())
+            Err(CircularBufferError::EmptyBuffer)
         } else {
             let result = unsafe {
                 mem::replace(&mut self.data[self.front], mem::MaybeUninit::uninit()).assume_init()
@@ -331,7 +344,7 @@ impl<A: Debug> CircularBuffer<A> {
     /// Attempts to remove an element from the buffer.
     ///
     /// Returns Err(()) if the requested element does not exist.
-    pub fn try_remove(&mut self, idx: usize) -> Result<A, ()> {
+    pub fn try_remove(&mut self, idx: usize) -> Result<A> {
         if self.len() > idx {
             let position = (self.front + idx) % RRB_WIDTH;
             let back = (self.front + self.len) % RRB_WIDTH;
@@ -340,7 +353,7 @@ impl<A: Debug> CircularBuffer<A> {
                 // We rotate the subarray from idx to self.back left 1
                 let slice = &mut self.data[position..back];
                 slice.rotate_left(1);
-                self.try_pop_back()
+                Ok(self.pop_back())
             } else {
                 // The buffer is split up into self.front..SIZE and 0..self.back
                 // If the idx lies in the second part we can follow the same proccess as above
@@ -366,11 +379,11 @@ impl<A: Debug> CircularBuffer<A> {
                     // Part 2
                     let slice = &mut self.data[position..back];
                     slice.rotate_left(1);
-                    self.try_pop_back()
+                    Ok(self.pop_back())
                 }
             }
         } else {
-            Err(())
+            Err(CircularBufferError::IndexOutOfBounds)
         }
     }
 
@@ -385,7 +398,7 @@ impl<A: Debug> CircularBuffer<A> {
     /// Attempts to push an element to a side of the buffer.
     ///
     /// Returns Err(()) if the buffer is full.
-    pub fn try_push(&mut self, side: Side, item: A) -> Result<(), ()> {
+    pub fn try_push(&mut self, side: Side, item: A) -> Result<()> {
         match side {
             Side::Back => self.try_push_back(item),
             Side::Front => self.try_push_front(item),
@@ -405,7 +418,7 @@ impl<A: Debug> CircularBuffer<A> {
     /// Attempts to remove an element from a side of the buffer.
     ///
     /// Returns Err(()) if the buffer is empty.
-    pub fn try_pop(&mut self, side: Side) -> Result<A, ()> {
+    pub fn try_pop(&mut self, side: Side) -> Result<A> {
         match side {
             Side::Back => self.try_pop_back(),
             Side::Front => self.try_pop_front(),
@@ -682,7 +695,7 @@ impl<A: Debug> CircularBuffer<A> {
         &self,
         range: Range<usize>,
         f: &mut F,
-    ) -> Result<usize, usize> {
+    ) -> std::result::Result<usize, usize> {
         let range = range.start.min(self.len())..range.end.min(self.len());
         if range.start == range.end {
             panic!()
@@ -741,7 +754,11 @@ impl<A: Ord + Debug> CircularBuffer<A> {
     /// Performs a binary search through the buffer that has already been sorted by the order
     /// induced by the natural `Ord` comparator. For more information see the `binary_search_by`
     /// function.
-    pub fn binary_search(&self, range: Range<usize>, item: &A) -> Result<usize, usize> {
+    pub fn binary_search(
+        &self,
+        range: Range<usize>,
+        item: &A,
+    ) -> std::result::Result<usize, usize> {
         let mut f = |p: &A| p.cmp(item);
         self.binary_search_by(range, &mut f)
     }
@@ -754,19 +771,8 @@ impl<A: Debug> Default for CircularBuffer<A> {
 }
 
 impl<A: Debug> Debug for CircularBuffer<A> {
-    fn fmt(&self, fmt: &mut Formatter) -> Result<(), fmt::Error> {
-        fmt.write_str("[")?;
-        let mut first = true;
-        for item in self.iter() {
-            if first {
-                first = false;
-            } else {
-                fmt.write_str(", ")?;
-            }
-            item.fmt(fmt)?;
-        }
-        fmt.write_str("]")?;
-        Ok(())
+    fn fmt(&self, fmt: &mut Formatter) -> std::result::Result<(), fmt::Error> {
+        fmt.debug_list().entries(self).finish()
     }
 }
 
@@ -1071,7 +1077,7 @@ mod test {
 
         // Back
         assert_eq!(empty.back(), None);
-        assert_eq!(empty.try_pop_back(), Err(()));
+        assert_eq!(empty.try_pop_back(), Err(CircularBufferError::EmptyBuffer));
         assert_eq!(empty.back_mut(), None);
         assert_eq!(empty.end(Side::Back), None);
         assert_eq!(empty.end_mut(Side::Back), None);
@@ -1079,7 +1085,7 @@ mod test {
         // Front
         assert_eq!(empty.front(), None);
         assert_eq!(empty.front_mut(), None);
-        assert_eq!(empty.try_pop_front(), Err(()));
+        assert_eq!(empty.try_pop_front(), Err(CircularBufferError::EmptyBuffer));
         assert_eq!(empty.end(Side::Front), None);
         assert_eq!(empty.end_mut(Side::Front), None);
 
@@ -1108,7 +1114,7 @@ mod test {
         assert_eq!(single.end_mut(Side::Back), Some(&mut item));
         let mut back = single.clone();
         assert_eq!(back.try_pop_back(), Ok(item));
-        assert_eq!(back.try_pop_back(), Err(()));
+        assert_eq!(back.try_pop_back(), Err(CircularBufferError::EmptyBuffer));
         assert_eq!(back.back(), None);
         assert_eq!(back.back_mut(), None);
         assert_eq!(back.end(Side::Back), None);
@@ -1121,7 +1127,7 @@ mod test {
         assert_eq!(single.end_mut(Side::Front), Some(&mut item));
         let mut front = single.clone();
         assert_eq!(front.try_pop_front(), Ok(item));
-        assert_eq!(front.try_pop_front(), Err(()));
+        assert_eq!(front.try_pop_front(), Err(CircularBufferError::EmptyBuffer));
         assert_eq!(front.end(Side::Front), None);
         assert_eq!(front.end_mut(Side::Front), None);
 
@@ -1166,7 +1172,7 @@ mod test {
         assert_eq!(back.try_pop_back(), Ok(7));
         assert_eq!(back.try_pop_back(), Ok(8));
         assert_eq!(back.try_pop_back(), Ok(9));
-        assert_eq!(back.try_pop_back(), Err(()));
+        assert_eq!(back.try_pop_back(), Err(CircularBufferError::EmptyBuffer));
         assert_eq!(back.back(), None);
         assert_eq!(back.back_mut(), None);
         assert_eq!(back.end(Side::Back), None);
@@ -1188,7 +1194,7 @@ mod test {
         assert_eq!(front.try_pop_front(), Ok(2));
         assert_eq!(front.try_pop_front(), Ok(1));
         assert_eq!(front.try_pop_front(), Ok(0));
-        assert_eq!(front.try_pop_front(), Err(()));
+        assert_eq!(front.try_pop_front(), Err(CircularBufferError::EmptyBuffer));
         assert_eq!(front.end(Side::Front), None);
         assert_eq!(front.end_mut(Side::Front), None);
 
@@ -1239,6 +1245,6 @@ mod test {
         assert_eq!(mem::size_of_val(&buffer), 16); // We need to allocate 2 usizes for front and len
         buffer.push_back(());
         assert_eq!(buffer.try_pop_back(), Ok(()));
-        assert_eq!(buffer.try_pop_back(), Err(()));
+        assert_eq!(buffer.try_pop_back(), Err(CircularBufferError::EmptyBuffer));
     }
 }
