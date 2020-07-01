@@ -7,13 +7,12 @@ use crate::nodes::{BorrowedChildList, BorrowedNode, ChildList, Internal, NodeRc}
 
 use crate::vector::InternalVector;
 use crate::Side;
-use std::collections::HashSet;
 use std::fmt::Debug;
 use std::mem;
-use std::ops::{Bound, Deref, DerefMut, Range, RangeBounds};
+use std::ops::{Bound, Range, RangeBounds};
 use std::rc::Rc;
 
-use archery::{ArcK, RcK, SharedPointer, SharedPointerKind};
+use archery::{SharedPointer, SharedPointerKind};
 
 // #[derive(Debug, Clone)]
 // pub(crate) struct RefMutRcByPtr<'a, A>(pub(crate) Rc<&'a mut A>);
@@ -119,26 +118,6 @@ impl<'a, A: Clone + Debug, P: SharedPointerKind> PartialFocus<A, P> {
         } else {
             self.move_focus(idx);
             self.leaf.get(idx - self.leaf_range.start)
-        }
-    }
-
-    /// Returns the length of the focus. This is equivalent to the length of the root of the focus.
-    fn len(&self) -> usize {
-        if self.path.is_empty() {
-            self.leaf.len()
-        } else {
-            self.path[0].0.len()
-        }
-    }
-
-    /// Returns the leaf node and its range associated with the particular index. This will move the
-    /// focus if necessary.
-    fn leaf_at(&mut self, idx: usize) -> Option<(Range<usize>, &Leaf<A>)> {
-        if idx < self.len() {
-            self.move_focus(idx);
-            Some((self.leaf_range.clone(), &self.leaf))
-        } else {
-            None
         }
     }
 }
@@ -323,21 +302,6 @@ impl<'a, A: Clone + Debug, P: SharedPointerKind> Focus<'a, A, P> {
     /// ```
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    /// Returns the leaf node and its range associated with the particular index. This will move the
-    /// focus if necessary.
-    fn leaf_at(&mut self, idx: usize) -> Option<(Range<usize>, &Leaf<A>)> {
-        let new_idx = idx + self.range.start;
-        if self.range.contains(&new_idx) {
-            if !self.focus_range.contains(&new_idx) {
-                self.refocus(new_idx);
-            }
-            self.spine_node_focus
-                .leaf_at(new_idx - self.focus_range.start)
-        } else {
-            None
-        }
     }
 
     /// Narrows the focus, limiting it to a particular range.
@@ -608,38 +572,23 @@ impl<'a, A: Clone + Debug, P: SharedPointerKind> FocusMut<'a, A, P> {
 
     fn combine(&mut self, mut other: Self) {
         // Recombine both side FocusMuts into back into the original FocusMut
-        let total_len = self.len() + other.len();
         if self.is_empty() {
             mem::replace(self, other);
             return;
         } else if other.is_empty() {
             return;
         }
-        // println!(
-        //     "Recombine called\n{:?}\n{:?}\nn\n\n\n",
-        //     self.nodes, other.nodes
-        // );
 
         other.nodes.reverse();
-
-        // let mut combined_nodes = Vec::new();
 
         while !self.nodes.is_empty() && !other.nodes.is_empty() {
             let mut left_node = self.nodes.pop().unwrap();
             let right_node = other.nodes.pop().unwrap();
             let right_level = right_node.level();
-            // println!(
-            //     "loop {} {}\n{:?}\n{:?}",
-            //     self.nodes.len(),
-            //     other.nodes.len(),
-            //     left_node,
-            //     right_node
-            // );
 
             if !left_node.from_same_source(&right_node) {
                 self.nodes.push(left_node);
                 other.nodes.push(right_node);
-                // println!("break here");
                 break;
             }
 
@@ -648,33 +597,17 @@ impl<'a, A: Clone + Debug, P: SharedPointerKind> FocusMut<'a, A, P> {
                 // If we have a borrowed Leaf as the root then we could have exhausted the list.
                 if right_level + 1 == right_parent.level() {
                     // The parent range must be updated to include the whole borrowed node now.
-                    // println!(
-                    //     "lel b {} {:?} {}",
-                    //     right_parent.len(),
-                    //     right_parent.internal_mut().children.range_mut(),
-                    //     right_level
-                    // );
                     right_parent.internal_mut().children.range_mut().start -= 1;
-                // println!("lel a {}", right_parent.len());
                 } else {
                     other.nodes.push(left_node);
-                    // println!("Should be breaking here")
                 }
             } else {
                 other.nodes.push(left_node);
-                // println!("Should be breaking here")
             }
         }
         other.nodes.reverse();
         self.nodes.append(&mut other.nodes);
         self.len += other.len;
-
-        // println!(
-        //     "Recombine result\n{:?}\n{:?}\n{}\n\n\n",
-        //     self.nodes,
-        //     other.nodes,
-        //     self.len()
-        // );
     }
 
     /// Derp
@@ -748,43 +681,14 @@ impl<'a, A: Clone + Debug, P: SharedPointerKind> FocusMut<'a, A, P> {
             // Nothing needs to move here
             return;
         }
-        if let Some((root_id, ref mut range)) = self.root {
-            // println!(
-            //     "Checking root range validity {:?} for {} sz {}",
-            //     range,
-            //     idx,
-            //     self.nodes[root_id].len()
-            // );
+        if let Some((_, ref mut range)) = self.root {
             if !range.contains(&idx) {
-                // println!(
-                //     "resetting root {} {} {:?} {}",
-                //     self.nodes.len(),
-                //     root_id,
-                //     range,
-                //     idx
-                // );
-                self.root.take(); //.unwrap();
+                self.root.take();
                 self.path.clear();
                 self.leaf = None;
                 self.leaf_range = 0..0;
-                // if let Some((node_position, new_idx)) =
-                //     self.find_new_node_info_for_index(idx, root_id, range)
-                // {
-                //     let node_start = idx - new_idx;
-                //     let node_len = self.nodes[node_position].len();
-                //     self.root = Some((node_position, node_start..node_start + node_len));
-                //     // println!(
-                //     //     "{} {:?} vs {} {:?} with {}",
-                //     //     root_id,
-                //     //     range,
-                //     //     node_position,
-                //     //     node_start..node_start + node_len,
-                //     //     idx
-                //     // );
-                // }
             }
         }
-        // println!("Checking root {:?}", self.root);
         if self.root.is_none() {
             // If the root is unassigned we can potentially find a new one.
             if idx < self.len {
@@ -797,22 +701,14 @@ impl<'a, A: Clone + Debug, P: SharedPointerKind> FocusMut<'a, A, P> {
                 // the correct leaf
                 return;
             }
-            // if  {
-            //     // println!("Found new {:?} going to {}", node_position, new_idx);
-            // } else {
-            // }
         }
         // Resets the path so only correct items remain
-        // println!("Checking path {} {}", idx, self.path.len());
         while let Some((_, range)) = self.path.last() {
-            // println!("Check {:?}", range);
             if range.contains(&idx) {
                 break;
             }
-            // println!("Popping path");
             self.path.pop();
         }
-        // println!("Done checking path");
         if self.path.is_empty() {
             if let Some((ref root, ref range)) = self.root {
                 // Over here we are guaranteed only the root and the elements in path are correct
@@ -821,7 +717,6 @@ impl<'a, A: Clone + Debug, P: SharedPointerKind> FocusMut<'a, A, P> {
                 match root {
                     BorrowedNode::Internal(internal) => {
                         // Root has children
-                        // println!("derp {} {:?} {:?}", idx, range, internal.len());
                         let (child_idx, new_idx) =
                             internal.position_info_for(idx - range.start).unwrap();
                         let range_start = idx - new_idx;
@@ -866,11 +761,9 @@ impl<'a, A: Clone + Debug, P: SharedPointerKind> FocusMut<'a, A, P> {
             .unwrap_or(&self.root.as_ref().unwrap().1)
             .clone();
         loop {
-            let (parent, parent_range) = self.path.last_mut().unwrap();
+            let (parent, _) = self.path.last_mut().unwrap();
             let parent = unsafe { &mut **parent };
-            let (child_idx, new_idx) = parent
-                .position_info_for(idx /* - parent_range.start*/)
-                .unwrap();
+            let (child_idx, new_idx) = parent.position_info_for(idx).unwrap();
             let this_skipped_items = idx - new_idx;
             idx = new_idx;
             match parent.children {
@@ -958,38 +851,6 @@ impl<'a, A: Clone + Debug, P: SharedPointerKind> FocusMut<'a, A, P> {
                 forward_end += node.len();
             }
             unreachable!();
-        }
-    }
-
-    /// Returns the spine position and subindex corresponding the given index.
-    fn find_new_node_info_for_index(
-        &self,
-        index: usize,
-        old_position: usize,
-        old_range: Range<usize>,
-    ) -> Option<(usize, usize)> {
-        if index >= self.len {
-            None
-        } else if index >= old_range.end {
-            let mut forward_end = old_range.end;
-
-            for (idx, node) in self.nodes.iter().enumerate().skip(old_position + 1) {
-                if index < forward_end + node.len() {
-                    return Some((idx, index - forward_end));
-                }
-                forward_end += node.len();
-            }
-            unreachable!();
-        } else {
-            let mut forward_start = old_range.start;
-
-            for (idx, node) in self.nodes.iter().enumerate().take(old_position).rev() {
-                forward_start -= node.len();
-                if index >= forward_start {
-                    return Some((idx, index - forward_start));
-                }
-            }
-            unreachable!()
         }
     }
 
@@ -1084,10 +945,9 @@ impl<A: Clone + Debug, B: Clone + Debug> Container<(A, B)> for Dual<A, B> {
     }
 }
 */
+#[cfg(test)]
 mod test {
-
     use crate::Vector;
-    use archery::RcK;
 
     #[test]
     pub fn single_focus_mut() {

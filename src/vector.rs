@@ -254,10 +254,9 @@ use crate::nodes::{ChildList, Internal, NodeRc};
 use crate::sort::{do_dual_sort, do_single_sort};
 use crate::{Side, RRB_WIDTH};
 use archery::{ArcK, RcK, SharedPointer, SharedPointerKind};
-use rand_core::{RngCore, SeedableRng};
+use rand_core::SeedableRng;
 use std::borrow::Borrow;
 use std::cmp;
-use std::collections::HashSet;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::iter::{self, FromIterator, FusedIterator};
@@ -2167,7 +2166,8 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
         }
     }
 
-    /// Returns the height of the tree.
+    /// Returns the height of the tree. This is only used for debugging purposes.const
+    #[allow(dead_code)]
     pub(crate) fn height(&self) -> usize {
         debug_assert_eq!(self.left_spine.len(), self.right_spine.len());
         self.left_spine.len()
@@ -2317,6 +2317,7 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     }
 
     /// Checks the internal invariants that are required by the Vector.
+    #[allow(dead_code)]
     pub(crate) fn assert_invariants(&self) -> bool {
         // Invariant 1
         // Spines must be of equal length
@@ -2477,6 +2478,7 @@ impl<A: Clone + Debug + Ord, P: SharedPointerKind> InternalVector<A, P> {
 impl<A: Clone + Debug + PartialEq, P: SharedPointerKind> InternalVector<A, P> {
     /// Tests whether the node is equal to the given vector. This is mainly used for
     /// debugging purposes.
+    #[allow(dead_code)]
     pub(crate) fn equal_vec(&self, v: &Vec<A>) -> bool {
         if self.len() == v.len() {
             let mut iter = v.iter();
@@ -2499,26 +2501,6 @@ impl<A: Clone + Debug + PartialEq, P: SharedPointerKind> InternalVector<A, P> {
             true
         } else {
             false
-        }
-    }
-
-    /// Tests whether the node is equal to the given vector. This is mainly used for
-    /// debugging purposes.
-    pub(crate) fn equal_vec_debug(&self, v: &Vec<A>) {
-        if self.len() == v.len() {
-            let mut iter = v.iter();
-            println!("Left");
-            for spine in self.left_spine.iter() {
-                spine.equal_iter_debug(&mut iter);
-            }
-            println!("Root");
-            self.root.equal_iter_debug(&mut iter);
-            println!("Right");
-            for spine in self.right_spine.iter().rev() {
-                spine.equal_iter_debug(&mut iter);
-            }
-        } else {
-            println!("incorrect lens {} {}", self.len(), v.len());
         }
     }
 }

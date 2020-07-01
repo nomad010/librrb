@@ -1,6 +1,6 @@
 use crate::focus::FocusMut;
 use archery::SharedPointerKind;
-use rand_core::{RngCore, SeedableRng};
+use rand_core::RngCore;
 use std::cmp;
 use std::fmt::Debug;
 use std::mem;
@@ -389,10 +389,7 @@ pub(crate) fn do_dual_sort<A, B, R, F, P, Q>(
 mod test {
     use crate::*;
     use ::proptest::num::i32;
-    use archery::RcK;
-    use proptest::prelude::*;
     use proptest::proptest;
-    use proptest_derive::Arbitrary;
 
     proptest! {
         #[test]

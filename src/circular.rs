@@ -3,7 +3,6 @@
 //! A fixed-size container of elements that supports fast operations on either side of the buffer.
 
 use crate::{Side, RRB_WIDTH};
-use std::cmp;
 use std::fmt::{self, Debug, Formatter};
 use std::iter::FusedIterator;
 use std::mem;
@@ -16,13 +15,12 @@ pub enum CircularBufferError {
     EmptyBuffer,
     #[error("tried to insert an element into a full buffer")]
     FullBuffer,
-    #[error("tried to access an element past the end of the buffer")]
-    IndexOutOfBounds,
+    // #[error("tried to access an element past the end of the buffer")]
+    // IndexOutOfBounds,
 }
 
 type Result<T> = std::result::Result<T, CircularBufferError>;
 
-// #[derive(Debug)]
 pub(crate) struct BorrowBufferMut<A: Debug> {
     pub(crate) range: Range<usize>,
     data: *mut mem::MaybeUninit<A>,
@@ -44,20 +42,11 @@ impl<A: Debug> Debug for BorrowBufferMut<A> {
 }
 
 impl<'a, A: Debug> BorrowBufferMut<A> {
-    pub fn empty(&mut self) -> Self {
-        BorrowBufferMut {
-            range: self.range.start..self.range.start,
-            data: self.data,
-            front: 0,
-            len: self.len,
-        }
-    }
-
     pub fn from_same_source(&self, other: &Self) -> bool {
         self.data == other.data
     }
 
-    pub fn combine(&mut self, mut other: Self) {
+    pub fn combine(&mut self, other: Self) {
         assert!(self.from_same_source(&other));
         assert!(other.range.start == self.range.end);
         self.range.end = other.range.end;
@@ -69,14 +58,6 @@ impl<'a, A: Debug> BorrowBufferMut<A> {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    pub fn free_space(&self) -> usize {
-        RRB_WIDTH - self.len()
-    }
-
-    pub fn is_full(&self) -> bool {
-        self.len() == RRB_WIDTH
     }
 
     fn index_for(&self, idx: usize) -> usize {
@@ -109,70 +90,9 @@ impl<'a, A: Debug> BorrowBufferMut<A> {
         }
     }
 
-    pub fn front(&self) -> Option<&A> {
-        self.get(0)
-    }
-
-    pub fn back(&self) -> Option<&A> {
-        self.get(self.len() - 1)
-    }
-
     pub fn front_mut(&mut self) -> Option<&mut A> {
         self.get_mut(0)
     }
-
-    pub fn back_mut(&mut self) -> Option<&mut A> {
-        self.get_mut(self.len() - 1)
-    }
-
-    pub fn end(&self, side: Side) -> Option<&A> {
-        match side {
-            Side::Back => self.back(),
-            Side::Front => self.front(),
-        }
-    }
-
-    pub fn end_mut(&mut self, side: Side) -> Option<&mut A> {
-        match side {
-            Side::Back => self.back_mut(),
-            Side::Front => self.front_mut(),
-        }
-    }
-
-    pub unsafe fn take_item(&mut self, idx: usize) -> A {
-        let idx = idx + self.range.start;
-        assert!(self.range.contains(&idx));
-        let index = self.index_for(idx);
-        let data = std::slice::from_raw_parts_mut(self.data, RRB_WIDTH);
-        mem::replace(&mut data[index], mem::MaybeUninit::uninit()).assume_init()
-    }
-
-    pub unsafe fn return_item(&mut self, idx: usize, item: A) {
-        let idx = idx + self.range.start;
-        assert!(self.range.contains(&idx));
-        let index = self.index_for(idx);
-        let data = std::slice::from_raw_parts_mut(self.data, RRB_WIDTH);
-        data[index] = mem::MaybeUninit::new(item);
-    }
-
-    // pub fn pair_mut(&mut self, first: usize, second: usize) -> (&mut A, &mut A) {
-    // assert_ne!(first, second);
-    // assert!(first < self.len());
-    // assert!(second < self.len());
-
-    // let first_idx = self.index_for(first);
-    // let second_idx = self.index_for(second);
-    // if first_idx > second_idx {
-    //     let result = self.pair_mut(second, first);
-    //     return (result.1, result.0);
-    // }
-
-    // let (first_slice, second_slice) = self.data.split_at_mut(second_idx);
-    // let first_ptr = first_slice[first_idx].as_mut_ptr();
-    // let second_ptr = second_slice[0].as_mut_ptr();
-
-    // unsafe { (&mut *first_ptr, &mut *second_ptr) }
-    // }
 
     pub fn split_at(&mut self, index: usize) -> Self {
         let first_end = self.range.start + index;
@@ -212,18 +132,6 @@ impl<A: Debug> CircularBuffer<A> {
     pub fn with_item(item: A) -> Self {
         let mut result = CircularBuffer::new();
         result.push_back(item);
-        result
-    }
-
-    /// Creates a new `CircularBuffer` with the elements from the given `Vec`.
-    ///
-    /// Panics if the collection contains more than `RRB_WIDTH` items.
-    pub fn with_items(items: Vec<A>) -> Self {
-        let mut result = CircularBuffer::new();
-        assert!(items.len() <= RRB_WIDTH);
-        for item in items.into_iter() {
-            result.push_back(item);
-        }
         result
     }
 
@@ -341,70 +249,6 @@ impl<A: Debug> CircularBuffer<A> {
         self.try_pop_front().expect("Circular buffer is empty")
     }
 
-    /// Attempts to remove an element from the buffer.
-    ///
-    /// Returns Err(()) if the requested element does not exist.
-    pub fn try_remove(&mut self, idx: usize) -> Result<A> {
-        if self.len() > idx {
-            let position = (self.front + idx) % RRB_WIDTH;
-            let back = (self.front + self.len) % RRB_WIDTH;
-
-            if back > self.front {
-                // We rotate the subarray from idx to self.back left 1
-                let slice = &mut self.data[position..back];
-                slice.rotate_left(1);
-                Ok(self.pop_back())
-            } else {
-                // The buffer is split up into self.front..SIZE and 0..self.back
-                // If the idx lies in the second part we can follow the same proccess as above
-                // If idx lies in the first part we need to shift both parts around
-                if position > self.front {
-                    // Part 1
-                    // Slide the first element in the second part to the last position and pop it
-                    let second_slice = &mut self.data[0..back];
-                    second_slice.rotate_right(1);
-                    let moved_element = mem::MaybeUninit::new(self.pop_back());
-
-                    // We rotate the item we'd like to remove the very end and replace it with the
-                    // above
-                    let first_slice = &mut self.data[position..RRB_WIDTH];
-                    first_slice.rotate_left(1);
-                    unsafe {
-                        Ok(
-                            mem::replace(&mut self.data[RRB_WIDTH - 1], moved_element)
-                                .assume_init(),
-                        )
-                    }
-                } else {
-                    // Part 2
-                    let slice = &mut self.data[position..back];
-                    slice.rotate_left(1);
-                    Ok(self.pop_back())
-                }
-            }
-        } else {
-            Err(CircularBufferError::IndexOutOfBounds)
-        }
-    }
-
-    /// Attempts to remove an element from the buffer.
-    ///
-    /// Panics if the requested element does not exist.
-    pub fn remove(&mut self, idx: usize) -> A {
-        self.try_remove(idx)
-            .expect("Tried to remove element that does not exist")
-    }
-
-    /// Attempts to push an element to a side of the buffer.
-    ///
-    /// Returns Err(()) if the buffer is full.
-    pub fn try_push(&mut self, side: Side, item: A) -> Result<()> {
-        match side {
-            Side::Back => self.try_push_back(item),
-            Side::Front => self.try_push_front(item),
-        }
-    }
-
     /// Attempts to push an element to a side of the buffer.
     ///
     /// Panics if the buffer is full.
@@ -503,26 +347,6 @@ impl<A: Debug> CircularBuffer<A> {
         }
     }
 
-    /// Gets a reference the element on a given side of the buffer.
-    ///
-    /// Returns None if the buffer is empty.
-    pub fn end(&self, side: Side) -> Option<&A> {
-        match side {
-            Side::Back => self.back(),
-            Side::Front => self.front(),
-        }
-    }
-
-    /// Gets a mutable  reference the element on a given side of the buffer.
-    ///
-    /// Returns None if the buffer is empty.
-    pub fn end_mut(&mut self, side: Side) -> Option<&mut A> {
-        match side {
-            Side::Back => self.back_mut(),
-            Side::Front => self.front_mut(),
-        }
-    }
-
     /// Creates an iterator over the elements in the buffer.
     pub fn iter(&self) -> Iter<A> {
         Iter {
@@ -541,13 +365,6 @@ impl<A: Debug> CircularBuffer<A> {
             back: (self.front + self.len) % RRB_WIDTH,
             buffer: self,
         }
-    }
-
-    /// Shuffles the circular buffer in memory so that the buffer is contiguous instead of
-    /// potentially being split up into two areas. This allows the buffer to be returned as a slice.
-    pub fn align_contents(&mut self) {
-        self.data.rotate_left(self.front);
-        self.front = 0;
     }
 
     /// Returns a pair of mutable references to the data at the given positions.
@@ -575,67 +392,6 @@ impl<A: Debug> CircularBuffer<A> {
         unsafe { (&mut *first_ptr, &mut *second_ptr) }
     }
 
-    /// Returns the circular buffer as a single slice if possible.
-    pub fn slice_get_ref(&self) -> Option<&[A]> {
-        let back = (self.front + self.len) % RRB_WIDTH;
-        if back >= self.front {
-            let slice = &self.data[self.front..back];
-            unsafe { Some(&*(slice as *const [mem::MaybeUninit<A>] as *const [A])) }
-        } else {
-            None
-        }
-    }
-
-    /// Returns the circular buffer as a single mutable slice if possible.
-    pub fn slice_get_mut(&mut self) -> Option<&mut [A]> {
-        let back = (self.front + self.len) % RRB_WIDTH;
-        if back >= self.front {
-            let slice = &mut self.data[self.front..back];
-            unsafe { Some(&mut *(slice as *mut [mem::MaybeUninit<A>] as *mut [A])) }
-        } else {
-            None
-        }
-    }
-
-    /// Temporarily removes an item at the requested index if it exists. The item must be put back
-    /// into the buffer before ANY other operations on the cirular buffer are performed. The item
-    /// can be returned to the buffer with the `return_item` function. It is not safe to clone, drop
-    /// or do anything except return the item to the buffer while the item is taken.
-    ///
-    /// # Panics
-    ///
-    /// This panics if the index points to an out of bound item.
-    ///
-    /// # Safety
-    ///
-    /// This is a very unsafe function. If the buffer is dropped while an item is taken out,
-    /// undefined behaviour will occur. If the same item is taken multiple items, instant undefined
-    /// behaviour will occur. Reading taken items via calls such as `get`, `get_mut` or `pop` will
-    /// invoke undefined behaviour. Putting an item back in the wrong place, will invoke undefined
-    /// behaviour when the buffer is dropped.
-    pub unsafe fn take_item(&mut self, idx: usize) -> A {
-        assert!(idx < self.len());
-        let position = (self.front + idx) % RRB_WIDTH;
-        mem::replace(&mut self.data[position], mem::MaybeUninit::uninit()).assume_init()
-    }
-
-    /// Returns an item to the given index. Calling this on an existing item that was not taken out,
-    /// will leak the memory of the item that is replaced.
-    ///
-    /// # Panics
-    ///
-    /// This panics if the index points to an out of bound item.
-    ///
-    /// # Safety
-    ///
-    /// Putting an item back in the wrong place will invoke undefined behaviour when the buffer is
-    /// dropped.
-    pub unsafe fn return_item(&mut self, idx: usize, item: A) {
-        assert!(idx < self.len());
-        let position = (self.front + idx) % RRB_WIDTH;
-        self.data[position] = mem::MaybeUninit::new(item);
-    }
-
     /// Removes elements from `self` and inserts these elements into `destination`. At most `len`
     /// elements will be removed. The actual number of elements decanted is returned. Elements are
     /// popped from `share_side` but pushed into the destination via `share_side.negate()`.
@@ -653,77 +409,6 @@ impl<A: Debug> CircularBuffer<A> {
         }
     }
 
-    /// Sorts the buffer by the order induced by the given comparator.
-    pub fn sort_by<F: FnMut(&A, &A) -> cmp::Ordering>(&mut self, range: Range<usize>, f: &mut F) {
-        self.align_contents();
-        let data = self.slice_get_mut().unwrap();
-        data[range].sort_by(f);
-    }
-
-    /// Tests whether the buffer is sorted by the order induced by the given comparator.
-    pub fn is_sorted_by<F: FnMut(&A, &A) -> Option<cmp::Ordering>>(
-        &self,
-        range: Range<usize>,
-        f: &mut F,
-    ) -> bool {
-        let mut iter = self.iter().skip(range.start).take(range.end - range.start);
-        if let Some(mut item) = iter.next() {
-            for next in iter {
-                if let Some(cmp) = f(item, next) {
-                    if cmp != cmp::Ordering::Greater {
-                        item = next;
-                    } else {
-                        return false;
-                    }
-                } else {
-                    return false;
-                }
-            }
-            true
-        } else {
-            true
-        }
-    }
-
-    /// Performs a binary search through the buffer that has already been sorted by the order
-    /// induced by the given comparator. If the function returns `Ok(position)` then it is
-    /// guaranteed that the `f(buffer[position]) == Ordering::Equal`. If the function returns
-    /// `Err(position)` then `f(buffer[position]) == Ordering::Greater`. This would indicate the
-    /// position where searched for element should be inserted in order to maintain sorted order.
-    /// Tgis is hoisted directly from the algorithm used in the rust std library.
-    pub fn binary_search_by<F: FnMut(&A) -> cmp::Ordering>(
-        &self,
-        range: Range<usize>,
-        f: &mut F,
-    ) -> std::result::Result<usize, usize> {
-        let range = range.start.min(self.len())..range.end.min(self.len());
-        if range.start == range.end {
-            panic!()
-        }
-        let mut size = range.end - range.start;
-        if size == 0 {
-            return Err(0);
-        }
-        let mut base = range.start;
-        while size > 1 {
-            let half = size / 2;
-            let mid = base + half;
-            let cmp = f(self.get(mid).unwrap());
-            base = if cmp == cmp::Ordering::Greater {
-                base
-            } else {
-                mid
-            };
-            size -= half;
-        }
-        let cmp = f(self.get(base).unwrap());
-        if cmp == cmp::Ordering::Equal {
-            Ok(base)
-        } else {
-            Err(base + (cmp == cmp::Ordering::Less) as usize)
-        }
-    }
-
     pub(crate) fn mutable_view(&mut self) -> BorrowBufferMut<A> {
         assert_ne!(self.len(), 0);
         BorrowBufferMut {
@@ -732,35 +417,6 @@ impl<A: Debug> CircularBuffer<A> {
             front: self.front,
             len: self.len,
         }
-    }
-}
-
-impl<A: PartialOrd + Debug> CircularBuffer<A> {
-    /// Tests whether the buffer is sorted by the order induced by the natural `PartialOrd`
-    /// comparator.
-    pub fn is_sorted(&self, range: Range<usize>) -> bool {
-        let mut f = |a: &A, b: &A| a.partial_cmp(b);
-        self.is_sorted_by(range, &mut f)
-    }
-}
-
-impl<A: Ord + Debug> CircularBuffer<A> {
-    /// Sorts the buffer by the order induced by the natural `Ord` comparator.
-    pub fn sort(&mut self, range: Range<usize>) {
-        let mut f = |a: &A, b: &A| a.cmp(b);
-        self.sort_by(range, &mut f);
-    }
-
-    /// Performs a binary search through the buffer that has already been sorted by the order
-    /// induced by the natural `Ord` comparator. For more information see the `binary_search_by`
-    /// function.
-    pub fn binary_search(
-        &self,
-        range: Range<usize>,
-        item: &A,
-    ) -> std::result::Result<usize, usize> {
-        let mut f = |p: &A| p.cmp(item);
-        self.binary_search_by(range, &mut f)
     }
 }
 
@@ -1079,15 +735,11 @@ mod test {
         assert_eq!(empty.back(), None);
         assert_eq!(empty.try_pop_back(), Err(CircularBufferError::EmptyBuffer));
         assert_eq!(empty.back_mut(), None);
-        assert_eq!(empty.end(Side::Back), None);
-        assert_eq!(empty.end_mut(Side::Back), None);
 
         // Front
         assert_eq!(empty.front(), None);
         assert_eq!(empty.front_mut(), None);
         assert_eq!(empty.try_pop_front(), Err(CircularBufferError::EmptyBuffer));
-        assert_eq!(empty.end(Side::Front), None);
-        assert_eq!(empty.end_mut(Side::Front), None);
 
         // Iter
         assert_eq!(empty.iter().collect::<Vec<_>>(), empty_ref_vector);
@@ -1110,26 +762,18 @@ mod test {
         // Back
         assert_eq!(single.back(), Some(&item));
         assert_eq!(single.back_mut(), Some(&mut item));
-        assert_eq!(single.end(Side::Back), Some(&item));
-        assert_eq!(single.end_mut(Side::Back), Some(&mut item));
         let mut back = single.clone();
         assert_eq!(back.try_pop_back(), Ok(item));
         assert_eq!(back.try_pop_back(), Err(CircularBufferError::EmptyBuffer));
         assert_eq!(back.back(), None);
         assert_eq!(back.back_mut(), None);
-        assert_eq!(back.end(Side::Back), None);
-        assert_eq!(back.end_mut(Side::Back), None);
 
         // Front
         assert_eq!(single.front(), Some(&item));
         assert_eq!(single.front_mut(), Some(&mut item));
-        assert_eq!(single.end(Side::Front), Some(&item));
-        assert_eq!(single.end_mut(Side::Front), Some(&mut item));
         let mut front = single.clone();
         assert_eq!(front.try_pop_front(), Ok(item));
         assert_eq!(front.try_pop_front(), Err(CircularBufferError::EmptyBuffer));
-        assert_eq!(front.end(Side::Front), None);
-        assert_eq!(front.end_mut(Side::Front), None);
 
         // Iter
         assert_eq!(
@@ -1159,8 +803,6 @@ mod test {
         // Back
         assert_eq!(buffer.back(), Some(&0));
         assert_eq!(buffer.back_mut(), Some(&mut 0));
-        assert_eq!(buffer.end(Side::Back), Some(&0));
-        assert_eq!(buffer.end_mut(Side::Back), Some(&mut 0));
         let mut back = buffer.clone();
         assert_eq!(back.try_pop_back(), Ok(0));
         assert_eq!(back.try_pop_back(), Ok(1));
@@ -1175,14 +817,10 @@ mod test {
         assert_eq!(back.try_pop_back(), Err(CircularBufferError::EmptyBuffer));
         assert_eq!(back.back(), None);
         assert_eq!(back.back_mut(), None);
-        assert_eq!(back.end(Side::Back), None);
-        assert_eq!(back.end_mut(Side::Back), None);
 
         // Front
         assert_eq!(buffer.front(), Some(&9));
         assert_eq!(buffer.front_mut(), Some(&mut 9));
-        assert_eq!(buffer.end(Side::Front), Some(&9));
-        assert_eq!(buffer.end_mut(Side::Front), Some(&mut 9));
         let mut front = buffer.clone();
         assert_eq!(front.try_pop_front(), Ok(9));
         assert_eq!(front.try_pop_front(), Ok(8));
@@ -1195,21 +833,6 @@ mod test {
         assert_eq!(front.try_pop_front(), Ok(1));
         assert_eq!(front.try_pop_front(), Ok(0));
         assert_eq!(front.try_pop_front(), Err(CircularBufferError::EmptyBuffer));
-        assert_eq!(front.end(Side::Front), None);
-        assert_eq!(front.end_mut(Side::Front), None);
-
-        // Sort
-        buffer.sort(0..buffer.len());
-        assert_eq!(buffer.try_pop_front(), Ok(0));
-        assert_eq!(buffer.try_pop_front(), Ok(1));
-        assert_eq!(buffer.try_pop_front(), Ok(2));
-        assert_eq!(buffer.try_pop_front(), Ok(3));
-        assert_eq!(buffer.try_pop_front(), Ok(4));
-        assert_eq!(buffer.try_pop_front(), Ok(5));
-        assert_eq!(buffer.try_pop_front(), Ok(6));
-        assert_eq!(buffer.try_pop_front(), Ok(7));
-        assert_eq!(buffer.try_pop_front(), Ok(8));
-        assert_eq!(buffer.try_pop_front(), Ok(9));
     }
 
     #[test]

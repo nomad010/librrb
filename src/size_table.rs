@@ -2,7 +2,7 @@
 //!
 //! The size table is a structure for mapping from a position to a child index in an RRB tree.
 use crate::circular::CircularBuffer;
-use crate::{Side, RRB_WIDTH};
+use crate::Side;
 
 /// A naive implementation of an size table for nodes in the RRB tree. This implementation keeps
 /// track of the size of each of child as well as the level of the node in the tree.
@@ -24,16 +24,6 @@ impl SizeTable {
     /// Returns the level that the table should be associated with.
     pub fn level(&self) -> usize {
         self.level
-    }
-
-    /// Returns the free space left in this node.
-    pub fn free_space(&self) -> usize {
-        RRB_WIDTH.pow(1 + self.level as u32) - self.cumulative_size()
-    }
-
-    /// Returns the capacity of each of child in this node.
-    pub fn items_per_dense_node(&self) -> usize {
-        RRB_WIDTH.pow(self.level as u32)
     }
 
     /// Returns the total size of this node.
@@ -106,15 +96,6 @@ impl SizeTable {
         self.decrement_child_size(idx, decrement)
     }
 
-    /// Removes the child at the given index from the node and returns its size.
-    pub fn remove_child(&mut self, idx: usize) -> usize {
-        if idx == 0 {
-            self.buffer.remove(idx)
-        } else {
-            self.buffer.remove(idx) - self.buffer.get(idx - 1).cloned().unwrap()
-        }
-    }
-
     /// Adds a new child to a side of the node of a given size.
     pub fn push_child(&mut self, side: Side, size: usize) {
         match side {
@@ -170,6 +151,7 @@ impl SizeTable {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::RRB_WIDTH;
 
     #[test]
     pub fn empty() {

@@ -3,11 +3,9 @@
 use crate::circular::{BorrowBufferMut, CircularBuffer};
 use crate::size_table::SizeTable;
 use crate::{Side, RRB_WIDTH};
-use archery::{ArcK, RcK, SharedPointer, SharedPointerKind};
-use std::cmp;
+use archery::{SharedPointer, SharedPointerKind};
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut, Range};
-use std::rc::Rc;
 
 /// A leaf indicates a terminal node in the tree.
 #[derive(Debug)]
@@ -16,11 +14,6 @@ pub(crate) struct Leaf<A: Debug> {
 }
 
 impl<A: Debug> Leaf<A> {
-    /// Sorts the leaf by the given comparator.
-    pub fn sort_by<F: FnMut(&A, &A) -> cmp::Ordering>(&mut self, range: Range<usize>, f: &mut F) {
-        self.buffer.sort_by(range, f)
-    }
-
     /// Constructs a new empty leaf.
     pub fn empty() -> Self {
         Leaf {
@@ -32,17 +25,6 @@ impl<A: Debug> Leaf<A> {
     pub fn with_item(item: A) -> Self {
         Leaf {
             buffer: CircularBuffer::with_item(item),
-        }
-    }
-
-    /// Constructs a new leaf from the given items.
-    ///
-    /// # Panics
-    ///
-    /// This will panic if the length of items is greater than `RRB_WIDTH`.
-    pub fn with_items(items: Vec<A>) -> Self {
-        Leaf {
-            buffer: CircularBuffer::with_items(items),
         }
     }
 
@@ -68,13 +50,9 @@ impl<A: Debug> Leaf<A> {
         true
     }
 
-    /// Updates an element in the leaf.
-    pub fn update(&mut self, idx: usize, item: A) {
-        *self.buffer.get_mut(idx).unwrap() = item;
-    }
-
     /// Checks whether the node corresponds to its size table, Leaves do not have these tables so
     /// this never fails.
+    #[allow(dead_code)]
     pub fn debug_check_lens_size_table(&self) -> (usize, bool) {
         (self.len(), true)
     }
@@ -108,6 +86,7 @@ impl<A: Debug> Leaf<A> {
 impl<A: Debug + PartialEq> Leaf<A> {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
+    #[allow(dead_code)]
     pub(crate) fn equal_iter<'a>(&self, iter: &mut std::slice::Iter<'a, A>) -> bool {
         for value in &self.buffer {
             if value != iter.next().unwrap() {
@@ -119,6 +98,7 @@ impl<A: Debug + PartialEq> Leaf<A> {
 
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
+    #[allow(dead_code)]
     pub(crate) fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, A>) {
         for value in &self.buffer {
             let iter_value = iter.next().unwrap();
@@ -155,15 +135,6 @@ pub(crate) struct BorrowedLeaf<A: Debug> {
 }
 
 impl<'a, A: Debug> BorrowedLeaf<A> {
-    pub fn empty(&mut self) -> Self {
-        BorrowedLeaf {
-            buffer: self.buffer.empty(),
-        }
-    }
-
-    pub fn update(&mut self, idx: usize, item: A) {
-        *self.buffer.get_mut(idx).unwrap() = item;
-    }
     pub fn split_at(&mut self, idx: usize) -> Self {
         let buffer = self.buffer.split_at(idx);
         BorrowedLeaf { buffer }
@@ -184,10 +155,6 @@ impl<'a, A: Debug> BorrowedLeaf<A> {
 
     pub fn combine(&mut self, other: Self) {
         self.buffer.combine(other.buffer)
-    }
-
-    pub fn get(&self, idx: usize) -> Option<&A> {
-        self.buffer.get(idx)
     }
 
     pub fn get_mut(&mut self, idx: usize) -> Option<&mut A> {
@@ -217,32 +184,6 @@ impl<A: Clone + Debug, P: SharedPointerKind> ChildList<A, P> {
         match self {
             ChildList::Internals(_) => ChildList::Internals(CircularBuffer::new()),
             ChildList::Leaves(_) => ChildList::Leaves(CircularBuffer::new()),
-        }
-    }
-
-    /// Consumes `self` and returns the list as a list of leaf nodes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves(self) -> CircularBuffer<SharedPointer<Leaf<A>, P>> {
-        if let ChildList::Leaves(x) = self {
-            x
-        } else {
-            panic!("Failed to unwrap a child list as a leaves list")
-        }
-    }
-
-    /// Consumes `self` and returns the list as a list of internal nodes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` is not a list of internal nodes.
-    pub fn internals(self) -> CircularBuffer<SharedPointer<Internal<A, P>, P>> {
-        if let ChildList::Internals(x) = self {
-            x
-        } else {
-            panic!("Failed to unwrap a child list as an internals list")
         }
     }
 
@@ -684,67 +625,6 @@ impl<'a, A: Clone + std::fmt::Debug, P: SharedPointerKind> BorrowedChildList<A, 
         }
     }
 
-    /// Returns a reference to the list as a list of leaf nodes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves_ref(&self) -> &BorrowBufferMut<SharedPointer<Leaf<A>, P>> {
-        if let BorrowedChildList::Leaves(x) = self {
-            x
-        } else {
-            panic!("Failed to unwrap a child list as a leaves list")
-        }
-    }
-
-    /// Returns a reference to the list as a list of internal nodes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` is not a list of internal nodes.
-    pub fn internals_ref(&self) -> &BorrowBufferMut<SharedPointer<Internal<A, P>, P>> {
-        if let BorrowedChildList::Internals(x) = self {
-            x
-        } else {
-            panic!("Failed to unwrap a child list as an internals list")
-        }
-    }
-
-    /// Returns a mutable reference to the list as a list of leaf nodes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves_mut(&mut self) -> &mut BorrowBufferMut<SharedPointer<Leaf<A>, P>> {
-        if let BorrowedChildList::Leaves(x) = self {
-            x
-        } else {
-            panic!("Failed to unwrap a child list as a leaves list")
-        }
-    }
-
-    /// Returns a mutable reference to the list as a list of internal nodes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` is not a list of internal nodes.
-    pub fn internals_mut(&mut self) -> &mut BorrowBufferMut<SharedPointer<Internal<A, P>, P>> {
-        if let BorrowedChildList::Internals(x) = self {
-            x
-        } else {
-            panic!("Failed to unwrap a child list as an internals list")
-        }
-    }
-
-    fn empty(&mut self) -> Self {
-        match self {
-            BorrowedChildList::Internals(children) => {
-                BorrowedChildList::Internals(children.empty())
-            }
-            BorrowedChildList::Leaves(children) => BorrowedChildList::Leaves(children.empty()),
-        }
-    }
-
     fn split_at(&mut self, index: usize) -> Self {
         match self {
             BorrowedChildList::Internals(ref mut children) => {
@@ -755,13 +635,6 @@ impl<'a, A: Clone + std::fmt::Debug, P: SharedPointerKind> BorrowedChildList<A, 
                 let new_children = children.split_at(index);
                 BorrowedChildList::Leaves(new_children)
             }
-        }
-    }
-
-    fn len(&self) -> usize {
-        match self {
-            BorrowedChildList::Internals(children) => children.len(),
-            BorrowedChildList::Leaves(children) => children.len(),
         }
     }
 
@@ -981,20 +854,6 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> Internal<A, P> {
         }
     }
 
-    /// Overwrites the element at the given index in the tree with a new value.
-    pub fn update(&mut self, idx: usize, item: A) {
-        let (array_idx, new_idx) = self.sizes.position_info_for(idx).unwrap();
-
-        match &mut self.children {
-            ChildList::Internals(children) => {
-                SharedPointer::make_mut(children.get_mut(array_idx).unwrap()).update(new_idx, item)
-            }
-            ChildList::Leaves(children) => {
-                SharedPointer::make_mut(children.get_mut(array_idx).unwrap()).update(new_idx, item)
-            }
-        }
-    }
-
     pub fn borrow_node(&mut self) -> BorrowedInternal<A, P> {
         BorrowedInternal {
             children: self.children.borrow(),
@@ -1019,15 +878,6 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> Internal<A, P> {
     /// Returns whether the node is empty. This should almost never be the case.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    /// Returns the number of elements that could be inserted into the node.
-    pub fn free_space(&self) -> usize {
-        debug_assert_eq!(
-            RRB_WIDTH.pow(1 + self.level() as u32) - self.len(),
-            self.sizes.free_space()
-        );
-        self.sizes.free_space()
     }
 
     /// Returns the number of direct children of the node.
@@ -1115,6 +965,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> Internal<A, P> {
 impl<A: Clone + std::fmt::Debug + PartialEq, P: SharedPointerKind> Internal<A, P> {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
+    #[allow(dead_code)]
     pub(crate) fn equal_iter<'a>(&self, iter: &mut std::slice::Iter<'a, A>) -> bool {
         match self.children {
             ChildList::Internals(ref children) => {
@@ -1137,6 +988,7 @@ impl<A: Clone + std::fmt::Debug + PartialEq, P: SharedPointerKind> Internal<A, P
 
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
+    #[allow(dead_code)]
     pub(crate) fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, A>) {
         match self.children {
             ChildList::Internals(ref children) => {
@@ -1160,13 +1012,6 @@ pub(crate) struct BorrowedInternal<A: Clone + Debug, P: SharedPointerKind> {
 }
 
 impl<'a, A: Clone + Debug, P: SharedPointerKind> BorrowedInternal<A, P> {
-    fn empty(&mut self) -> Self {
-        BorrowedInternal {
-            sizes: SharedPointer::clone(&self.sizes),
-            children: self.children.empty(),
-        }
-    }
-
     pub fn left_size(&self) -> usize {
         let range = self.children.range();
         if range.start == 0 {
@@ -1383,14 +1228,6 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> NodeRc<A, P> {
         }
     }
 
-    /// Returns the number of elements that can be inserted into this node.
-    pub fn free_space(&self) -> usize {
-        match self {
-            NodeRc::Leaf(x) => x.free_space(),
-            NodeRc::Internal(x) => x.free_space(),
-        }
-    }
-
     /// Returns the number of children that can be inserted into this node.
     pub fn free_slots(&self) -> usize {
         match self {
@@ -1435,19 +1272,6 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> NodeRc<A, P> {
             x
         } else {
             panic!("Failed to unwrap a node as a leaf node")
-        }
-    }
-
-    /// Returns a reference to the node as an internal node.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` is not an internal node.
-    pub fn internal_ref(&self) -> &SharedPointer<Internal<A, P>, P> {
-        if let NodeRc::Internal(x) = self {
-            x
-        } else {
-            panic!("Failed to unwrap a node as an internal node")
         }
     }
 
@@ -1499,6 +1323,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> NodeRc<A, P> {
 impl<A: Clone + std::fmt::Debug + PartialEq, P: SharedPointerKind> NodeRc<A, P> {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
+    #[allow(dead_code)]
     pub(crate) fn equal_iter<'a>(&self, iter: &mut std::slice::Iter<'a, A>) -> bool {
         match self {
             NodeRc::Internal(ref internal) => internal.equal_iter(iter),
@@ -1508,6 +1333,7 @@ impl<A: Clone + std::fmt::Debug + PartialEq, P: SharedPointerKind> NodeRc<A, P> 
 
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
+    #[allow(dead_code)]
     pub(crate) fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, A>) {
         match self {
             NodeRc::Internal(ref internal) => internal.equal_iter_debug(iter),
@@ -1537,13 +1363,6 @@ pub(crate) enum BorrowedNode<A: Clone + Debug, P: SharedPointerKind> {
 }
 
 impl<A: Clone + Debug, P: SharedPointerKind> BorrowedNode<A, P> {
-    pub fn empty(&mut self) -> Self {
-        match self {
-            BorrowedNode::Internal(internal) => BorrowedNode::Internal(internal.empty()),
-            BorrowedNode::Leaf(leaf) => BorrowedNode::Leaf(leaf.empty()),
-        }
-    }
-
     pub fn len(&self) -> usize {
         match self {
             BorrowedNode::Internal(internal) => internal.len(),
@@ -1556,56 +1375,6 @@ impl<A: Clone + Debug, P: SharedPointerKind> BorrowedNode<A, P> {
             BorrowedNode::Internal(internal) => internal.level(),
             BorrowedNode::Leaf(leaf) => leaf.level(),
         }
-    }
-
-    pub fn make_spine(&mut self, side: Side) -> Vec<NodeRc<A, P>> {
-        let mut spine = Vec::new();
-        if let BorrowedNode::Internal(ref mut internal) = self {
-            let idx = if side == Side::Front {
-                0
-            } else {
-                internal.children.len() - 1
-            };
-            unsafe {
-                let child = match &mut internal.children {
-                    BorrowedChildList::Internals(children) => {
-                        NodeRc::Internal(children.take_item(idx))
-                    }
-                    BorrowedChildList::Leaves(children) => NodeRc::Leaf(children.take_item(idx)),
-                };
-                spine.push(child);
-            }
-        }
-        while let NodeRc::Internal(internal) = spine.last_mut().unwrap() {
-            let idx = if side == Side::Front {
-                0
-            } else {
-                internal.children.slots() - 1
-            };
-            unsafe {
-                let child = match SharedPointer::make_mut(internal).children {
-                    ChildList::Internals(ref mut children) => {
-                        NodeRc::Internal(children.take_item(idx))
-                    }
-                    ChildList::Leaves(ref mut children) => NodeRc::Leaf(children.take_item(idx)),
-                };
-                spine.push(child);
-            }
-        }
-        spine
-    }
-
-    pub fn split_info(&mut self, index: usize) -> (Vec<Self>, Vec<Self>) {
-        if index == 0 {
-            let empty = self.empty();
-            *self = empty;
-        } else if index == self.len() {
-            let empty = self.empty();
-        }
-        let shared: Vec<Self> = Vec::new();
-        // let result
-        if let BorrowedNode::Internal(internal) = self {}
-        unimplemented!();
     }
 
     pub fn leaf(self) -> BorrowedLeaf<A> {
@@ -1622,32 +1391,6 @@ impl<A: Clone + Debug, P: SharedPointerKind> BorrowedNode<A, P> {
     ///
     /// Panics if `self` is not an internal node.
     pub fn internal(self) -> BorrowedInternal<A, P> {
-        if let BorrowedNode::Internal(x) = self {
-            x
-        } else {
-            panic!("Failed to unwrap a node as an internal node")
-        }
-    }
-
-    /// Returns a reference to the node as a leaf node.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` is not a leaf node.
-    pub fn leaf_ref(&self) -> &BorrowedLeaf<A> {
-        if let BorrowedNode::Leaf(x) = self {
-            x
-        } else {
-            panic!("Failed to unwrap a node as a leaf node")
-        }
-    }
-
-    /// Returns a reference to the node as an internal node.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` is not an internal node.
-    pub fn internal_ref(&self) -> &BorrowedInternal<A, P> {
         if let BorrowedNode::Internal(x) = self {
             x
         } else {
