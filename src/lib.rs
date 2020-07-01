@@ -33,6 +33,7 @@ mod annotated_nodes;
 mod annotation_table;
 mod circular;
 mod nodes;
+// mod reference;
 mod size_table;
 mod sort;
 
@@ -51,8 +52,10 @@ pub const RRB_WIDTH: usize = 64;
 
 /// Represents a side of a container.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Side {
+pub enum Side {
+    /// derp
     Front,
+    /// derp
     Back,
 }
 

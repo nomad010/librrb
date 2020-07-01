@@ -3,6 +3,7 @@
 use crate::circular::{BorrowBufferMut, CircularBuffer};
 use crate::size_table::SizeTable;
 use crate::{Side, RRB_WIDTH};
+use archery::{ArcK, RcK, SharedPointer, SharedPointerKind};
 use std::cmp;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut, Range};
@@ -195,13 +196,22 @@ impl<'a, A: Debug> BorrowedLeaf<A> {
 }
 
 /// Represents a homogenous list of nodes.
-#[derive(Clone, Debug)]
-pub(crate) enum ChildList<A: Clone + Debug> {
-    Leaves(CircularBuffer<Rc<Leaf<A>>>),
-    Internals(CircularBuffer<Rc<Internal<A>>>),
+#[derive(Debug)]
+pub(crate) enum ChildList<A: Clone + std::fmt::Debug, P: SharedPointerKind> {
+    Leaves(CircularBuffer<SharedPointer<Leaf<A>, P>>),
+    Internals(CircularBuffer<SharedPointer<Internal<A, P>, P>>),
 }
 
-impl<A: Clone + Debug> ChildList<A> {
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> Clone for ChildList<A, P> {
+    fn clone(&self) -> Self {
+        match self {
+            ChildList::Leaves(buf) => ChildList::Leaves(buf.clone()),
+            ChildList::Internals(buf) => ChildList::Internals(buf.clone()),
+        }
+    }
+}
+
+impl<A: Clone + Debug, P: SharedPointerKind> ChildList<A, P> {
     /// Constructs a new empty list of nodes.
     pub fn new_empty(&self) -> Self {
         match self {
@@ -215,7 +225,7 @@ impl<A: Clone + Debug> ChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves(self) -> CircularBuffer<Rc<Leaf<A>>> {
+    pub fn leaves(self) -> CircularBuffer<SharedPointer<Leaf<A>, P>> {
         if let ChildList::Leaves(x) = self {
             x
         } else {
@@ -228,7 +238,7 @@ impl<A: Clone + Debug> ChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals(self) -> CircularBuffer<Rc<Internal<A>>> {
+    pub fn internals(self) -> CircularBuffer<SharedPointer<Internal<A, P>, P>> {
         if let ChildList::Internals(x) = self {
             x
         } else {
@@ -241,7 +251,7 @@ impl<A: Clone + Debug> ChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves_ref(&self) -> &CircularBuffer<Rc<Leaf<A>>> {
+    pub fn leaves_ref(&self) -> &CircularBuffer<SharedPointer<Leaf<A>, P>> {
         if let ChildList::Leaves(x) = self {
             x
         } else {
@@ -254,7 +264,7 @@ impl<A: Clone + Debug> ChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals_ref(&self) -> &CircularBuffer<Rc<Internal<A>>> {
+    pub fn internals_ref(&self) -> &CircularBuffer<SharedPointer<Internal<A, P>, P>> {
         if let ChildList::Internals(x) = self {
             x
         } else {
@@ -267,7 +277,7 @@ impl<A: Clone + Debug> ChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves_mut(&mut self) -> &mut CircularBuffer<Rc<Leaf<A>>> {
+    pub fn leaves_mut(&mut self) -> &mut CircularBuffer<SharedPointer<Leaf<A>, P>> {
         if let ChildList::Leaves(x) = self {
             x
         } else {
@@ -280,7 +290,7 @@ impl<A: Clone + Debug> ChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals_mut(&mut self) -> &mut CircularBuffer<Rc<Internal<A>>> {
+    pub fn internals_mut(&mut self) -> &mut CircularBuffer<SharedPointer<Internal<A, P>, P>> {
         if let ChildList::Internals(x) = self {
             x
         } else {
@@ -288,7 +298,7 @@ impl<A: Clone + Debug> ChildList<A> {
         }
     }
 
-    pub fn borrow(&mut self) -> BorrowedChildList<A> {
+    pub fn borrow(&mut self) -> BorrowedChildList<A, P> {
         match self {
             ChildList::Internals(children) => BorrowedChildList::Internals(children.mutable_view()),
             ChildList::Leaves(children) => BorrowedChildList::Leaves(children.mutable_view()),
@@ -310,20 +320,24 @@ impl<A: Clone + Debug> ChildList<A> {
     pub fn get_mut(&mut self, child_idx: usize, idx: usize) -> Option<&mut A> {
         match self {
             ChildList::Leaves(children) => {
-                Rc::make_mut(children.get_mut(child_idx).unwrap()).get_mut(idx)
+                SharedPointer::make_mut(children.get_mut(child_idx).unwrap()).get_mut(idx)
             }
             ChildList::Internals(children) => {
-                Rc::make_mut(children.get_mut(child_idx).unwrap()).get_mut(idx)
+                SharedPointer::make_mut(children.get_mut(child_idx).unwrap()).get_mut(idx)
             }
         }
     }
 
     /// Returns a copy of the Rc of the node at the given position in the node.
-    pub fn get_child_node(&self, idx: usize) -> Option<NodeRc<A>> {
+    pub fn get_child_node(&self, idx: usize) -> Option<NodeRc<A, P>> {
         // TODO: Get rid of this function
         match self {
-            ChildList::Leaves(children) => children.get(idx).map(|x| Rc::clone(x).into()),
-            ChildList::Internals(children) => children.get(idx).map(|x| Rc::clone(x).into()),
+            ChildList::Leaves(children) => {
+                children.get(idx).map(|x| SharedPointer::clone(x).into())
+            }
+            ChildList::Internals(children) => {
+                children.get(idx).map(|x| SharedPointer::clone(x).into())
+            }
         }
     }
 
@@ -341,19 +355,315 @@ impl<A: Clone + Debug> ChildList<A> {
     }
 }
 
+// impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> Internal<A, P> {
+//     /// Constructs a new empty internal node that is at level 1 in the tree.
+//     pub fn empty_leaves() -> Self {
+//         Internal {
+//             sizes: SharedPointer::new(SizeTable::new(1)),
+//             children: ChildList::Leaves(CircularBuffer::new()),
+//         }
+//     }
+
+//     /// Constructs a new empty internal node that is at the given level in the tree.
+//     pub fn empty_internal(level: usize) -> Self {
+//         debug_assert_ne!(level, 0); // Should be a Leaf
+//         if level == 1 {
+//             Self::empty_leaves()
+//         } else {
+//             Internal {
+//                 sizes: SharedPointer::new(SizeTable::new(level)),
+//                 children: ChildList::Internals(CircularBuffer::new()),
+//             }
+//         }
+//     }
+
+//     /// Constructs a new internal node of the same level, but with no children.
+//     pub fn new_empty(&self) -> Self {
+//         Internal {
+//             sizes: SharedPointer::new(SizeTable::new(self.sizes.level())),
+//             children: self.children.new_empty(),
+//         }
+//     }
+
+//     /// Removes elements from `self` and inserts these elements into `destination`. At most `len`
+//     /// elements will be removed. The actual number of elements decanted is returned. Elements are
+//     /// popped from `share_side` but pushed into the destination via `share_side.negate()`. Both
+//     /// self and destination should be at the same level in the tree.
+//     pub fn share_children_with(
+//         &mut self,
+//         destination: &mut Self,
+//         share_side: Side,
+//         len: usize,
+//     ) -> usize {
+//         debug_assert_eq!(self.level(), destination.level());
+//         let shared = match self.children {
+//             ChildList::Internals(ref mut children) => {
+//                 debug_assert_eq!(children.len(), self.sizes.len());
+//                 children.decant_into(destination.children.internals_mut(), share_side, len)
+//             }
+//             ChildList::Leaves(ref mut children) => {
+//                 debug_assert_eq!(children.len(), self.sizes.len());
+//                 children.decant_into(destination.children.leaves_mut(), share_side, len)
+//             }
+//         };
+//         if shared != 0 {
+//             let origin_sizes = SharedPointer::make_mut(&mut self.sizes);
+//             let destination_sizes = SharedPointer::make_mut(&mut destination.sizes);
+
+//             for _ in 0..shared {
+//                 destination_sizes
+//                     .push_child(share_side.negate(), origin_sizes.pop_child(share_side));
+//             }
+//         }
+
+//         shared
+//     }
+
+//     /// Packs the children of the to the left of the node so that all but the last is dense.
+//     pub fn pack_children(&mut self) {
+//         if self.is_empty() {
+//             return;
+//         }
+//         if self.level() == 1 {
+//             assert_eq!(self.children.leaves_ref().len(), self.sizes.len());
+//         } else {
+//             assert_eq!(self.children.internals_ref().len(), self.sizes.len());
+//         }
+//         // TODO: Genericize on a side
+//         let mut write_position = 0;
+//         let mut read_position = write_position + 1;
+//         match self.children {
+//             ChildList::Internals(ref mut children) => {
+//                 while read_position < children.len() {
+//                     if read_position == write_position {
+//                         read_position += 1;
+//                         continue;
+//                     } else {
+//                         let (write, read) = children.pair_mut(write_position, read_position);
+//                         SharedPointer::make_mut(read).share_children_with(
+//                             SharedPointer::make_mut(write),
+//                             Side::Front,
+//                             RRB_WIDTH,
+//                         );
+
+//                         if write.is_full() {
+//                             write_position += 1;
+//                         }
+//                         if read.is_empty() {
+//                             read_position += 1;
+//                         }
+//                     }
+//                 }
+//                 while children.back().unwrap().is_empty() {
+//                     children.pop_back();
+//                 }
+//                 let sizes = SharedPointer::make_mut(&mut self.sizes);
+//                 *sizes = SizeTable::new(sizes.level());
+//                 for child in children {
+//                     sizes.push_child(Side::Back, child.len());
+//                 }
+//             }
+//             ChildList::Leaves(ref mut children) => {
+//                 while read_position < children.len() {
+//                     if read_position == write_position {
+//                         read_position += 1;
+//                         continue;
+//                     } else {
+//                         let (write, read) = children.pair_mut(write_position, read_position);
+//                         SharedPointer::make_mut(read).share_children_with(
+//                             SharedPointer::make_mut(write),
+//                             Side::Front,
+//                             RRB_WIDTH,
+//                         );
+
+//                         if write.is_full() {
+//                             write_position += 1;
+//                         }
+//                         if read.is_empty() {
+//                             read_position += 1;
+//                         }
+//                     }
+//                 }
+
+//                 while children.back().unwrap().is_empty() {
+//                     children.pop_back();
+//                 }
+//                 let sizes = SharedPointer::make_mut(&mut self.sizes);
+//                 *sizes = SizeTable::new(sizes.level());
+//                 for child in children {
+//                     sizes.push_child(Side::Back, child.len());
+//                 }
+//             }
+//         }
+
+//         if self.level() == 1 {
+//             assert_eq!(self.children.leaves_ref().len(), self.sizes.len());
+//         } else {
+//             assert_eq!(self.children.internals_ref().len(), self.sizes.len());
+//         }
+//     }
+
+//     /// Returns a reference to the element at the given index in the tree.
+//     pub fn get(&self, idx: usize) -> Option<&A> {
+//         if let Some((array_idx, new_idx)) = self.sizes.position_info_for(idx) {
+//             self.children.get(array_idx, new_idx)
+//         } else {
+//             None
+//         }
+//     }
+
+//     pub fn get_mut(&mut self, idx: usize) -> Option<&mut A> {
+//         if let Some((array_idx, new_idx)) = self.sizes.position_info_for(idx) {
+//             self.children.get_mut(array_idx, new_idx)
+//         } else {
+//             None
+//         }
+//     }
+
+//     /// Overwrites the element at the given index in the tree with a new value.
+//     pub fn update(&mut self, idx: usize, item: A) {
+//         let (array_idx, new_idx) = self.sizes.position_info_for(idx).unwrap();
+
+//         match &mut self.children {
+//             ChildList::Internals(children) => {
+//                 SharedPointer::make_mut(children.get_mut(array_idx).unwrap()).update(new_idx, item)
+//             }
+//             ChildList::Leaves(children) => {
+//                 SharedPointer::make_mut(children.get_mut(array_idx).unwrap()).update(new_idx, item)
+//             }
+//         }
+//     }
+
+//     pub fn borrow_node(&mut self) -> BorrowedInternal<A, P> {
+//         BorrowedInternal {
+//             children: self.children.borrow(),
+//             sizes: Rc::clone(&self.sizes),
+//         }
+//     }
+
+//     /// Returns the level the node is at in the tree.
+//     pub fn level(&self) -> usize {
+//         self.sizes.level()
+//     }
+
+//     /// Returns the size(number of elements hanging off) of the node.
+//     pub fn len(&self) -> usize {
+//         debug_assert_eq!(
+//             self.debug_check_lens_size_table(),
+//             self.sizes.cumulative_size()
+//         );
+//         self.sizes.cumulative_size()
+//     }
+
+//     /// Returns whether the node is empty. This should almost never be the case.
+//     pub fn is_empty(&self) -> bool {
+//         self.len() == 0
+//     }
+
+//     /// Returns the number of elements that could be inserted into the node.
+//     pub fn free_space(&self) -> usize {
+//         debug_assert_eq!(
+//             RRB_WIDTH.pow(1 + self.level() as u32) - self.len(),
+//             self.sizes.free_space()
+//         );
+//         self.sizes.free_space()
+//     }
+
+//     /// Returns the number of direct children of the node.
+//     pub fn slots(&self) -> usize {
+//         debug_assert_eq!(self.sizes.len(), self.children.slots());
+//         self.children.slots()
+//     }
+
+//     /// Returns the number of direct children that could be inserted into the node.
+//     pub fn free_slots(&self) -> usize {
+//         debug_assert_eq!(RRB_WIDTH - self.sizes.len(), self.children.free_slots());
+//         self.children.free_slots()
+//     }
+
+//     /// Returns whether no more children can be inserted into the node.
+//     pub fn is_full(&self) -> bool {
+//         self.free_slots() == 0
+//     }
+
+//     /// Returns whether the node is a leaf. This is always false for an internal node.
+//     pub fn is_leaf(&self) -> bool {
+//         false
+//     }
+
+//     /// Returns the position of the child that corresponds to the given index along with a new
+//     /// index to query in that child.
+//     pub fn position_info_for(&self, idx: usize) -> Option<(usize, usize)> {
+//         self.sizes.position_info_for(idx)
+//     }
+
+//     /// Checks whether the node corresponds to its size table.
+//     pub fn debug_check_lens_size_table(&self) -> usize {
+//         let mut cumulative_size = 0;
+//         match &self.children {
+//             ChildList::Internals(children) => {
+//                 debug_assert_eq!(self.sizes.len(), children.len());
+//                 for i in 0..children.len() {
+//                     debug_assert_eq!(
+//                         children.get(i).unwrap().len(),
+//                         self.sizes.get_child_size(i).unwrap()
+//                     );
+//                     cumulative_size += children.get(i).unwrap().len();
+//                 }
+//                 cumulative_size
+//             }
+//             ChildList::Leaves(children) => {
+//                 debug_assert_eq!(self.sizes.len(), children.len());
+//                 for i in 0..children.len() {
+//                     debug_assert_eq!(
+//                         children.get(i).unwrap().len(),
+//                         self.sizes.get_child_size(i).unwrap()
+//                     );
+//                     cumulative_size += children.get(i).unwrap().len();
+//                 }
+//                 cumulative_size
+//             }
+//         }
+//     }
+
+//     /// Checks whether the node's heights and heights of its children make sense.
+//     pub fn debug_check_child_heights(&self) -> usize {
+//         match &self.children {
+//             ChildList::Internals(children) => {
+//                 for i in children {
+//                     debug_assert_eq!(i.debug_check_child_heights() + 1, self.level());
+//                 }
+//             }
+//             ChildList::Leaves(children) => {
+//                 for i in children {
+//                     debug_assert_eq!(i.debug_check_child_heights() + 1, self.level());
+//                 }
+//             }
+//         }
+//         self.level()
+//     }
+
+//     /// Check the invariants of the node.
+//     pub fn debug_check_invariants(&self) -> bool {
+//         self.debug_check_child_heights();
+//         self.len();
+//         true
+//     }
+// }
+
 #[derive(Debug)]
-pub(crate) enum BorrowedChildList<A: Clone + Debug> {
-    Internals(BorrowBufferMut<Rc<Internal<A>>>),
-    Leaves(BorrowBufferMut<Rc<Leaf<A>>>),
+pub(crate) enum BorrowedChildList<A: Clone + std::fmt::Debug, P: SharedPointerKind> {
+    Internals(BorrowBufferMut<SharedPointer<Internal<A, P>, P>>),
+    Leaves(BorrowBufferMut<SharedPointer<Leaf<A>, P>>),
 }
 
-impl<'a, A: Clone + Debug> BorrowedChildList<A> {
+impl<'a, A: Clone + std::fmt::Debug, P: SharedPointerKind> BorrowedChildList<A, P> {
     /// Consumes `self` and returns the list as a list of leaf nodes.
     ///
     /// # Panics
     ///
     /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves(self) -> BorrowBufferMut<Rc<Leaf<A>>> {
+    pub fn leaves(self) -> BorrowBufferMut<SharedPointer<Leaf<A>, P>> {
         if let BorrowedChildList::Leaves(x) = self {
             x
         } else {
@@ -366,7 +676,7 @@ impl<'a, A: Clone + Debug> BorrowedChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals(self) -> BorrowBufferMut<Rc<Internal<A>>> {
+    pub fn internals(self) -> BorrowBufferMut<SharedPointer<Internal<A, P>, P>> {
         if let BorrowedChildList::Internals(x) = self {
             x
         } else {
@@ -379,7 +689,7 @@ impl<'a, A: Clone + Debug> BorrowedChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves_ref(&self) -> &BorrowBufferMut<Rc<Leaf<A>>> {
+    pub fn leaves_ref(&self) -> &BorrowBufferMut<SharedPointer<Leaf<A>, P>> {
         if let BorrowedChildList::Leaves(x) = self {
             x
         } else {
@@ -392,7 +702,7 @@ impl<'a, A: Clone + Debug> BorrowedChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals_ref(&self) -> &BorrowBufferMut<Rc<Internal<A>>> {
+    pub fn internals_ref(&self) -> &BorrowBufferMut<SharedPointer<Internal<A, P>, P>> {
         if let BorrowedChildList::Internals(x) = self {
             x
         } else {
@@ -405,7 +715,7 @@ impl<'a, A: Clone + Debug> BorrowedChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves_mut(&mut self) -> &mut BorrowBufferMut<Rc<Leaf<A>>> {
+    pub fn leaves_mut(&mut self) -> &mut BorrowBufferMut<SharedPointer<Leaf<A>, P>> {
         if let BorrowedChildList::Leaves(x) = self {
             x
         } else {
@@ -418,7 +728,7 @@ impl<'a, A: Clone + Debug> BorrowedChildList<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals_mut(&mut self) -> &mut BorrowBufferMut<Rc<Internal<A>>> {
+    pub fn internals_mut(&mut self) -> &mut BorrowBufferMut<SharedPointer<Internal<A, P>, P>> {
         if let BorrowedChildList::Internals(x) = self {
             x
         } else {
@@ -491,17 +801,26 @@ impl<'a, A: Clone + Debug> BorrowedChildList<A> {
 }
 
 /// An internal node indicates a non-terminal node in the tree.
-#[derive(Clone, Debug)]
-pub(crate) struct Internal<A: Clone + Debug> {
-    pub sizes: Rc<SizeTable>,
-    pub children: ChildList<A>,
+#[derive(Debug)]
+pub(crate) struct Internal<A: Clone + std::fmt::Debug, P: SharedPointerKind> {
+    pub sizes: SharedPointer<SizeTable, P>,
+    pub children: ChildList<A, P>,
 }
 
-impl<A: Clone + Debug> Internal<A> {
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> Clone for Internal<A, P> {
+    fn clone(&self) -> Self {
+        Internal {
+            sizes: self.sizes.clone(),
+            children: self.children.clone(),
+        }
+    }
+}
+
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> Internal<A, P> {
     /// Constructs a new empty internal node that is at level 1 in the tree.
     pub fn empty_leaves() -> Self {
         Internal {
-            sizes: Rc::new(SizeTable::new(1)),
+            sizes: SharedPointer::new(SizeTable::new(1)),
             children: ChildList::Leaves(CircularBuffer::new()),
         }
     }
@@ -513,7 +832,7 @@ impl<A: Clone + Debug> Internal<A> {
             Self::empty_leaves()
         } else {
             Internal {
-                sizes: Rc::new(SizeTable::new(level)),
+                sizes: SharedPointer::new(SizeTable::new(level)),
                 children: ChildList::Internals(CircularBuffer::new()),
             }
         }
@@ -522,7 +841,7 @@ impl<A: Clone + Debug> Internal<A> {
     /// Constructs a new internal node of the same level, but with no children.
     pub fn new_empty(&self) -> Self {
         Internal {
-            sizes: Rc::new(SizeTable::new(self.sizes.level())),
+            sizes: SharedPointer::new(SizeTable::new(self.sizes.level())),
             children: self.children.new_empty(),
         }
     }
@@ -549,8 +868,8 @@ impl<A: Clone + Debug> Internal<A> {
             }
         };
         if shared != 0 {
-            let origin_sizes = Rc::make_mut(&mut self.sizes);
-            let destination_sizes = Rc::make_mut(&mut destination.sizes);
+            let origin_sizes = SharedPointer::make_mut(&mut self.sizes);
+            let destination_sizes = SharedPointer::make_mut(&mut destination.sizes);
 
             for _ in 0..shared {
                 destination_sizes
@@ -582,8 +901,8 @@ impl<A: Clone + Debug> Internal<A> {
                         continue;
                     } else {
                         let (write, read) = children.pair_mut(write_position, read_position);
-                        Rc::make_mut(read).share_children_with(
-                            Rc::make_mut(write),
+                        SharedPointer::make_mut(read).share_children_with(
+                            SharedPointer::make_mut(write),
                             Side::Front,
                             RRB_WIDTH,
                         );
@@ -599,7 +918,7 @@ impl<A: Clone + Debug> Internal<A> {
                 while children.back().unwrap().is_empty() {
                     children.pop_back();
                 }
-                let sizes = Rc::make_mut(&mut self.sizes);
+                let sizes = SharedPointer::make_mut(&mut self.sizes);
                 *sizes = SizeTable::new(sizes.level());
                 for child in children {
                     sizes.push_child(Side::Back, child.len());
@@ -612,8 +931,8 @@ impl<A: Clone + Debug> Internal<A> {
                         continue;
                     } else {
                         let (write, read) = children.pair_mut(write_position, read_position);
-                        Rc::make_mut(read).share_children_with(
-                            Rc::make_mut(write),
+                        SharedPointer::make_mut(read).share_children_with(
+                            SharedPointer::make_mut(write),
                             Side::Front,
                             RRB_WIDTH,
                         );
@@ -630,7 +949,7 @@ impl<A: Clone + Debug> Internal<A> {
                 while children.back().unwrap().is_empty() {
                     children.pop_back();
                 }
-                let sizes = Rc::make_mut(&mut self.sizes);
+                let sizes = SharedPointer::make_mut(&mut self.sizes);
                 *sizes = SizeTable::new(sizes.level());
                 for child in children {
                     sizes.push_child(Side::Back, child.len());
@@ -668,50 +987,18 @@ impl<A: Clone + Debug> Internal<A> {
 
         match &mut self.children {
             ChildList::Internals(children) => {
-                Rc::make_mut(children.get_mut(array_idx).unwrap()).update(new_idx, item)
+                SharedPointer::make_mut(children.get_mut(array_idx).unwrap()).update(new_idx, item)
             }
             ChildList::Leaves(children) => {
-                Rc::make_mut(children.get_mut(array_idx).unwrap()).update(new_idx, item)
+                SharedPointer::make_mut(children.get_mut(array_idx).unwrap()).update(new_idx, item)
             }
         }
     }
 
-    /// Sorts the elements in the tree by the given comparator.
-    ///
-    /// # NOTE
-    ///
-    /// This is a work in progress. And the functionality doesn't work at all at the moment.
-    pub fn sort_by<F: FnMut(&A, &A) -> cmp::Ordering>(&mut self, range: Range<usize>, f: &mut F) {
-        let mut start = 0;
-        match self.children {
-            ChildList::Internals(ref mut children) => {
-                for child in children {
-                    let end = start + child.len();
-                    if end > range.start && start < range.end {
-                        // Range intersects
-                        let new_range = start.max(range.start)..end.min(range.end);
-                        Rc::make_mut(child).sort_by(new_range, f);
-                    }
-                    start = end;
-                }
-            }
-            ChildList::Leaves(ref mut children) => {
-                for child in children {
-                    let end = start + child.len();
-                    if end > range.start && start < range.end {
-                        let new_range = start.max(range.start)..end.min(range.end);
-                        Rc::make_mut(child).sort_by(new_range, f);
-                    }
-                    start = end;
-                }
-            }
-        }
-    }
-
-    pub fn borrow_node(&mut self) -> BorrowedInternal<A> {
+    pub fn borrow_node(&mut self) -> BorrowedInternal<A, P> {
         BorrowedInternal {
             children: self.children.borrow(),
-            sizes: Rc::clone(&self.sizes),
+            sizes: SharedPointer::clone(&self.sizes),
         }
     }
 
@@ -825,7 +1112,7 @@ impl<A: Clone + Debug> Internal<A> {
     }
 }
 
-impl<A: Clone + Debug + PartialEq> Internal<A> {
+impl<A: Clone + std::fmt::Debug + PartialEq, P: SharedPointerKind> Internal<A, P> {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
     pub(crate) fn equal_iter<'a>(&self, iter: &mut std::slice::Iter<'a, A>) -> bool {
@@ -867,15 +1154,15 @@ impl<A: Clone + Debug + PartialEq> Internal<A> {
 }
 
 #[derive(Debug)]
-pub(crate) struct BorrowedInternal<A: Clone + Debug> {
-    pub(crate) sizes: Rc<SizeTable>,
-    pub(crate) children: BorrowedChildList<A>,
+pub(crate) struct BorrowedInternal<A: Clone + Debug, P: SharedPointerKind> {
+    pub(crate) sizes: SharedPointer<SizeTable, P>,
+    pub(crate) children: BorrowedChildList<A, P>,
 }
 
-impl<'a, A: Clone + Debug> BorrowedInternal<A> {
+impl<'a, A: Clone + Debug, P: SharedPointerKind> BorrowedInternal<A, P> {
     fn empty(&mut self) -> Self {
         BorrowedInternal {
-            sizes: Rc::clone(&self.sizes),
+            sizes: SharedPointer::clone(&self.sizes),
             children: self.children.empty(),
         }
     }
@@ -934,7 +1221,7 @@ impl<'a, A: Clone + Debug> BorrowedInternal<A> {
         let new_children = self.children.split_at(index);
         BorrowedInternal {
             children: new_children,
-            sizes: Rc::clone(&self.sizes),
+            sizes: SharedPointer::clone(&self.sizes),
         }
     }
 
@@ -978,18 +1265,27 @@ impl<'a, A: Clone + Debug> BorrowedInternal<A> {
 }
 
 /// Represents an arbitrary node in the tree.
-#[derive(Clone, Debug)]
-pub(crate) enum NodeRc<A: Clone + Debug> {
-    Leaf(Rc<Leaf<A>>),
-    Internal(Rc<Internal<A>>),
+#[derive(Debug)]
+pub(crate) enum NodeRc<A: Clone + std::fmt::Debug, P: SharedPointerKind> {
+    Leaf(SharedPointer<Leaf<A>, P>),
+    Internal(SharedPointer<Internal<A, P>, P>),
 }
 
-impl<A: Clone + Debug> NodeRc<A> {
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> Clone for NodeRc<A, P> {
+    fn clone(&self) -> Self {
+        match self {
+            NodeRc::Leaf(buf) => NodeRc::Leaf(buf.clone()),
+            NodeRc::Internal(buf) => NodeRc::Internal(buf.clone()),
+        }
+    }
+}
+
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> NodeRc<A, P> {
     /// Constructs a new empty of the same level.
     pub fn new_empty(&self) -> Self {
         match self {
-            NodeRc::Internal(x) => Rc::new(x.new_empty()).into(),
-            NodeRc::Leaf(_) => Rc::new(Leaf::empty()).into(),
+            NodeRc::Internal(x) => NodeRc::Internal(SharedPointer::new(x.new_empty())),
+            NodeRc::Leaf(_) => NodeRc::Leaf(SharedPointer::new(Leaf::empty())),
         }
     }
 
@@ -1005,16 +1301,20 @@ impl<A: Clone + Debug> NodeRc<A> {
     ) -> usize {
         match self {
             NodeRc::Internal(ref mut origin_internal) => {
-                let destination_internal = Rc::make_mut(destination.internal_mut());
-                Rc::make_mut(origin_internal).share_children_with(
+                let destination_internal = SharedPointer::make_mut(destination.internal_mut());
+                SharedPointer::make_mut(origin_internal).share_children_with(
                     destination_internal,
                     share_side,
                     len,
                 )
             }
             NodeRc::Leaf(ref mut origin_leaf) => {
-                let destination_leaf = Rc::make_mut(destination.leaf_mut());
-                Rc::make_mut(origin_leaf).share_children_with(destination_leaf, share_side, len)
+                let destination_leaf = SharedPointer::make_mut(destination.leaf_mut());
+                SharedPointer::make_mut(origin_leaf).share_children_with(
+                    destination_leaf,
+                    share_side,
+                    len,
+                )
             }
         }
     }
@@ -1078,8 +1378,8 @@ impl<A: Clone + Debug> NodeRc<A> {
     /// Returns the element at the given position in the node.
     pub fn get_mut(&mut self, idx: usize) -> Option<&mut A> {
         match self {
-            NodeRc::Leaf(ref mut x) => Rc::make_mut(x).get_mut(idx),
-            NodeRc::Internal(ref mut x) => Rc::make_mut(x).get_mut(idx),
+            NodeRc::Leaf(ref mut x) => SharedPointer::make_mut(x).get_mut(idx),
+            NodeRc::Internal(ref mut x) => SharedPointer::make_mut(x).get_mut(idx),
         }
     }
 
@@ -1104,7 +1404,7 @@ impl<A: Clone + Debug> NodeRc<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a leaf node.
-    pub fn leaf(self) -> Rc<Leaf<A>> {
+    pub fn leaf(self) -> SharedPointer<Leaf<A>, P> {
         if let NodeRc::Leaf(x) = self {
             x
         } else {
@@ -1117,7 +1417,7 @@ impl<A: Clone + Debug> NodeRc<A> {
     /// # Panics
     ///
     /// Panics if `self` is not an internal node.
-    pub fn internal(self) -> Rc<Internal<A>> {
+    pub fn internal(self) -> SharedPointer<Internal<A, P>, P> {
         if let NodeRc::Internal(x) = self {
             x
         } else {
@@ -1130,7 +1430,7 @@ impl<A: Clone + Debug> NodeRc<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a leaf node.
-    pub fn leaf_ref(&self) -> &Rc<Leaf<A>> {
+    pub fn leaf_ref(&self) -> &SharedPointer<Leaf<A>, P> {
         if let NodeRc::Leaf(x) = self {
             x
         } else {
@@ -1143,7 +1443,7 @@ impl<A: Clone + Debug> NodeRc<A> {
     /// # Panics
     ///
     /// Panics if `self` is not an internal node.
-    pub fn internal_ref(&self) -> &Rc<Internal<A>> {
+    pub fn internal_ref(&self) -> &SharedPointer<Internal<A, P>, P> {
         if let NodeRc::Internal(x) = self {
             x
         } else {
@@ -1156,7 +1456,7 @@ impl<A: Clone + Debug> NodeRc<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a leaf node.
-    pub fn leaf_mut(&mut self) -> &mut Rc<Leaf<A>> {
+    pub fn leaf_mut(&mut self) -> &mut SharedPointer<Leaf<A>, P> {
         if let NodeRc::Leaf(x) = self {
             x
         } else {
@@ -1169,7 +1469,7 @@ impl<A: Clone + Debug> NodeRc<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a internal node.
-    pub fn internal_mut(&mut self) -> &mut Rc<Internal<A>> {
+    pub fn internal_mut(&mut self) -> &mut SharedPointer<Internal<A, P>, P> {
         if let NodeRc::Internal(x) = self {
             x
         } else {
@@ -1177,12 +1477,12 @@ impl<A: Clone + Debug> NodeRc<A> {
         }
     }
 
-    pub fn borrow_node(&mut self) -> BorrowedNode<A> {
+    pub fn borrow_node(&mut self) -> BorrowedNode<A, P> {
         match self {
             NodeRc::Internal(internal) => {
-                BorrowedNode::Internal(Rc::make_mut(internal).borrow_node())
+                BorrowedNode::Internal(SharedPointer::make_mut(internal).borrow_node())
             }
-            NodeRc::Leaf(leaf) => BorrowedNode::Leaf(Rc::make_mut(leaf).borrow_node()),
+            NodeRc::Leaf(leaf) => BorrowedNode::Leaf(SharedPointer::make_mut(leaf).borrow_node()),
         }
     }
 
@@ -1196,7 +1496,7 @@ impl<A: Clone + Debug> NodeRc<A> {
     }
 }
 
-impl<A: Clone + Debug + PartialEq> NodeRc<A> {
+impl<A: Clone + std::fmt::Debug + PartialEq, P: SharedPointerKind> NodeRc<A, P> {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
     pub(crate) fn equal_iter<'a>(&self, iter: &mut std::slice::Iter<'a, A>) -> bool {
@@ -1216,25 +1516,27 @@ impl<A: Clone + Debug + PartialEq> NodeRc<A> {
     }
 }
 
-impl<A: Clone + Debug> From<Rc<Leaf<A>>> for NodeRc<A> {
-    fn from(t: Rc<Leaf<A>>) -> NodeRc<A> {
+impl<A: Clone + Debug, P: SharedPointerKind> From<SharedPointer<Leaf<A>, P>> for NodeRc<A, P> {
+    fn from(t: SharedPointer<Leaf<A>, P>) -> NodeRc<A, P> {
         NodeRc::Leaf(t)
     }
 }
 
-impl<A: Clone + Debug> From<Rc<Internal<A>>> for NodeRc<A> {
-    fn from(t: Rc<Internal<A>>) -> NodeRc<A> {
+impl<A: Clone + Debug, P: SharedPointerKind> From<SharedPointer<Internal<A, P>, P>>
+    for NodeRc<A, P>
+{
+    fn from(t: SharedPointer<Internal<A, P>, P>) -> NodeRc<A, P> {
         NodeRc::Internal(t)
     }
 }
 
 #[derive(Debug)]
-pub(crate) enum BorrowedNode<A: Clone + Debug> {
-    Internal(BorrowedInternal<A>),
+pub(crate) enum BorrowedNode<A: Clone + Debug, P: SharedPointerKind> {
+    Internal(BorrowedInternal<A, P>),
     Leaf(BorrowedLeaf<A>),
 }
 
-impl<A: Clone + Debug> BorrowedNode<A> {
+impl<A: Clone + Debug, P: SharedPointerKind> BorrowedNode<A, P> {
     pub fn empty(&mut self) -> Self {
         match self {
             BorrowedNode::Internal(internal) => BorrowedNode::Internal(internal.empty()),
@@ -1256,7 +1558,7 @@ impl<A: Clone + Debug> BorrowedNode<A> {
         }
     }
 
-    pub fn make_spine(&mut self, side: Side) -> Vec<NodeRc<A>> {
+    pub fn make_spine(&mut self, side: Side) -> Vec<NodeRc<A, P>> {
         let mut spine = Vec::new();
         if let BorrowedNode::Internal(ref mut internal) = self {
             let idx = if side == Side::Front {
@@ -1281,7 +1583,7 @@ impl<A: Clone + Debug> BorrowedNode<A> {
                 internal.children.slots() - 1
             };
             unsafe {
-                let child = match Rc::make_mut(internal).children {
+                let child = match SharedPointer::make_mut(internal).children {
                     ChildList::Internals(ref mut children) => {
                         NodeRc::Internal(children.take_item(idx))
                     }
@@ -1319,7 +1621,7 @@ impl<A: Clone + Debug> BorrowedNode<A> {
     /// # Panics
     ///
     /// Panics if `self` is not an internal node.
-    pub fn internal(self) -> BorrowedInternal<A> {
+    pub fn internal(self) -> BorrowedInternal<A, P> {
         if let BorrowedNode::Internal(x) = self {
             x
         } else {
@@ -1345,7 +1647,7 @@ impl<A: Clone + Debug> BorrowedNode<A> {
     /// # Panics
     ///
     /// Panics if `self` is not an internal node.
-    pub fn internal_ref(&self) -> &BorrowedInternal<A> {
+    pub fn internal_ref(&self) -> &BorrowedInternal<A, P> {
         if let BorrowedNode::Internal(x) = self {
             x
         } else {
@@ -1371,7 +1673,7 @@ impl<A: Clone + Debug> BorrowedNode<A> {
     /// # Panics
     ///
     /// Panics if `self` is not a internal node.
-    pub fn internal_mut(&mut self) -> &mut BorrowedInternal<A> {
+    pub fn internal_mut(&mut self) -> &mut BorrowedInternal<A, P> {
         if let BorrowedNode::Internal(x) = self {
             x
         } else {

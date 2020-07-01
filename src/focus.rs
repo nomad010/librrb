@@ -2,8 +2,10 @@
 //!
 //! A focus tracks the last leaf and positions which was read. The path down this tree is saved in
 //! the focus and is used to accelerate lookups in nearby locations.
-use crate::nodes::{BorrowedChildList, BorrowedNode, ChildList, Internal, Leaf, NodeRc};
-use crate::vector::Vector;
+use crate::nodes::Leaf;
+use crate::nodes::{BorrowedChildList, BorrowedNode, ChildList, Internal, NodeRc};
+
+use crate::vector::InternalVector;
 use crate::Side;
 use std::collections::HashSet;
 use std::fmt::Debug;
@@ -11,41 +13,43 @@ use std::mem;
 use std::ops::{Bound, Deref, DerefMut, Range, RangeBounds};
 use std::rc::Rc;
 
-#[derive(Debug, Clone)]
-pub(crate) struct RefMutRcByPtr<'a, A>(pub(crate) Rc<&'a mut A>);
+use archery::{ArcK, RcK, SharedPointer, SharedPointerKind};
 
-impl<'a, A> RefMutRcByPtr<'a, A> {}
+// #[derive(Debug, Clone)]
+// pub(crate) struct RefMutRcByPtr<'a, A>(pub(crate) Rc<&'a mut A>);
 
-impl<'a, A> std::hash::Hash for RefMutRcByPtr<'a, A> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::ptr::hash(*self.0, state);
-    }
-}
+// impl<'a, A> RefMutRcByPtr<'a, A> {}
 
-impl<'a, A> Eq for RefMutRcByPtr<'a, A> {}
+// impl<'a, A> std::hash::Hash for RefMutRcByPtr<'a, A> {
+//     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+//         std::ptr::hash(*self.0, state);
+//     }
+// }
 
-impl<'a, A> PartialEq for RefMutRcByPtr<'a, A> {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
-}
+// impl<'a, A> Eq for RefMutRcByPtr<'a, A> {}
+
+// impl<'a, A> PartialEq for RefMutRcByPtr<'a, A> {
+//     fn eq(&self, other: &Self) -> bool {
+//         Rc::ptr_eq(&self.0, &other.0)
+//     }
+// }
 
 /// A focus for a particular node in the spine.
 ///
 /// This tracks the path down to a particular leaf in the tree.
 #[derive(Clone, Debug)]
-struct PartialFocus<A: Clone + Debug> {
-    path: Vec<(Rc<Internal<A>>, Range<usize>)>,
-    leaf: Rc<Leaf<A>>,
+struct PartialFocus<A: Clone + Debug, P: SharedPointerKind> {
+    path: Vec<(SharedPointer<Internal<A, P>, P>, Range<usize>)>,
+    leaf: SharedPointer<Leaf<A>, P>,
     leaf_range: Range<usize>,
 }
 
-impl<'a, A: Clone + Debug> PartialFocus<A> {
+impl<'a, A: Clone + Debug, P: SharedPointerKind> PartialFocus<A, P> {
     /// A helper method to compute the remainder of a path down a tree to a particular index.
     fn tree_path(
-        nodes: &mut Vec<(Rc<Internal<A>>, Range<usize>)>,
+        nodes: &mut Vec<(SharedPointer<Internal<A, P>, P>, Range<usize>)>,
         mut idx: usize,
-    ) -> (Range<usize>, Rc<Leaf<A>>) {
+    ) -> (Range<usize>, SharedPointer<Leaf<A>, P>) {
         let mut skipped_items = nodes.last().unwrap().1.clone();
         while let Some((previous_root, _)) = nodes.last() {
             if let Some((array_idx, new_idx)) = previous_root.sizes.position_info_for(idx) {
@@ -73,7 +77,7 @@ impl<'a, A: Clone + Debug> PartialFocus<A> {
     }
 
     /// Constructs the focus from a tree node. This will focus on the first element in the node.
-    fn from_tree(tree: &'a NodeRc<A>) -> Self {
+    fn from_tree(tree: &'a NodeRc<A, P>) -> Self {
         match tree {
             NodeRc::Internal(internal) => {
                 let mut path = vec![(internal.clone(), 0..tree.len())];
@@ -142,15 +146,15 @@ impl<'a, A: Clone + Debug> PartialFocus<A> {
 /// A focus for the entire the tree. Like a `PartialFocus`, but this also takes the position in the
 /// spine into account.
 #[derive(Clone, Debug)]
-pub struct Focus<'a, A: Clone + Debug> {
-    tree: &'a Vector<A>,
+pub struct Focus<'a, A: Clone + Debug, P: SharedPointerKind> {
+    tree: &'a InternalVector<A, P>,
     spine_position: Option<(Side, usize)>,
-    spine_node_focus: PartialFocus<A>,
+    spine_node_focus: PartialFocus<A, P>,
     focus_range: Range<usize>,
     range: Range<usize>,
 }
 
-impl<'a, A: Clone + Debug> Focus<'a, A> {
+impl<'a, A: Clone + Debug, P: SharedPointerKind> Focus<'a, A, P> {
     /// Constructs a new focus for a Vector.
     ///
     /// # Examples
@@ -162,7 +166,7 @@ impl<'a, A: Clone + Debug> Focus<'a, A> {
     /// let mut focus = Focus::new(&v);
     /// assert_eq!(focus.get(0), Some(&1));
     /// ```
-    pub fn new(tree: &'a Vector<A>) -> Self {
+    pub fn new(tree: &'a InternalVector<A, P>) -> Self {
         Focus::narrowed_tree(tree, 0..tree.len())
     }
 
@@ -178,7 +182,7 @@ impl<'a, A: Clone + Debug> Focus<'a, A> {
     /// let mut focus = Focus::narrowed_tree(&v, 1..3);
     /// assert_eq!(focus.get(0), Some(&2));
     /// ```
-    pub fn narrowed_tree(tree: &'a Vector<A>, mut range: Range<usize>) -> Self {
+    pub fn narrowed_tree(tree: &'a InternalVector<A, P>, mut range: Range<usize>) -> Self {
         if range.start >= tree.len() {
             range.start = tree.len();
         }
@@ -404,22 +408,22 @@ impl<'a, A: Clone + Debug> Focus<'a, A> {
 
 /// A focus of the elements of a vector. The focus allows mutation of the elements in the vector.
 #[derive(Debug)]
-pub struct FocusMut<'a, A: Clone + Debug> {
-    origins: Vec<Rc<&'a mut Vector<A>>>,
-    pub(crate) nodes: Vec<BorrowedNode<A>>,
+pub struct FocusMut<'a, A: Clone + Debug, P: SharedPointerKind> {
+    origins: Vec<Rc<&'a mut InternalVector<A, P>>>,
+    pub(crate) nodes: Vec<BorrowedNode<A, P>>,
     len: usize,
     // Focus part
     // This indicates the index of the root in the node list and the range of that is covered by it
     root: Option<(usize, Range<usize>)>,
     // The listing of internal nodes below the borrowed root node along with their associated ranges
-    path: Vec<(*mut Internal<A>, Range<usize>)>,
+    path: Vec<(*mut Internal<A, P>, Range<usize>)>,
     // The leaf of the focus part, might not exist if the borrowed root is a leaf node
     leaf: Option<*mut Leaf<A>>,
     // The range that is covered by the lowest part of the focus
     leaf_range: Range<usize>,
 }
 
-impl<'a, A: Clone + Debug> FocusMut<'a, A> {
+impl<'a, A: Clone + Debug, P: SharedPointerKind> FocusMut<'a, A, P> {
     fn empty(&mut self) -> Self {
         FocusMut {
             origins: self.origins.clone(),
@@ -433,8 +437,8 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
     }
 
     pub(crate) fn from_vectors(
-        origins: Vec<Rc<&'a mut Vector<A>>>,
-        nodes: Vec<BorrowedNode<A>>,
+        origins: Vec<Rc<&'a mut InternalVector<A, P>>>,
+        nodes: Vec<BorrowedNode<A, P>>,
     ) -> Self {
         let mut len = 0;
         for node in nodes.iter() {
@@ -532,10 +536,10 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
                     // Know how to do this, we borrow the child node.
                     let child = match new_internal.children {
                         BorrowedChildList::Internals(ref mut children) => BorrowedNode::Internal(
-                            Rc::make_mut(children.front_mut().unwrap()).borrow_node(),
+                            SharedPointer::make_mut(children.front_mut().unwrap()).borrow_node(),
                         ),
                         BorrowedChildList::Leaves(ref mut children) => BorrowedNode::Leaf(
-                            Rc::make_mut(children.front_mut().unwrap()).borrow_node(),
+                            SharedPointer::make_mut(children.front_mut().unwrap()).borrow_node(),
                         ),
                     };
                     new_internal.children.range_mut().start += 1;
@@ -719,7 +723,7 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
     ///     assert_eq!(focus.get(2), None);
     /// });
     /// ```
-    pub fn narrow<R: RangeBounds<usize>, F: FnMut(&mut FocusMut<A>)>(
+    pub fn narrow<R: RangeBounds<usize>, F: FnMut(&mut FocusMut<A, P>)>(
         &mut self,
         range: R,
         mut f: F,
@@ -823,12 +827,14 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
                         let range_start = idx - new_idx;
                         match internal.children {
                             BorrowedChildList::Internals(ref mut children) => {
-                                let child = Rc::make_mut(children.get_mut(child_idx).unwrap());
+                                let child =
+                                    SharedPointer::make_mut(children.get_mut(child_idx).unwrap());
                                 self.path
                                     .push((child, range_start..range_start + child.len()));
                             }
                             BorrowedChildList::Leaves(ref mut children) => {
-                                let leaf = Rc::make_mut(children.get_mut(child_idx).unwrap());
+                                let leaf =
+                                    SharedPointer::make_mut(children.get_mut(child_idx).unwrap());
                                 let leaf_len = leaf.len();
                                 let leaf: *mut Leaf<A> = leaf;
                                 self.leaf = Some(leaf);
@@ -869,13 +875,13 @@ impl<'a, A: Clone + Debug> FocusMut<'a, A> {
             idx = new_idx;
             match parent.children {
                 ChildList::Internals(ref mut children) => {
-                    let new_root = Rc::make_mut(children.get_mut(child_idx).unwrap());
+                    let new_root = SharedPointer::make_mut(children.get_mut(child_idx).unwrap());
                     skipped_items.start += this_skipped_items;
                     skipped_items.end = skipped_items.start + new_root.len();
                     self.path.push((new_root, skipped_items.clone()));
                 }
                 ChildList::Leaves(ref mut children) => {
-                    let leaf = Rc::make_mut(children.get_mut(child_idx).unwrap());
+                    let leaf = SharedPointer::make_mut(children.get_mut(child_idx).unwrap());
                     let leaf_len = leaf.len();
                     let leaf: *mut Leaf<A> = leaf;
                     skipped_items.start += this_skipped_items;
@@ -1081,6 +1087,7 @@ impl<A: Clone + Debug, B: Clone + Debug> Container<(A, B)> for Dual<A, B> {
 mod test {
 
     use crate::Vector;
+    use archery::RcK;
 
     #[test]
     pub fn single_focus_mut() {
