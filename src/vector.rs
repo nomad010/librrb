@@ -250,9 +250,11 @@
 //! [Vector::singleton]: ./struct.Vector.html#method.singleton
 
 use crate::focus::{Focus, FocusMut};
-use crate::nodes::{ChildList, Internal, Leaf, NodeRc};
+use crate::nodes::Leaf;
+use crate::nodes::{ChildList, Internal, NodeRc};
 use crate::sort::{do_dual_sort, do_single_sort};
 use crate::{Side, RRB_WIDTH};
+use archery::{ArcK, RcK, SharedPointer, SharedPointerKind};
 use rand_core::{RngCore, SeedableRng};
 use std::borrow::Borrow;
 use std::cmp;
@@ -352,15 +354,26 @@ macro_rules! vector {
 // 1) The position lies within the left of the root by traversing down the left spine at least once.
 //
 /// A container for representing sequence of elements
-#[derive(Clone, Debug)]
-pub struct Vector<A: Clone + Debug> {
-    pub(crate) left_spine: Vec<NodeRc<A>>,
-    pub(crate) right_spine: Vec<NodeRc<A>>,
-    pub(crate) root: NodeRc<A>,
+#[derive(Debug)]
+pub struct InternalVector<A: Clone + Debug, P: SharedPointerKind> {
+    pub(crate) left_spine: Vec<NodeRc<A, P>>,
+    pub(crate) right_spine: Vec<NodeRc<A, P>>,
+    pub(crate) root: NodeRc<A, P>,
     len: usize,
 }
 
-impl<A: Clone + Debug> Vector<A> {
+impl<A: Clone + Debug, P: SharedPointerKind> Clone for InternalVector<A, P> {
+    fn clone(&self) -> Self {
+        InternalVector {
+            left_spine: self.left_spine.clone(),
+            right_spine: self.right_spine.clone(),
+            root: self.root.clone(),
+            len: self.len,
+        }
+    }
+}
+
+impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// Constructs a new empty vector.
     ///
     /// # Examples
@@ -372,10 +385,10 @@ impl<A: Clone + Debug> Vector<A> {
     /// assert_eq!(v, vector![]);
     /// ```
     pub fn new() -> Self {
-        Vector {
+        InternalVector {
             left_spine: vec![],
             right_spine: vec![],
-            root: Rc::new(Leaf::empty()).into(),
+            root: SharedPointer::new(Leaf::empty()).into(),
             len: 0,
         }
     }
@@ -387,22 +400,22 @@ impl<A: Clone + Debug> Vector<A> {
     /// ```
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::Vector;
-    /// let v: Vector<u64> = Vector::singleton(1);
+    /// let v = Vector::singleton(1);
     /// assert_eq!(v, vector![1]);
     /// ```
     pub fn singleton(item: A) -> Self {
-        Vector {
+        InternalVector {
             left_spine: vec![],
             right_spine: vec![],
-            root: Rc::new(Leaf::with_item(item)).into(),
+            root: SharedPointer::new(Leaf::with_item(item)).into(),
             len: 1,
         }
     }
 
     /// Derp
     pub fn constant_vec_of_length(item: A, len: usize) -> Self {
-        let mut store = Vector::new();
-        let mut accumulator = Vector::singleton(item);
+        let mut store = InternalVector::new();
+        let mut accumulator = InternalVector::singleton(item);
         while accumulator.len() <= len {
             if len & accumulator.len() != 0 {
                 store.append(accumulator.clone());
@@ -446,7 +459,7 @@ impl<A: Clone + Debug> Vector<A> {
     /// iterator, while the root is in the middle.
     pub(crate) fn spine_iter(
         &self,
-    ) -> impl Iterator<Item = (Option<(Side, usize)>, &NodeRc<A>)> + DoubleEndedIterator {
+    ) -> impl Iterator<Item = (Option<(Side, usize)>, &NodeRc<A, P>)> + DoubleEndedIterator {
         let left_spine_iter = self
             .left_spine
             .iter()
@@ -481,13 +494,13 @@ impl<A: Clone + Debug> Vector<A> {
             }
 
             let full_node = mem::replace(node, node.new_empty());
-            let parent_node = Rc::make_mut(
+            let parent_node = SharedPointer::make_mut(
                 spine
                     .get_mut(idx + 1)
                     .unwrap_or(&mut self.root)
                     .internal_mut(),
             );
-            Rc::make_mut(&mut parent_node.sizes).push_child(side, full_node.len());
+            SharedPointer::make_mut(&mut parent_node.sizes).push_child(side, full_node.len());
             match parent_node.children {
                 ChildList::Leaves(ref mut children) => children.push(side, full_node.leaf()),
                 ChildList::Internals(ref mut children) => children.push(side, full_node.internal()),
@@ -501,9 +514,9 @@ impl<A: Clone + Debug> Vector<A> {
             // the new root. We leave the root empty
             let new_root = match &self.root {
                 NodeRc::Internal(_) => {
-                    Rc::new(Internal::empty_internal(self.root.level() + 1)).into()
+                    SharedPointer::new(Internal::empty_internal(self.root.level() + 1)).into()
                 }
-                NodeRc::Leaf(_) => Rc::new(Internal::empty_leaves()).into(),
+                NodeRc::Leaf(_) => SharedPointer::new(Internal::empty_leaves()).into(),
             };
             let mut new_node = mem::replace(&mut self.root, new_root);
             let mut other_new_node = new_node.new_empty();
@@ -523,7 +536,7 @@ impl<A: Clone + Debug> Vector<A> {
             self.complete_leaf(side);
         }
 
-        Rc::make_mut(self.leaf_mut(side)).push(side, item);
+        SharedPointer::make_mut(self.leaf_mut(side)).push(side, item);
         self.len += 1;
 
         if self.spine_ref(side).len() == 1 {
@@ -602,11 +615,11 @@ impl<A: Clone + Debug> Vector<A> {
                 .get_mut(level + 1)
                 .unwrap_or(&mut self.root)
                 .internal_mut();
-            let child: NodeRc<A> = match Rc::make_mut(node).children {
+            let child: NodeRc<A, P> = match SharedPointer::make_mut(node).children {
                 ChildList::Internals(ref mut children) => children.pop(side).into(),
                 ChildList::Leaves(ref mut children) => children.pop(side).into(),
             };
-            Rc::make_mut(&mut Rc::make_mut(node).sizes).pop_child(side);
+            SharedPointer::make_mut(&mut SharedPointer::make_mut(node).sizes).pop_child(side);
             spine[level] = child;
         }
 
@@ -675,7 +688,7 @@ impl<A: Clone + Debug> Vector<A> {
     fn pop_side(&mut self, side: Side) -> Option<A> {
         debug_assert_eq!(self.left_spine.len(), self.right_spine.len());
         if self.spine_ref(side).is_empty() {
-            if let Ok(item) = Rc::make_mut(self.root.leaf_mut()).try_pop(side) {
+            if let Ok(item) = SharedPointer::make_mut(self.root.leaf_mut()).try_pop(side) {
                 self.len -= 1;
                 Some(item)
             } else {
@@ -684,7 +697,7 @@ impl<A: Clone + Debug> Vector<A> {
         } else {
             // Can never be none as the is of height at least 1
             let leaf = self.leaf_mut(side);
-            let item = Rc::make_mut(leaf).pop(side);
+            let item = SharedPointer::make_mut(leaf).pop(side);
 
             if leaf.is_empty() {
                 self.empty_leaf(side);
@@ -772,7 +785,7 @@ impl<A: Clone + Debug> Vector<A> {
     /// ```
     pub fn front_mut(&mut self) -> Option<&mut A> {
         let leaf = self.left_spine.first_mut().unwrap_or(&mut self.root);
-        Rc::make_mut(leaf.leaf_mut()).front_mut()
+        SharedPointer::make_mut(leaf.leaf_mut()).front_mut()
     }
 
     /// Returns a reference to the item at the back of the sequence. If the tree is empty this
@@ -806,7 +819,7 @@ impl<A: Clone + Debug> Vector<A> {
     /// ```
     pub fn back_mut(&mut self) -> Option<&mut A> {
         let leaf = self.right_spine.first_mut().unwrap_or(&mut self.root);
-        Rc::make_mut(leaf.leaf_mut()).back_mut()
+        SharedPointer::make_mut(leaf.leaf_mut()).back_mut()
     }
 
     /// Derp
@@ -1046,9 +1059,9 @@ impl<A: Clone + Debug> Vector<A> {
             // The root moves to either the left or right spine and the root becomes empty
             // We replace the left with root here and right with an empty node
             let new_root = match &self.root {
-                NodeRc::Leaf(_) => Rc::new(Internal::empty_leaves()).into(),
+                NodeRc::Leaf(_) => SharedPointer::new(Internal::empty_leaves()).into(),
                 NodeRc::Internal(root) => {
-                    Rc::new(Internal::empty_internal(root.level() + 1)).into()
+                    SharedPointer::new(Internal::empty_internal(root.level() + 1)).into()
                 }
             };
             let mut new_left = mem::replace(&mut self.root, new_root);
@@ -1062,9 +1075,9 @@ impl<A: Clone + Debug> Vector<A> {
             // The root moves to either the left or right spine and the root becomes empty
             // We replace the right with root here and left with an empty node
             let new_root = match &other.root {
-                NodeRc::Leaf(_) => Rc::new(Internal::empty_leaves()).into(),
+                NodeRc::Leaf(_) => SharedPointer::new(Internal::empty_leaves()).into(),
                 NodeRc::Internal(root) => {
-                    Rc::new(Internal::empty_internal(root.level() + 1)).into()
+                    SharedPointer::new(Internal::empty_internal(root.level() + 1)).into()
                 }
             };
             let mut new_right = mem::replace(&mut other.root, new_root);
@@ -1078,18 +1091,19 @@ impl<A: Clone + Debug> Vector<A> {
         debug_assert_eq!(other.left_spine.len(), other.right_spine.len());
         debug_assert_eq!(self.right_spine.len(), other.left_spine.len());
 
-        let packer = |new_node: NodeRc<A>, parent_node: &mut Rc<Internal<A>>, side| {
-            if !new_node.is_empty() {
-                let parent = &mut Rc::make_mut(parent_node);
-                Rc::make_mut(&mut parent.sizes).push_child(side, new_node.len());
-                match parent.children {
-                    ChildList::Internals(ref mut children) => {
-                        children.push(side, new_node.internal())
+        let packer =
+            |new_node: NodeRc<A, P>, parent_node: &mut SharedPointer<Internal<A, P>, P>, side| {
+                if !new_node.is_empty() {
+                    let parent = &mut SharedPointer::make_mut(parent_node);
+                    SharedPointer::make_mut(&mut parent.sizes).push_child(side, new_node.len());
+                    match parent.children {
+                        ChildList::Internals(ref mut children) => {
+                            children.push(side, new_node.internal())
+                        }
+                        ChildList::Leaves(ref mut children) => children.push(side, new_node.leaf()),
                     }
-                    ChildList::Leaves(ref mut children) => children.push(side, new_node.leaf()),
                 }
-            }
-        };
+            };
 
         // More efficient to work from front to back here, but we need to remove elements
         // We reverse to make this more efficient
@@ -1115,8 +1129,8 @@ impl<A: Clone + Debug> Vector<A> {
             let mut left_node = self.right_spine.pop().unwrap();
             let mut right_node = other.left_spine.pop().unwrap();
 
-            let left = Rc::make_mut(left_node.internal_mut());
-            let right = Rc::make_mut(right_node.internal_mut());
+            let left = SharedPointer::make_mut(left_node.internal_mut());
+            let right = SharedPointer::make_mut(right_node.internal_mut());
 
             if !left.is_empty() {
                 left.pack_children();
@@ -1133,37 +1147,43 @@ impl<A: Clone + Debug> Vector<A> {
                     match left.children {
                         ChildList::Internals(ref mut children) => {
                             let destination_node =
-                                Rc::make_mut(children.get_mut(left_position).unwrap());
-                            let source_node =
-                                Rc::make_mut(right.children.internals_mut().front_mut().unwrap());
+                                SharedPointer::make_mut(children.get_mut(left_position).unwrap());
+                            let source_node = SharedPointer::make_mut(
+                                right.children.internals_mut().front_mut().unwrap(),
+                            );
                             let shared = source_node.share_children_with(
                                 destination_node,
                                 Side::Front,
                                 RRB_WIDTH,
                             );
-                            Rc::make_mut(&mut left.sizes).increment_side_size(Side::Back, shared);
-                            Rc::make_mut(&mut right.sizes).decrement_side_size(Side::Front, shared);
+                            SharedPointer::make_mut(&mut left.sizes)
+                                .increment_side_size(Side::Back, shared);
+                            SharedPointer::make_mut(&mut right.sizes)
+                                .decrement_side_size(Side::Front, shared);
                             if source_node.is_empty() {
                                 right.children.internals_mut().pop_front();
-                                Rc::make_mut(&mut right.sizes).pop_child(Side::Front);
+                                SharedPointer::make_mut(&mut right.sizes).pop_child(Side::Front);
                             }
                             assert_eq!(right.sizes.len(), right.children.internals_mut().len());
                         }
                         ChildList::Leaves(ref mut children) => {
                             let destination_node =
-                                Rc::make_mut(children.get_mut(left_position).unwrap());
-                            let source_node =
-                                Rc::make_mut(right.children.leaves_mut().front_mut().unwrap());
+                                SharedPointer::make_mut(children.get_mut(left_position).unwrap());
+                            let source_node = SharedPointer::make_mut(
+                                right.children.leaves_mut().front_mut().unwrap(),
+                            );
                             let shared = source_node.share_children_with(
                                 destination_node,
                                 Side::Front,
                                 RRB_WIDTH,
                             );
-                            Rc::make_mut(&mut left.sizes).increment_side_size(Side::Back, shared);
-                            Rc::make_mut(&mut right.sizes).decrement_side_size(Side::Front, shared);
+                            SharedPointer::make_mut(&mut left.sizes)
+                                .increment_side_size(Side::Back, shared);
+                            SharedPointer::make_mut(&mut right.sizes)
+                                .decrement_side_size(Side::Front, shared);
                             if source_node.is_empty() {
                                 right.children.leaves_mut().pop_front();
-                                Rc::make_mut(&mut right.sizes).pop_child(Side::Front);
+                                SharedPointer::make_mut(&mut right.sizes).pop_child(Side::Front);
                             }
                             assert_eq!(right.sizes.len(), right.children.leaves_mut().len());
                         }
@@ -1212,9 +1232,9 @@ impl<A: Clone + Debug> Vector<A> {
 
         if !other.root.is_empty() {
             let new_root = match &self.root {
-                NodeRc::Leaf(_) => Rc::new(Internal::empty_leaves()).into(),
+                NodeRc::Leaf(_) => SharedPointer::new(Internal::empty_leaves()).into(),
                 NodeRc::Internal(root) => {
-                    Rc::new(Internal::empty_internal(root.level() + 1)).into()
+                    SharedPointer::new(Internal::empty_internal(root.level() + 1)).into()
                 }
             };
             let old_root = mem::replace(&mut self.root, new_root);
@@ -1264,7 +1284,7 @@ impl<A: Clone + Debug> Vector<A> {
         if len == 0 {
             self.left_spine.clear();
             self.right_spine.clear();
-            self.root = Rc::new(Leaf::empty()).into();
+            self.root = SharedPointer::new(Leaf::empty()).into();
             self.len = 0;
             return;
         }
@@ -1297,7 +1317,7 @@ impl<A: Clone + Debug> Vector<A> {
         if start >= self.len {
             self.left_spine.clear();
             self.right_spine.clear();
-            self.root = Rc::new(Leaf::empty()).into();
+            self.root = SharedPointer::new(Leaf::empty()).into();
             self.len = 0;
             return;
         }
@@ -1409,9 +1429,9 @@ impl<A: Clone + Debug> Vector<A> {
                 assert!(node_index < internal.len());
                 let num_slots = internal.slots();
                 let (child_position, new_index) = internal.position_info_for(node_index).unwrap();
-                let internal_mut = Rc::make_mut(internal);
+                let internal_mut = SharedPointer::make_mut(internal);
                 let children = &mut internal_mut.children;
-                let sizes = Rc::make_mut(&mut internal_mut.sizes);
+                let sizes = SharedPointer::make_mut(&mut internal_mut.sizes);
                 let range = match side {
                     Side::Back => child_position + 1..num_slots,
                     Side::Front => 0..child_position,
@@ -1437,7 +1457,8 @@ impl<A: Clone + Debug> Vector<A> {
             }
 
             // The only thing to be fixed here is the leaf spine node
-            let leaf = Rc::make_mut(spine.last_mut().unwrap_or(&mut self.root).leaf_mut());
+            let leaf =
+                SharedPointer::make_mut(spine.last_mut().unwrap_or(&mut self.root).leaf_mut());
             let range = match side {
                 Side::Back => node_index + 1..leaf.slots(),
                 Side::Front => 0..node_index,
@@ -1466,7 +1487,7 @@ impl<A: Clone + Debug> Vector<A> {
     /// assert_eq!(v, vector![1]);
     /// assert_eq!(last_half, vector![2, 3]);
     /// ```
-    pub fn split_off(&mut self, at: usize) -> Vector<A> {
+    pub fn split_off(&mut self, at: usize) -> InternalVector<A, P> {
         // TODO: This is not really the most efficient way to do this, specialize this function.
         let mut result = self.clone();
         result.slice_to_end(at);
@@ -1961,11 +1982,16 @@ impl<A: Clone + Debug> Vector<A> {
     /// assert_eq!(v, vector![9, 8, 0, 1, 2, 3, 4, 5, 6, 7]);
     /// assert_eq!(secondary, vector!['j', 'i', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
     /// ```
-    pub fn dual_sort_range_by<F, R, T>(&mut self, f: &F, range: R, secondary: &mut Vector<T>)
-    where
+    pub fn dual_sort_range_by<F, R, T, P2>(
+        &mut self,
+        f: &F,
+        range: R,
+        secondary: &mut InternalVector<T, P2>,
+    ) where
         F: Fn(&A, &A) -> cmp::Ordering,
         R: RangeBounds<usize> + Clone,
         T: Clone + Debug,
+        P2: SharedPointerKind,
     {
         let mut focus = self.focus_mut();
         focus.narrow(range.clone(), |focus| {
@@ -2020,12 +2046,17 @@ impl<A: Clone + Debug> Vector<A> {
     /// assert_eq!(v, vector![9, 8, 0, 1, 2, 3, 4, 5, 6, 7]);
     /// assert_eq!(secondary, vector!['j', 'i', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
     /// ```
-    pub fn dual_sort_range_by_key<F, K, R, T>(&mut self, f: &F, range: R, secondary: &mut Vector<T>)
-    where
+    pub fn dual_sort_range_by_key<F, K, R, T, P2>(
+        &mut self,
+        f: &F,
+        range: R,
+        secondary: &mut InternalVector<T, P2>,
+    ) where
         F: Fn(&A) -> K,
         K: Ord,
         R: RangeBounds<usize> + Clone,
         T: Debug + Clone,
+        P2: SharedPointerKind,
     {
         let comp = |x: &A, y: &A| f(x).cmp(&f(y));
         let mut focus = self.focus_mut();
@@ -2070,10 +2101,11 @@ impl<A: Clone + Debug> Vector<A> {
     /// v.dual_sort_by(&Ord::cmp, &mut secondary);
     /// assert_eq!(v, vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     /// ```
-    pub fn dual_sort_by<F, T>(&mut self, f: &F, secondary: &mut Vector<T>)
+    pub fn dual_sort_by<F, T, P2>(&mut self, f: &F, secondary: &mut InternalVector<T, P2>)
     where
         F: Fn(&A, &A) -> cmp::Ordering,
         T: Debug + Clone,
+        P2: SharedPointerKind,
     {
         self.dual_sort_range_by(f, .., secondary);
     }
@@ -2108,7 +2140,7 @@ impl<A: Clone + Debug> Vector<A> {
     }
 
     /// Returns a reference the spine of the requested side of the tree.
-    fn spine_ref(&self, side: Side) -> &Vec<NodeRc<A>> {
+    fn spine_ref(&self, side: Side) -> &Vec<NodeRc<A, P>> {
         match side {
             Side::Front => &self.left_spine,
             Side::Back => &self.right_spine,
@@ -2116,7 +2148,7 @@ impl<A: Clone + Debug> Vector<A> {
     }
 
     /// Returns a mutable reference the spine of the requested side of the tree.
-    fn spine_mut(&mut self, side: Side) -> &mut Vec<NodeRc<A>> {
+    fn spine_mut(&mut self, side: Side) -> &mut Vec<NodeRc<A, P>> {
         match side {
             Side::Front => &mut self.left_spine,
             Side::Back => &mut self.right_spine,
@@ -2124,7 +2156,7 @@ impl<A: Clone + Debug> Vector<A> {
     }
 
     /// Returns a reference to the leaf on the requested side of the tree.
-    fn leaf_ref(&self, side: Side) -> &Rc<Leaf<A>> {
+    fn leaf_ref(&self, side: Side) -> &SharedPointer<Leaf<A>, P> {
         self.spine_ref(side)
             .first()
             .unwrap_or(&self.root)
@@ -2132,7 +2164,7 @@ impl<A: Clone + Debug> Vector<A> {
     }
 
     /// Returns a mutable reference to the leaf on the requested side of the tree.
-    fn leaf_mut(&mut self, side: Side) -> &mut Rc<Leaf<A>> {
+    fn leaf_mut(&mut self, side: Side) -> &mut SharedPointer<Leaf<A>, P> {
         match side {
             Side::Front => self
                 .left_spine
@@ -2162,14 +2194,14 @@ impl<A: Clone + Debug> Vector<A> {
     /// assert_eq!(f.get(1), Some(&2));
     /// assert_eq!(f.get(2), Some(&3));
     /// ```
-    pub fn focus(&self) -> Focus<A> {
+    pub fn focus(&self) -> Focus<A, P> {
         Focus::new(self)
     }
 
     /// Returns a mutable focus over the vector. A focus tracks the last leaf and positions which
     /// was read. The path down this tree is saved in the focus and is used to accelerate lookups in
     /// nearby locations.
-    pub fn focus_mut(&mut self) -> FocusMut<A> {
+    pub fn focus_mut(&mut self) -> FocusMut<A, P> {
         let mut nodes = Vec::new();
         for node in self.left_spine.iter_mut() {
             if !node.is_empty() {
@@ -2192,7 +2224,7 @@ impl<A: Clone + Debug> Vector<A> {
     /// nearby locations.
     pub fn focus_mut_fn<F>(&mut self, f: &F)
     where
-        F: Fn(&mut FocusMut<A>),
+        F: Fn(&mut FocusMut<A, P>),
     {
         let mut nodes = Vec::new();
         for node in self.left_spine.iter_mut() {
@@ -2220,7 +2252,7 @@ impl<A: Clone + Debug> Vector<A> {
     /// assert_eq!(iter.next(), Some(&3));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter(&self) -> Iter<A> {
+    pub fn iter(&self) -> Iter<A, P> {
         Iter {
             front: 0,
             back: self.len(),
@@ -2242,7 +2274,7 @@ impl<A: Clone + Debug> Vector<A> {
     /// assert_eq!(iter.next(), Some(&mut 3));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_mut(&mut self) -> IterMut<A> {
+    pub fn iter_mut(&mut self) -> IterMut<A, P> {
         IterMut {
             front: 0,
             back: self.len(),
@@ -2328,7 +2360,7 @@ impl<A: Clone + Debug> Vector<A> {
     }
 }
 
-impl<A: Clone + Debug + Ord> Vector<A> {
+impl<A: Clone + Debug + Ord, P: SharedPointerKind> InternalVector<A, P> {
     /// Sorts the entire sequence by the natural comparator on the sequence.
     ///
     /// # Examples
@@ -2358,9 +2390,10 @@ impl<A: Clone + Debug + Ord> Vector<A> {
     /// assert_eq!(v, vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     /// assert_eq!(secondary, vector!['j', 'i','h', 'g', 'f', 'e', 'd', 'c', 'b', 'a']);
     /// ```
-    pub fn dual_sort<T>(&mut self, secondary: &mut Vector<T>)
+    pub fn dual_sort<T, P2>(&mut self, secondary: &mut InternalVector<T, P2>)
     where
         T: Debug + Clone,
+        P2: SharedPointerKind,
     {
         self.dual_sort_by(&Ord::cmp, secondary)
     }
@@ -2397,16 +2430,17 @@ impl<A: Clone + Debug + Ord> Vector<A> {
     /// assert_eq!(v, vector![9, 8, 7, 6, 5, 0, 1, 2, 3, 4]);
     /// assert_eq!(secondary, vector!['a', 'b', 'c', 'd', 'e', 'j', 'i','h', 'g', 'f']);
     /// ```
-    pub fn dual_sort_range<R, T>(&mut self, range: R, secondary: &mut Vector<T>)
+    pub fn dual_sort_range<R, T, P2>(&mut self, range: R, secondary: &mut InternalVector<T, P2>)
     where
         R: RangeBounds<usize> + Clone,
         T: Debug + Clone,
+        P2: SharedPointerKind,
     {
         self.dual_sort_range_by(&Ord::cmp, range, secondary)
     }
 }
 
-impl<A: Clone + Debug + PartialEq> Vector<A> {
+impl<A: Clone + Debug + PartialEq, P: SharedPointerKind> InternalVector<A, P> {
     /// Tests whether the node is equal to the given vector. This is mainly used for
     /// debugging purposes.
     pub(crate) fn equal_vec(&self, v: &Vec<A>) -> bool {
@@ -2455,33 +2489,33 @@ impl<A: Clone + Debug + PartialEq> Vector<A> {
     }
 }
 
-impl<A: Clone + Debug> Default for Vector<A> {
+impl<A: Clone + Debug, P: SharedPointerKind> Default for InternalVector<A, P> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<A: Clone + Debug + PartialEq> PartialEq for Vector<A> {
+impl<A: Clone + Debug + PartialEq, P: SharedPointerKind> PartialEq for InternalVector<A, P> {
     fn eq(&self, other: &Self) -> bool {
         self.len() == other.len() && self.iter().eq(other.iter())
     }
 }
 
-impl<A: Clone + Debug + Eq> Eq for Vector<A> {}
+impl<A: Clone + Debug + Eq, P: SharedPointerKind> Eq for InternalVector<A, P> {}
 
-impl<A: Clone + Debug + PartialOrd> PartialOrd for Vector<A> {
+impl<A: Clone + Debug + PartialOrd, P: SharedPointerKind> PartialOrd for InternalVector<A, P> {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         self.iter().partial_cmp(other.iter())
     }
 }
 
-impl<A: Clone + Debug + Ord> Ord for Vector<A> {
+impl<A: Clone + Debug + Ord, P: SharedPointerKind> Ord for InternalVector<A, P> {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         self.iter().cmp(other.iter())
     }
 }
 
-impl<A: Clone + Debug + Hash> Hash for Vector<A> {
+impl<A: Clone + Debug + Hash, P: SharedPointerKind> Hash for InternalVector<A, P> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         for i in self {
             i.hash(state)
@@ -2489,9 +2523,9 @@ impl<A: Clone + Debug + Hash> Hash for Vector<A> {
     }
 }
 
-impl<A: Clone + Debug> FromIterator<A> for Vector<A> {
+impl<A: Clone + Debug, P: SharedPointerKind> FromIterator<A> for InternalVector<A, P> {
     fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self {
-        let mut result = Vector::new();
+        let mut result = InternalVector::default();
         for item in iter {
             result.push_back(item);
         }
@@ -2499,20 +2533,25 @@ impl<A: Clone + Debug> FromIterator<A> for Vector<A> {
     }
 }
 
+/// derp
+pub type Vector<A> = InternalVector<A, RcK>;
+/// derp
+pub type ThreadSafeVector<A> = InternalVector<A, ArcK>;
+
 /// An iterator for a Vector.
 #[derive(Clone, Debug)]
-pub struct Iter<'a, A: Clone + Debug> {
+pub struct Iter<'a, A: Clone + Debug, P: SharedPointerKind> {
     front: usize,
     back: usize,
-    focus: Focus<'a, A>,
+    focus: Focus<'a, A, P>,
 }
 
-impl<'a, A: Clone + Debug + 'a> Iterator for Iter<'a, A> {
+impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> Iterator for Iter<'a, A, P> {
     type Item = &'a A;
 
     fn next(&mut self) -> Option<&'a A> {
         if self.front != self.back {
-            let focus: &'a mut Focus<A> = unsafe { &mut *(&mut self.focus as *mut _) };
+            let focus: &'a mut Focus<A, P> = unsafe { &mut *(&mut self.focus as *mut _) };
             let result = focus.get(self.front).unwrap();
             self.front += 1;
             Some(result)
@@ -2527,20 +2566,20 @@ impl<'a, A: Clone + Debug + 'a> Iterator for Iter<'a, A> {
     }
 }
 
-impl<'a, A: 'a + Clone + Debug> IntoIterator for &'a Vector<A> {
+impl<'a, A: 'a + Clone + Debug, P: SharedPointerKind> IntoIterator for &'a InternalVector<A, P> {
     type Item = &'a A;
-    type IntoIter = Iter<'a, A>;
+    type IntoIter = Iter<'a, A, P>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
-impl<'a, A: Clone + Debug + 'a> DoubleEndedIterator for Iter<'a, A> {
+impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> DoubleEndedIterator for Iter<'a, A, P> {
     fn next_back(&mut self) -> Option<&'a A> {
         if self.front != self.back {
             self.back -= 1;
-            let focus: &'a mut Focus<A> = unsafe { &mut *(&mut self.focus as *mut _) };
+            let focus: &'a mut Focus<A, P> = unsafe { &mut *(&mut self.focus as *mut _) };
             focus.get(self.back)
         } else {
             None
@@ -2548,24 +2587,24 @@ impl<'a, A: Clone + Debug + 'a> DoubleEndedIterator for Iter<'a, A> {
     }
 }
 
-impl<'a, A: Clone + Debug + 'a> ExactSizeIterator for Iter<'a, A> {}
+impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> ExactSizeIterator for Iter<'a, A, P> {}
 
-impl<'a, A: Clone + Debug + 'a> FusedIterator for Iter<'a, A> {}
+impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> FusedIterator for Iter<'a, A, P> {}
 
 /// An iterator for a Vector.
 #[derive(Debug)]
-pub struct IterMut<'a, A: Clone + Debug> {
+pub struct IterMut<'a, A: Clone + Debug, P: SharedPointerKind> {
     front: usize,
     back: usize,
-    focus: FocusMut<'a, A>,
+    focus: FocusMut<'a, A, P>,
 }
 
-impl<'a, A: Clone + Debug + 'a> Iterator for IterMut<'a, A> {
+impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> Iterator for IterMut<'a, A, P> {
     type Item = &'a mut A;
 
     fn next(&mut self) -> Option<&'a mut A> {
         if self.front != self.back {
-            let focus: &'a mut FocusMut<A> = unsafe { &mut *(&mut self.focus as *mut _) };
+            let focus: &'a mut FocusMut<A, P> = unsafe { &mut *(&mut self.focus as *mut _) };
             let result = focus.get(self.front).unwrap();
             self.front += 1;
             Some(result)
@@ -2580,20 +2619,22 @@ impl<'a, A: Clone + Debug + 'a> Iterator for IterMut<'a, A> {
     }
 }
 
-impl<'a, A: 'a + Clone + Debug> IntoIterator for &'a mut Vector<A> {
+impl<'a, A: 'a + Clone + Debug, P: SharedPointerKind> IntoIterator
+    for &'a mut InternalVector<A, P>
+{
     type Item = &'a mut A;
-    type IntoIter = IterMut<'a, A>;
+    type IntoIter = IterMut<'a, A, P>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
     }
 }
 
-impl<'a, A: Clone + Debug + 'a> DoubleEndedIterator for IterMut<'a, A> {
+impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> DoubleEndedIterator for IterMut<'a, A, P> {
     fn next_back(&mut self) -> Option<&'a mut A> {
         if self.front != self.back {
             self.back -= 1;
-            let focus: &'a mut FocusMut<A> = unsafe { &mut *(&mut self.focus as *mut _) };
+            let focus: &'a mut FocusMut<A, P> = unsafe { &mut *(&mut self.focus as *mut _) };
             focus.get(self.back)
         } else {
             None
@@ -2601,9 +2642,9 @@ impl<'a, A: Clone + Debug + 'a> DoubleEndedIterator for IterMut<'a, A> {
     }
 }
 
-impl<'a, A: Clone + Debug + 'a> ExactSizeIterator for IterMut<'a, A> {}
+impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> ExactSizeIterator for IterMut<'a, A, P> {}
 
-impl<'a, A: Clone + Debug + 'a> FusedIterator for IterMut<'a, A> {}
+impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> FusedIterator for IterMut<'a, A, P> {}
 
 #[allow(clippy::cognitive_complexity)]
 #[cfg(test)]

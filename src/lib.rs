@@ -18,8 +18,9 @@
 //! [`im`]: https://docs.rs/im/
 //!
 //! # What are some differences between librrb's Vector vs im's Vector?
-//! * `librrb` is not thread-safe, but may be in the future. `im` has a thread-safe Vector and a
-//! non-thread-safe Vector. It is likely that `librrb` may use a different scheme to `im`.
+//! * Both `librrb` and `im` are thread-safe but they have slightly different implementations.
+//! `librrb` uses archery to abstract over either Rc or Arc internally, while `im` exposes two
+//! seperate crates. In the future, it will be possible to convert between these types.
 //! * `librrb` keeps the tree in a format that allows quick access to the spines of the RRB tree.
 //! `im` uses additional buffers on the sides that can be accessed quickly. Both of these techniques
 //! facilitate quick mutation/access at the edges of the tree. `librrb`'s approach requires extra
@@ -33,6 +34,7 @@ mod annotated_nodes;
 mod annotation_table;
 mod circular;
 mod nodes;
+// mod reference;
 mod size_table;
 mod sort;
 
@@ -51,8 +53,10 @@ pub const RRB_WIDTH: usize = 64;
 
 /// Represents a side of a container.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Side {
+pub enum Side {
+    /// derp
     Front,
+    /// derp
     Back,
 }
 

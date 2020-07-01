@@ -1,13 +1,15 @@
+use crate::focus::FocusMut;
+use archery::SharedPointerKind;
+use rand_core::{RngCore, SeedableRng};
 use std::cmp;
 use std::fmt::Debug;
 use std::mem;
 
-use rand_core::{RngCore, SeedableRng};
-
-use crate::focus::FocusMut;
-
-pub(crate) fn do_single_sort<A, R, F>(focus: &mut FocusMut<A>, rng: &mut R, comparator: &F)
-where
+pub(crate) fn do_single_sort<A, R, F, P: SharedPointerKind>(
+    focus: &mut FocusMut<A, P>,
+    rng: &mut R,
+    comparator: &F,
+) where
     A: Clone + Debug,
     R: RngCore,
     F: Fn(&A, &A) -> cmp::Ordering,
@@ -176,9 +178,9 @@ where
     });
 }
 
-pub(crate) fn do_dual_sort<A, B, R, F>(
-    focus: &mut FocusMut<A>,
-    dual: &mut FocusMut<B>,
+pub(crate) fn do_dual_sort<A, B, R, F, P1: SharedPointerKind, P2: SharedPointerKind>(
+    focus: &mut FocusMut<A, P1>,
+    dual: &mut FocusMut<B, P2>,
     rng: &mut R,
     comparator: &F,
 ) where
@@ -387,6 +389,7 @@ pub(crate) fn do_dual_sort<A, B, R, F>(
 mod test {
     use crate::*;
     use ::proptest::num::i32;
+    use archery::RcK;
     use proptest::prelude::*;
     use proptest::proptest;
     use proptest_derive::Arbitrary;
