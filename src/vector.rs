@@ -229,25 +229,24 @@
 //! We currently choose the `Summing over two levels` algorithm for concatenation, however in the
 //! future this may switch to other algorithms. This means that H is bounded by O(logN + logC/M^2).
 //! An example of what to expect from this algorithm can be found by understanding the inserts test.
-//! The insert operation is done by splitting the original vector into two pieces before and after
-//! the split point. The new element is inserted and the two pieces are concatenated back together.
-//! The test, itself, inserts 0..N repetitively into the middle of a Vector. When N is roughly
-//! 200000, the height of the tree reaches 26. For comparison a full tree of height 4 can holds
-//! 16_777_216 or over 800 times this amount and a full tree of 26 levels could hold over 10^44
-//! elements.
+//! The test inserts 0..N repetitively into the middle of a Vector. The insert operation is done by
+//! splitting the original vector into two pieces before and after the split point. The new element
+//! is inserted and the two pieces are concatenated back together. When N is roughly 200,000, the
+//! height of the tree reaches 26. For comparison a full tree of height 4 can hold 16,777,216 or
+//! over 800 times this amount and a full tree of 26 levels could hold over 10^44 elements.
 //!
-//! [Vector::push_front]: ./struct.Vector.html#method.push_front
-//! [Vector::push_back]: ./struct.Vector.html#method.push_back
-//! [Vector::pop_front]: ./struct.Vector.html#method.pop_front
-//! [Vector::pop_back]: ./struct.Vector.html#method.pop_back
-//! [Vector::slice_from_start]: ./struct.Vector.html#method.slice_from_start
-//! [Vector::slice_to_end]: ./struct.Vector.html#method.slice_to_end
-//! [Vector::concatenate]: ./struct.Vector.html#method.concatenate
-//! [Vector::clone]: ./struct.Vector.html#method.clone
-//! [Vector::front]: ./struct.Vector.html#method.front
-//! [Vector::back]: ./struct.Vector.html#method.back
-//! [Vector::new]: ./struct.Vector.html#method.new
-//! [Vector::singleton]: ./struct.Vector.html#method.singleton
+//! [Vector::push_front]: ./struct.InternalVector.html#method.push_front
+//! [Vector::push_back]: ./struct.InternalVector.html#method.push_back
+//! [Vector::pop_front]: ./struct.InternalVector.html#method.pop_front
+//! [Vector::pop_back]: ./struct.InternalVector.html#method.pop_back
+//! [Vector::slice_from_start]: ./struct.InternalVector.html#method.slice_from_start
+//! [Vector::slice_to_end]: ./struct.InternalVector.html#method.slice_to_end
+//! [Vector::concatenate]: ./struct.InternalVector.html#method.concatenate
+//! [Vector::clone]: ./struct.InternalVector.html#method.clone
+//! [Vector::front]: ./struct.InternalVector.html#method.front
+//! [Vector::back]: ./struct.InternalVector.html#method.back
+//! [Vector::new]: ./struct.InternalVector.html#method.new
+//! [Vector::singleton]: ./struct.InternalVector.html#method.singleton
 
 use crate::focus::{Focus, FocusMut};
 use crate::nodes::Leaf;
@@ -2017,16 +2016,16 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// assert_eq!(v, vector![9, 8, 0, 1, 2, 3, 4, 5, 6, 7]);
     /// assert_eq!(secondary, vector!['j', 'i', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
     /// ```
-    pub fn dual_sort_range_by<F, R, T, P2>(
+    pub fn dual_sort_range_by<F, R, T, Q>(
         &mut self,
         f: &F,
         range: R,
-        secondary: &mut InternalVector<T, P2>,
+        secondary: &mut InternalVector<T, Q>,
     ) where
         F: Fn(&A, &A) -> cmp::Ordering,
         R: RangeBounds<usize> + Clone,
         T: Clone + Debug,
-        P2: SharedPointerKind,
+        Q: SharedPointerKind,
     {
         let mut focus = self.focus_mut();
         focus.narrow(range.clone(), |focus| {
@@ -2081,17 +2080,17 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// assert_eq!(v, vector![9, 8, 0, 1, 2, 3, 4, 5, 6, 7]);
     /// assert_eq!(secondary, vector!['j', 'i', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
     /// ```
-    pub fn dual_sort_range_by_key<F, K, R, T, P2>(
+    pub fn dual_sort_range_by_key<F, K, R, T, Q>(
         &mut self,
         f: &F,
         range: R,
-        secondary: &mut InternalVector<T, P2>,
+        secondary: &mut InternalVector<T, Q>,
     ) where
         F: Fn(&A) -> K,
         K: Ord,
         R: RangeBounds<usize> + Clone,
         T: Debug + Clone,
-        P2: SharedPointerKind,
+        Q: SharedPointerKind,
     {
         let comp = |x: &A, y: &A| f(x).cmp(&f(y));
         let mut focus = self.focus_mut();
@@ -2136,11 +2135,11 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// v.dual_sort_by(&Ord::cmp, &mut secondary);
     /// assert_eq!(v, vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     /// ```
-    pub fn dual_sort_by<F, T, P2>(&mut self, f: &F, secondary: &mut InternalVector<T, P2>)
+    pub fn dual_sort_by<F, T, Q>(&mut self, f: &F, secondary: &mut InternalVector<T, Q>)
     where
         F: Fn(&A, &A) -> cmp::Ordering,
         T: Debug + Clone,
-        P2: SharedPointerKind,
+        Q: SharedPointerKind,
     {
         self.dual_sort_range_by(f, .., secondary);
     }
@@ -2425,10 +2424,10 @@ impl<A: Clone + Debug + Ord, P: SharedPointerKind> InternalVector<A, P> {
     /// assert_eq!(v, vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     /// assert_eq!(secondary, vector!['j', 'i','h', 'g', 'f', 'e', 'd', 'c', 'b', 'a']);
     /// ```
-    pub fn dual_sort<T, P2>(&mut self, secondary: &mut InternalVector<T, P2>)
+    pub fn dual_sort<T, Q>(&mut self, secondary: &mut InternalVector<T, Q>)
     where
         T: Debug + Clone,
-        P2: SharedPointerKind,
+        Q: SharedPointerKind,
     {
         self.dual_sort_by(&Ord::cmp, secondary)
     }
@@ -2465,11 +2464,11 @@ impl<A: Clone + Debug + Ord, P: SharedPointerKind> InternalVector<A, P> {
     /// assert_eq!(v, vector![9, 8, 7, 6, 5, 0, 1, 2, 3, 4]);
     /// assert_eq!(secondary, vector!['a', 'b', 'c', 'd', 'e', 'j', 'i','h', 'g', 'f']);
     /// ```
-    pub fn dual_sort_range<R, T, P2>(&mut self, range: R, secondary: &mut InternalVector<T, P2>)
+    pub fn dual_sort_range<R, T, Q>(&mut self, range: R, secondary: &mut InternalVector<T, Q>)
     where
         R: RangeBounds<usize> + Clone,
         T: Debug + Clone,
-        P2: SharedPointerKind,
+        Q: SharedPointerKind,
     {
         self.dual_sort_range_by(&Ord::cmp, range, secondary)
     }

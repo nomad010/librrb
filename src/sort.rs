@@ -5,14 +5,12 @@ use std::cmp;
 use std::fmt::Debug;
 use std::mem;
 
-pub(crate) fn do_single_sort<A, R, F, P: SharedPointerKind>(
-    focus: &mut FocusMut<A, P>,
-    rng: &mut R,
-    comparator: &F,
-) where
+pub(crate) fn do_single_sort<A, R, F, P>(focus: &mut FocusMut<A, P>, rng: &mut R, comparator: &F)
+where
     A: Clone + Debug,
     R: RngCore,
     F: Fn(&A, &A) -> cmp::Ordering,
+    P: SharedPointerKind,
 {
     if focus.len() <= 1 {
         return;
@@ -178,9 +176,9 @@ pub(crate) fn do_single_sort<A, R, F, P: SharedPointerKind>(
     });
 }
 
-pub(crate) fn do_dual_sort<A, B, R, F, P1: SharedPointerKind, P2: SharedPointerKind>(
-    focus: &mut FocusMut<A, P1>,
-    dual: &mut FocusMut<B, P2>,
+pub(crate) fn do_dual_sort<A, B, R, F, P, Q>(
+    focus: &mut FocusMut<A, P>,
+    dual: &mut FocusMut<B, Q>,
     rng: &mut R,
     comparator: &F,
 ) where
@@ -188,6 +186,8 @@ pub(crate) fn do_dual_sort<A, B, R, F, P1: SharedPointerKind, P2: SharedPointerK
     B: Clone + Debug,
     R: RngCore,
     F: Fn(&A, &A) -> cmp::Ordering,
+    P: SharedPointerKind,
+    Q: SharedPointerKind,
 {
     if focus.len() <= 1 {
         return;
