@@ -301,6 +301,41 @@ macro_rules! vector {
     }};
 }
 
+/// Construct a vector.
+///
+/// # Examples
+///
+/// ```
+/// # #[macro_use] extern crate librrb;
+/// # use librrb::ThreadSafeVector;
+/// let first = vector_ts![1, 2, 3];
+/// let mut second = ThreadSafeVector::new();
+/// second.push_back(1);
+/// second.push_back(2);
+/// second.push_back(3);
+/// assert_eq!(first, second);
+/// ```
+#[macro_export]
+macro_rules! vector_ts {
+    () => { $crate::vector::ThreadSafeVector::new() };
+
+    ( $($x:expr),* ) => {{
+        let mut l = $crate::vector::ThreadSafeVector::new();
+        $(
+            l.push_back($x);
+        )*
+            l
+    }};
+
+    ( $($x:expr ,)* ) => {{
+        let mut l = $crate::vector::ThreadSafeVector::new();
+        $(
+            l.push_back($x);
+        )*
+            l
+    }};
+}
+
 // Keep the left and right spines in a deconstructed form in the vector
 // This allows us quicker access to the spines of the tree which are most commonly accessed.
 // We have the following invariants on the spine though

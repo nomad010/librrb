@@ -34,7 +34,6 @@ mod annotated_nodes;
 mod annotation_table;
 mod circular;
 mod nodes;
-// mod reference;
 mod size_table;
 mod sort;
 
@@ -43,7 +42,7 @@ pub mod vector;
 pub mod focus;
 
 #[doc(inline)]
-pub use vector::{Iter, IterMut, Vector};
+pub use vector::{Iter, IterMut, ThreadSafeVector, Vector};
 
 #[doc(inline)]
 pub use focus::{Focus, FocusMut};
