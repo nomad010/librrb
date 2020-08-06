@@ -4,6 +4,8 @@
 use crate::circular::CircularBuffer;
 use crate::Side;
 
+use std::ops::Range;
+
 /// A naive implementation of an size table for nodes in the RRB tree. This implementation keeps
 /// track of the size of each of child as well as the level of the node in the tree.
 #[derive(Clone, Debug)]
@@ -42,6 +44,19 @@ impl SizeTable {
             self.buffer.get(0).cloned()
         } else if idx < self.buffer.len() {
             Some(self.buffer.get(idx).unwrap() - self.buffer.get(idx - 1).unwrap())
+        } else {
+            None
+        }
+    }
+
+    /// Returns the size of the child at the given index.
+    pub fn get_child_range(&self, idx: usize) -> Option<Range<usize>> {
+        if idx < self.buffer.len() {
+            if idx == 0 {
+                Some(0..*self.buffer.get(0).unwrap())
+            } else {
+                Some(*self.buffer.get(idx - 1).unwrap()..*self.buffer.get(idx).unwrap())
+            }
         } else {
             None
         }

@@ -1,16 +1,22 @@
 use crate::focus::FocusMut;
+use crate::node_traits::{InternalTrait, LeafTrait};
 use archery::SharedPointerKind;
 use rand_core::RngCore;
 use std::cmp;
 use std::fmt::Debug;
 use std::mem;
 
-pub(crate) fn do_single_sort<A, R, F, P>(focus: &mut FocusMut<A, P>, rng: &mut R, comparator: &F)
-where
+pub(crate) fn do_single_sort<A, R, F, P, Internal, Leaf>(
+    focus: &mut FocusMut<A, P, Internal, Leaf>,
+    rng: &mut R,
+    comparator: &F,
+) where
     A: Clone + Debug,
     R: RngCore,
     F: Fn(&A, &A) -> cmp::Ordering,
     P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A>,
+    Leaf: LeafTrait<Item = A>,
 {
     if focus.len() <= 1 {
         return;
@@ -176,9 +182,9 @@ where
     });
 }
 
-pub(crate) fn do_dual_sort<A, B, R, F, P, Q>(
-    focus: &mut FocusMut<A, P>,
-    dual: &mut FocusMut<B, Q>,
+pub(crate) fn do_dual_sort<A, B, R, F, P, Q, Internal1, Leaf1, Internal2, Leaf2>(
+    focus: &mut FocusMut<A, P, Internal1, Leaf1>,
+    dual: &mut FocusMut<B, Q, Internal2, Leaf2>,
     rng: &mut R,
     comparator: &F,
 ) where
@@ -188,6 +194,10 @@ pub(crate) fn do_dual_sort<A, B, R, F, P, Q>(
     F: Fn(&A, &A) -> cmp::Ordering,
     P: SharedPointerKind,
     Q: SharedPointerKind,
+    Internal1: InternalTrait<P, Leaf1, Item = A>,
+    Leaf1: LeafTrait<Item = A>,
+    Internal2: InternalTrait<Q, Leaf2, Item = B>,
+    Leaf2: LeafTrait<Item = B>,
 {
     if focus.len() <= 1 {
         return;
