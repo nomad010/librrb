@@ -347,6 +347,20 @@ impl<A: Debug> CircularBuffer<A> {
         }
     }
 
+    pub fn end(&self, side: Side) -> Option<&A> {
+        match side {
+            Side::Front => self.front(),
+            Side::Back => self.back(),
+        }
+    }
+
+    pub fn end_mut(&mut self, side: Side) -> Option<&mut A> {
+        match side {
+            Side::Front => self.front_mut(),
+            Side::Back => self.back_mut(),
+        }
+    }
+
     /// Creates an iterator over the elements in the buffer.
     pub fn iter(&self) -> Iter<A> {
         Iter {

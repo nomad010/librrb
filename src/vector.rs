@@ -219,7 +219,7 @@
 //! | [`Pop back`][Vector::pop_back] | O(1) | O(H) |
 //! | [`Slice from Start`][Vector::slice_from_start] | O(MH) | O(MH) |
 //! | [`Slice to Back`][Vector::slice_to_end] | O(MH) | O(MH) |
-//! | [`Concatenate`][Vector::concatenate] | O(MH) | O(MH) |
+//! | [`Concatenate`][Vector::append] | O(MH) | O(MH) |
 //! | [`Clone`][Vector::clone] | O(H) | O(H) |
 //! | [`Front`][Vector::front] | O(1) | O(1) |
 //! | [`Back`][Vector::back] | O(1) | O(1) |
@@ -241,7 +241,7 @@
 //! [Vector::pop_back]: ./struct.InternalVector.html#method.pop_back
 //! [Vector::slice_from_start]: ./struct.InternalVector.html#method.slice_from_start
 //! [Vector::slice_to_end]: ./struct.InternalVector.html#method.slice_to_end
-//! [Vector::concatenate]: ./struct.InternalVector.html#method.concatenate
+//! [Vector::append]: ./struct.InternalVector.html#method.append
 //! [Vector::clone]: ./struct.InternalVector.html#method.clone
 //! [Vector::front]: ./struct.InternalVector.html#method.front
 //! [Vector::back]: ./struct.InternalVector.html#method.back
@@ -249,8 +249,11 @@
 //! [Vector::singleton]: ./struct.InternalVector.html#method.singleton
 
 use crate::focus::{Focus, FocusMut};
-use crate::nodes::Leaf;
-use crate::nodes::{ChildList, Internal, NodeRc};
+use crate::node_traits::{
+    BorrowedInternalTrait, BorrowedLeafTrait, InternalTrait, LeafTrait, NodeRc,
+};
+// use crate::node_impls::basic::;.
+use crate::node_impls::basic::{BorrowedInternal, BorrowedLeaf, ChildList, Internal, Leaf};
 use crate::sort::{do_dual_sort, do_single_sort};
 use crate::{Side, RRB_WIDTH};
 use archery::{ArcK, RcK, SharedPointer, SharedPointerKind};
@@ -388,14 +391,29 @@ macro_rules! vector_ts {
 //
 /// A container for representing sequence of elements
 #[derive(Debug)]
-pub struct InternalVector<A: Clone + Debug, P: SharedPointerKind> {
-    pub(crate) left_spine: Vec<NodeRc<A, P>>,
-    pub(crate) right_spine: Vec<NodeRc<A, P>>,
-    pub(crate) root: NodeRc<A, P>,
+pub struct InternalVector<A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
+    pub(crate) left_spine: Vec<NodeRc<A, P, Internal, Leaf>>,
+    pub(crate) right_spine: Vec<NodeRc<A, P, Internal, Leaf>>,
+    pub(crate) root: NodeRc<A, P, Internal, Leaf>,
     len: usize,
 }
 
-impl<A: Clone + Debug, P: SharedPointerKind> Clone for InternalVector<A, P> {
+impl<A, P, Internal, Leaf, BorrowedInternal> Clone
+    for InternalVector<A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     fn clone(&self) -> Self {
         InternalVector {
             left_spine: self.left_spine.clone(),
@@ -406,7 +424,14 @@ impl<A: Clone + Debug, P: SharedPointerKind> Clone for InternalVector<A, P> {
     }
 }
 
-impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
+impl<A, P, Internal, Leaf, BorrowedInternal> InternalVector<A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     /// Constructs a new empty vector.
     ///
     /// # Examples
@@ -421,7 +446,7 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
         InternalVector {
             left_spine: vec![],
             right_spine: vec![],
-            root: SharedPointer::new(Leaf::empty()).into(),
+            root: NodeRc::Leaf(SharedPointer::new(Leaf::empty())),
             len: 0,
         }
     }
@@ -440,7 +465,7 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
         InternalVector {
             left_spine: vec![],
             right_spine: vec![],
-            root: SharedPointer::new(Leaf::with_item(item)).into(),
+            root: NodeRc::Leaf(SharedPointer::new(Leaf::with_item(item))),
             len: 1,
         }
     }
@@ -492,7 +517,8 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// iterator, while the root is in the middle.
     pub(crate) fn spine_iter(
         &self,
-    ) -> impl Iterator<Item = (Option<(Side, usize)>, &NodeRc<A, P>)> + DoubleEndedIterator {
+    ) -> impl Iterator<Item = (Option<(Side, usize)>, &NodeRc<A, P, Internal, Leaf>)> + DoubleEndedIterator
+    {
         let left_spine_iter = self
             .left_spine
             .iter()
@@ -512,7 +538,7 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// bubble up full nodes. This will also handle expandung the tree.
     fn complete_leaf(&mut self, side: Side) {
         debug_assert_eq!(self.left_spine.len(), self.right_spine.len());
-        debug_assert_eq!(self.leaf_ref(side).free_slots(), 0);
+        debug_assert_eq!(self.leaf_ref(side).free_space(), 0);
         let (spine, other_spine) = match side {
             Side::Back => (&mut self.right_spine, &mut self.left_spine),
             Side::Front => (&mut self.left_spine, &mut self.right_spine),
@@ -533,11 +559,7 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
                     .unwrap_or(&mut self.root)
                     .internal_mut(),
             );
-            SharedPointer::make_mut(&mut parent_node.sizes).push_child(side, full_node.len());
-            match parent_node.children {
-                ChildList::Leaves(ref mut children) => children.push(side, full_node.leaf()),
-                ChildList::Internals(ref mut children) => children.push(side, full_node.internal()),
-            };
+            parent_node.push_child(side, full_node);
         }
 
         if self.root.slots() >= RRB_WIDTH - 1 {
@@ -545,12 +567,9 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
             // same height as the old root. We decant half the old root into this new node.
             // Finally, we create a new node of height one more than the old root and set that as
             // the new root. We leave the root empty
-            let new_root = match &self.root {
-                NodeRc::Internal(_) => {
-                    SharedPointer::new(Internal::empty_internal(self.root.level() + 1)).into()
-                }
-                NodeRc::Leaf(_) => SharedPointer::new(Internal::empty_leaves()).into(),
-            };
+            let new_root = NodeRc::Internal(SharedPointer::new(Internal::empty_internal(
+                self.root.level() + 1,
+            )));
             let mut new_node = mem::replace(&mut self.root, new_root);
             let mut other_new_node = new_node.new_empty();
             new_node.share_children_with(&mut other_new_node, side.negate(), RRB_WIDTH / 2);
@@ -565,7 +584,7 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// Pushes an item into a side leaf of the tree. This fixes up some invariants in the case that
     /// the root sits directly above the leaves.
     fn push_side(&mut self, side: Side, item: A) {
-        if self.leaf_ref(side).free_slots() == 0 {
+        if self.leaf_ref(side).free_space() == 0 {
             self.complete_leaf(side);
         }
 
@@ -616,18 +635,26 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// Signals that a leaf is empty. This process the replace the leaf with the next leaf.
     fn empty_leaf(&mut self, side: Side) {
         // Invariants
-        // 1) If the root is empty, the top spines have at least SIZE - 1 xhildren between them.
+        // 1) If the root is empty, the top spines have at least SIZE - 1 children between them.
         // 2) If the root is empty, each of top spines are within 2 size of each other
         // As a consequence, if any of the top spines are empty, the root is non-empty.
         // If we break invariant 1) then we shrink the tree, as we can make a new root from the
         // children of the tops of the spine.
         // If we break invariant 2), we call balance spine tops to correct it.
         debug_assert_eq!(self.left_spine.len(), self.right_spine.len());
+        // println!("LUL {:#?}", self);
         // Try and pop the node into the level above
         let spine = match side {
             Side::Back => &mut self.right_spine,
             Side::Front => &mut self.left_spine,
         };
+        // println!(
+        //     "LUL {:?} {} {} {}",
+        //     side,
+        //     spine.len(),
+        //     self.root.slots(),
+        //     self.root.slots() != 0 || spine.last().unwrap().slots() != 0
+        // );
         debug_assert_eq!(spine.first().unwrap().slots(), 0);
         debug_assert!(self.root.slots() != 0 || spine.last().unwrap().slots() != 0);
 
@@ -648,11 +675,7 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
                 .get_mut(level + 1)
                 .unwrap_or(&mut self.root)
                 .internal_mut();
-            let child: NodeRc<A, P> = match SharedPointer::make_mut(node).children {
-                ChildList::Internals(ref mut children) => children.pop(side).into(),
-                ChildList::Leaves(ref mut children) => children.pop(side).into(),
-            };
-            SharedPointer::make_mut(&mut SharedPointer::make_mut(node).sizes).pop_child(side);
+            let child = SharedPointer::make_mut(node).pop_child(side);
             spine[level] = child;
         }
 
@@ -670,7 +693,14 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
         // 2) Must differ in slots by at most one node
 
         // The invariant must be checked in a loop as slicing may break the invariant multiple times
+        // println!(
+        //     "LUL {} {} {}",
+        //     self.root.slots(),
+        //     self.root.level(),
+        //     self.root.is_leaf()
+        // );
         while self.root.slots() == 0 && !self.root.is_leaf() {
+            // println!("gar");
             let left_spine_top = self.left_spine.last_mut().unwrap();
             let right_spine_top = self.right_spine.last_mut().unwrap();
             let left_spine_children = left_spine_top.slots();
@@ -721,9 +751,9 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     fn pop_side(&mut self, side: Side) -> Option<A> {
         debug_assert_eq!(self.left_spine.len(), self.right_spine.len());
         if self.spine_ref(side).is_empty() {
-            if let Ok(item) = SharedPointer::make_mut(self.root.leaf_mut()).try_pop(side) {
+            if !self.root.is_empty() {
                 self.len -= 1;
-                Some(item)
+                Some(SharedPointer::make_mut(self.root.leaf_mut()).pop(side))
             } else {
                 None
             }
@@ -1077,6 +1107,14 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
         // there could be a merge of the left and right children. Each merge simply shifts elements
         // out of one node and adds them tp another.
         // In the best case, this algorithm is O(H)
+
+        // For each level we want to combine in the tree
+        // 1) Pack the children in the left node. O(M^2)
+        // 2) Pop grandchildren off the right node until the left node is full. O(M)
+        // 3) Pack the children in the right node. O(M^2)
+        // 4) Move the children off right node until the left node is full. O(M)
+        // 5) If at any stage the right node becomes empty we stop and left is the result, otherwise
+        //    we have to add represent it as a root with height: level + 1 and 'return' the result.
         if self.is_empty() {
             *self = other;
             return;
@@ -1085,18 +1123,29 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
             return;
         }
 
+        if self.len() == 1 {
+            other.push_front(self.pop_back().unwrap());
+            *self = other;
+            return;
+        }
+        if other.len() == 1 {
+            self.push_back(other.pop_back().unwrap());
+            return;
+        }
+
+        println!("lens {} {}", self.len(), other.len());
+
         let new_len = self.len + other.len();
+        // println!("Roflpi {:#?}", other);
 
         // Make the spines the same length
         while self.right_spine.len() < other.left_spine.len() {
             // The root moves to either the left or right spine and the root becomes empty
             // We replace the left with root here and right with an empty node
-            let new_root = match &self.root {
-                NodeRc::Leaf(_) => SharedPointer::new(Internal::empty_leaves()).into(),
-                NodeRc::Internal(root) => {
-                    SharedPointer::new(Internal::empty_internal(root.level() + 1)).into()
-                }
-            };
+            // println!("Adding to self");
+            let new_root = NodeRc::Internal(SharedPointer::new(Internal::empty_internal(
+                self.root.level() + 1,
+            )));
             let mut new_left = mem::replace(&mut self.root, new_root);
             let mut new_right = new_left.new_empty();
             new_left.share_children_with(&mut new_right, Side::Back, new_left.slots() / 2);
@@ -1107,12 +1156,10 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
         while other.left_spine.len() < self.right_spine.len() {
             // The root moves to either the left or right spine and the root becomes empty
             // We replace the right with root here and left with an empty node
-            let new_root = match &other.root {
-                NodeRc::Leaf(_) => SharedPointer::new(Internal::empty_leaves()).into(),
-                NodeRc::Internal(root) => {
-                    SharedPointer::new(Internal::empty_internal(root.level() + 1)).into()
-                }
-            };
+            // println!("Adding to other");
+            let new_root = NodeRc::Internal(SharedPointer::new(Internal::empty_internal(
+                other.root.level() + 1,
+            )));
             let mut new_right = mem::replace(&mut other.root, new_root);
             let mut new_left = new_right.new_empty();
             new_right.share_children_with(&mut new_left, Side::Front, new_right.slots() / 2);
@@ -1120,23 +1167,21 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
             other.right_spine.push(new_right);
         }
 
-        debug_assert_eq!(self.right_spine.len(), self.right_spine.len());
+        // println!("heights {} {}", self.height(), other.height());
+
+        // debug_assert_eq!(self.right_spine.len(), self.right_spine.len());
         debug_assert_eq!(other.left_spine.len(), other.right_spine.len());
         debug_assert_eq!(self.right_spine.len(), other.left_spine.len());
 
-        let packer =
-            |new_node: NodeRc<A, P>, parent_node: &mut SharedPointer<Internal<A, P>, P>, side| {
-                if !new_node.is_empty() {
-                    let parent = &mut SharedPointer::make_mut(parent_node);
-                    SharedPointer::make_mut(&mut parent.sizes).push_child(side, new_node.len());
-                    match parent.children {
-                        ChildList::Internals(ref mut children) => {
-                            children.push(side, new_node.internal())
-                        }
-                        ChildList::Leaves(ref mut children) => children.push(side, new_node.leaf()),
-                    }
-                }
-            };
+        let packer = |new_node: NodeRc<A, P, Internal, Leaf>,
+                      parent_node: &mut SharedPointer<Internal, P>,
+                      side| {
+            if !new_node.is_empty() {
+                let parent = &mut SharedPointer::make_mut(parent_node);
+                // println!("gar {} vs {}", parent.level(), new_node.level());
+                parent.push_child(side, new_node);
+            }
+        };
 
         // More efficient to work from front to back here, but we need to remove elements
         // We reverse to make this more efficient
@@ -1151,6 +1196,20 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
             packer(left_child, parent_node, Side::Back);
         }
         if let Some(right_child) = other.left_spine.pop() {
+            // println!(
+            //     "Gar {} {} {}",
+            //     other.left_spine.len(),
+            //     other.root.level(),
+            //     right_child.level()
+            // );
+            // for spine_node in other.left_spine.iter() {
+            //     println!(
+            //         "Roflderp gar {} vs {}",
+            //         spine_node.level(),
+            //         right_child.level()
+            //     );
+            // }
+
             let parent_node = other
                 .left_spine
                 .last_mut()
@@ -1158,6 +1217,23 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
                 .internal_mut();
             packer(right_child, parent_node, Side::Front);
         }
+        // let sls: usize = self.left_spine.iter().map(|x| x.len()).sum();
+        // let srs: usize = self.right_spine.iter().map(|x| x.len()).sum();
+        // let ols: usize = other.left_spine.iter().map(|x| x.len()).sum();
+        // let ors: usize = other.right_spine.iter().map(|x| x.len()).sum();
+        // println!(
+        //     "AAAAAG DERO GABLE GAR {} {} {} = {}, {} {} {} = {}, {}",
+        //     sls,
+        //     self.root.len(),
+        //     srs,
+        //     sls + self.root.len() + srs,
+        //     ols,
+        //     other.root.len(),
+        //     ors,
+        //     ols + other.root.len() + ors,
+        //     sls + self.root.len() + srs + ols + other.root.len() + ors,
+        // );
+        // Error in this loop
         while !self.right_spine.is_empty() {
             let mut left_node = self.right_spine.pop().unwrap();
             let mut right_node = other.left_spine.pop().unwrap();
@@ -1165,14 +1241,83 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
             let left = SharedPointer::make_mut(left_node.internal_mut());
             let right = SharedPointer::make_mut(right_node.internal_mut());
 
+            left.pack_children();
+            println!(
+                "OOH {} {} {:?} {} --- {} {} {:?} {} LEL {} {}",
+                left.len(),
+                left.slots(),
+                self.right_spine
+                    .iter()
+                    .map(|x| x.level())
+                    .collect::<Vec<_>>(),
+                self.root.level(),
+                right.len(),
+                right.slots(),
+                other
+                    .left_spine
+                    .iter()
+                    .map(|x| x.level())
+                    .collect::<Vec<_>>(),
+                other.root.level(),
+                left.level(),
+                right.level()
+            );
+            let mut left_right_most = left.pop_child(Side::Back);
+            while !left_right_most.is_full() && !right.is_empty() {
+                let mut right_left_most = right.pop_child(Side::Front);
+                println!("roflpi {} {}", left_right_most.len(), right_left_most.len());
+                right_left_most.share_children_with(
+                    &mut left_right_most,
+                    Side::Front,
+                    right_left_most.slots(),
+                );
+                println!(
+                    "roflpi2 {} {}",
+                    left_right_most.len(),
+                    right_left_most.len()
+                );
+                if !right_left_most.is_empty() {
+                    right.push_child(Side::Front, right_left_most);
+                }
+            }
+            left.push_child(Side::Back, left_right_most);
+            right.pack_children();
+            right.share_children_with(left, Side::Front, right.slots());
+
+            // packer(
+            //     left_node,
+            //     self.right_spine
+            //         .last_mut()
+            //         .unwrap_or(&mut self.root)
+            //         .internal_mut(),
+            //     Side::Back,
+            // );
+            // packer(
+            //     right_node,
+            //     other
+            //         .left_spine
+            //         .last_mut()
+            //         .unwrap_or(&mut other.root)
+            //         .internal_mut(),
+            //     Side::Front,
+            // );
+
+            // if !left.ch
+            // while left.get
+            // loop {
+            //     // if left.
+            // }
+            // while !right.is_empty() && left.
+            /*
+
             if !left.is_empty() {
                 left.pack_children();
 
                 let left_position = left.slots() - 1;
                 while left
-                    .children
-                    .get_child_node(left_position)
+                    .get_child_at_slot(left_position)
                     .unwrap()
+                    .0
                     .free_slots()
                     != 0
                     && !right.is_empty()
@@ -1228,6 +1373,7 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
                 right.pack_children();
                 right.share_children_with(left, Side::Front, RRB_WIDTH);
             }
+            */
 
             packer(
                 left_node,
@@ -1248,8 +1394,22 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
                     Side::Front,
                 );
             }
+            let left = self.right_spine.last_mut().unwrap_or(&mut self.root);
+            let right = other.left_spine.last_mut().unwrap_or(&mut other.root);
+            // println!(
+            //     "OOH {} {} {:?} {} --- {} {} {:?} {}",
+            //     left.len(),
+            //     left.slots(),
+            //     self.right_spine.iter().map(|x| x.len()).collect::<Vec<_>>(),
+            //     self.root.len(),
+            //     right.len(),
+            //     right.slots(),
+            //     other.left_spine.iter().map(|x| x.len()).collect::<Vec<_>>(),
+            //     other.root.len()
+            // );
         }
 
+        // Bug is between DERO println and here
         debug_assert!(self.right_spine.is_empty());
         debug_assert!(other.left_spine.is_empty());
         self.right_spine = other.right_spine;
@@ -1264,18 +1424,24 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
         }
 
         if !other.root.is_empty() {
-            let new_root = match &self.root {
-                NodeRc::Leaf(_) => SharedPointer::new(Internal::empty_leaves()).into(),
-                NodeRc::Internal(root) => {
-                    SharedPointer::new(Internal::empty_internal(root.level() + 1)).into()
-                }
-            };
+            let new_root = NodeRc::Internal(SharedPointer::new(Internal::empty_internal(
+                self.root.level() + 1,
+            )));
             let old_root = mem::replace(&mut self.root, new_root);
             self.left_spine.push(old_root);
             self.right_spine.push(other.root);
         }
         self.len = new_len;
         self.fixup_spine_tops();
+        // let ls: usize = self.left_spine.iter().map(|x| x.len()).sum();
+        // let rs: usize = self.right_spine.iter().map(|x| x.len()).sum();
+        // println!(
+        //     "GAR GABLE GAR {} {} {} = {}",
+        //     ls,
+        //     self.root.len(),
+        //     rs,
+        //     ls + self.root.len() + rs
+        // );
     }
 
     /// Prepends the given vector onto the front of this vector.
@@ -1314,16 +1480,18 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
         // node, but we add back the spine by replacing it with path to this leaf
         // 3) If the leaf only has the root as an ancestor it proceeds as 2) with the path becoming
         // the entire right spine.
-        if len == 0 {
-            self.left_spine.clear();
-            self.right_spine.clear();
-            self.root = SharedPointer::new(Leaf::empty()).into();
-            self.len = 0;
-            return;
-        }
-        let index = len;
-        self.make_index_side(index - 1, Side::Back);
-        self.fixup_spine_tops();
+        // if len == 0 {
+        //     self.left_spine.clear();
+        //     self.right_spine.clear();
+        //     self.root = NodeRc::Leaf(SharedPointer::new(Leaf::empty()));
+        //     self.len = 0;
+        //     return;
+        // }
+        // let index = len;
+        // unimplemented!();
+        // // self.make_index_side(index - 1, Side::Back);
+        // self.fixup_spine_tops();
+        self.split_off(len);
     }
 
     /// Slices the vector from the given index inclusive to the end.
@@ -1347,16 +1515,21 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
         // this leaf
         // 3) If the leaf only has the root as an ancestor it proceeds as 2) with the path becoming
         // the entire left spine.
-        if start >= self.len {
-            self.left_spine.clear();
-            self.right_spine.clear();
-            self.root = SharedPointer::new(Leaf::empty()).into();
-            self.len = 0;
-            return;
-        }
-        let index = start;
-        self.make_index_side(index, Side::Front);
-        self.fixup_spine_tops();
+        // if start >= self.len {
+        //     self.left_spine.clear();
+        //     self.right_spine.clear();
+        //     self.root = NodeRc::Leaf(SharedPointer::new(Leaf::empty()));
+        //     self.len = 0;
+        //     return;
+        // }
+        // let index = start;
+        // unimplemented!();
+        // // self.make_index_side(index, Side::Front);
+        // self.fixup_spine_tops();
+        // println!("before {}", self.len());
+        let result = self.split_off(start);
+        // println!("after {}", result.len());
+        *self = result;
     }
 
     /// Derp
@@ -1407,105 +1580,102 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     }
 
     /// Slices the tree so that the element is first at the requested side of the tree.
-    fn make_index_side(&mut self, index: usize, side: Side) {
-        if let Some((node_position, mut node_index)) = self.find_node_info_for_index(index) {
-            // We need to make this node the first/last in the tree
-            // This means that this node will become the part of the spine for the given side
-            match node_position {
-                None => {
-                    // The root is where the spine starts.
-                    // This means all of the requested side's spine must be discarded
-                    while let Some(node) = self.spine_mut(side).pop() {
-                        self.len -= node.len();
-                    }
-                }
-                Some((spine_side, spine_position)) if side != spine_side => {
-                    // The new end comes from the opposite spine
-                    // This means the root AND the requested spine must be discarded
-                    // The node we are pointing to becomes the new root and things above it in the
-                    // opposite spine are discarded. Since higher points come first we can do this
-                    // efficiently without reversing the spine
-                    while spine_position + 1 != self.spine_ref(side.negate()).len() {
-                        self.len -= self.spine_mut(side.negate()).pop().unwrap().len();
-                    }
-                    self.len -= self.root.len();
-                    let new_root = self.spine_mut(side.negate()).pop().unwrap();
-                    self.root = new_root;
-                    while let Some(node) = self.spine_mut(side).pop() {
-                        self.len -= node.len();
-                    }
-                }
-                Some((spine_side, spine_position)) if side == spine_side => {
-                    // The new end comes from the same spine.
-                    // Only the elements below the node in the spine need to be discarded
-                    // The root and left spine remain untouched
-                    // To the spine discarding efficiently we reverse, pop and reverse again
-                    self.spine_mut(side).reverse();
-                    for _ in 0..spine_position {
-                        self.len -= self.spine_mut(side).pop().unwrap().len();
-                    }
-                    self.spine_mut(side).reverse();
-                }
-                _ => unreachable!(),
-            }
-            // We need to complete the spine here, we do this by cutting a side off of
-            // nodes going down the spine
-            // We need to do this in reverse order again to make this more efficient
-            let spine = match side {
-                Side::Front => &mut self.left_spine,
-                Side::Back => &mut self.right_spine,
-            };
-            spine.reverse();
-            while let NodeRc::Internal(ref mut internal) =
-                spine.last_mut().unwrap_or(&mut self.root)
-            {
-                assert!(node_index < internal.len());
-                let num_slots = internal.slots();
-                let (child_position, new_index) = internal.position_info_for(node_index).unwrap();
-                let internal_mut = SharedPointer::make_mut(internal);
-                let children = &mut internal_mut.children;
-                let sizes = SharedPointer::make_mut(&mut internal_mut.sizes);
-                let range = match side {
-                    Side::Back => child_position + 1..num_slots,
-                    Side::Front => 0..child_position,
-                };
-                for _ in range {
-                    match children {
-                        ChildList::Internals(children) => {
-                            children.pop(side);
-                        }
-                        ChildList::Leaves(children) => {
-                            children.pop(side);
-                        }
-                    }
-                    self.len -= sizes.pop_child(side);
-                }
-                let next_node = match children {
-                    ChildList::Internals(children) => children.pop(side).into(),
-                    ChildList::Leaves(children) => children.pop(side).into(),
-                };
-                sizes.pop_child(side);
-                spine.push(next_node);
-                node_index = new_index;
-            }
+    // fn make_index_side(&mut self, index: usize, side: Side) {
+    // if let Some((node_position, mut node_index)) = self.find_node_info_for_index(index) {
+    //     // We need to make this node the first/last in the tree
+    //     // This means that this node will become the part of the spine for the given side
+    //     match node_position {
+    //         None => {
+    //             // The root is where the spine starts.
+    //             // This means all of the requested side's spine must be discarded
+    //             while let Some(node) = self.spine_mut(side).pop() {
+    //                 self.len -= node.len();
+    //             }
+    //         }
+    //         Some((spine_side, spine_position)) if side != spine_side => {
+    //             // The new end comes from the opposite spine
+    //             // This means the root AND the requested spine must be discarded
+    //             // The node we are pointing to becomes the new root and things above it in the
+    //             // opposite spine are discarded. Since higher points come first we can do this
+    //             // efficiently without reversing the spine
+    //             while spine_position + 1 != self.spine_ref(side.negate()).len() {
+    //                 self.len -= self.spine_mut(side.negate()).pop().unwrap().len();
+    //             }
+    //             self.len -= self.root.len();
+    //             let new_root = self.spine_mut(side.negate()).pop().unwrap();
+    //             self.root = new_root;
+    //             while let Some(node) = self.spine_mut(side).pop() {
+    //                 self.len -= node.len();
+    //             }
+    //         }
+    //         Some((spine_side, spine_position)) if side == spine_side => {
+    //             // The new end comes from the same spine.
+    //             // Only the elements below the node in the spine need to be discarded
+    //             // The root and left spine remain untouched
+    //             // To the spine discarding efficiently we reverse, pop and reverse again
+    //             self.spine_mut(side).reverse();
+    //             for _ in 0..spine_position {
+    //                 self.len -= self.spine_mut(side).pop().unwrap().len();
+    //             }
+    //             self.spine_mut(side).reverse();
+    //         }
+    //         _ => unreachable!(),
+    //     }
+    //     // We need to complete the spine here, we do this by cutting a side off of
+    //     // nodes going down the spine
+    //     // We need to do this in reverse order again to make this more efficient
+    //     let spine = match side {
+    //         Side::Front => &mut self.left_spine,
+    //         Side::Back => &mut self.right_spine,
+    //     };
+    //     spine.reverse();
+    //     while let NodeRc::Internal(ref mut internal) =
+    //         spine.last_mut().unwrap_or(&mut self.root)
+    //     {
+    //         assert!(node_index < internal.len());
+    //         let num_slots = internal.slots();
+    //         let (child_position, new_index) = internal.position_info_for(node_index).unwrap();
+    //         let internal_mut = SharedPointer::make_mut(internal);
+    //         // let children = &mut internal_mut.children;
+    //         let sizes = SharedPointer::make_mut(&mut internal_mut.sizes);
+    //         let range = match side {
+    //             Side::Back => child_position + 1..num_slots,
+    //             Side::Front => 0..child_position,
+    //         };
+    //         for _ in range {
+    //             match children {
+    //                 ChildList::Internals(children) => {
+    //                     children.pop(side);
+    //                 }
+    //                 ChildList::Leaves(children) => {
+    //                     children.pop(side);
+    //                 }
+    //             }
+    //             self.len -= sizes.pop_child(side);
+    //         }
+    //         let next_node = internal_mut.pop_child(side);
+    //         sizes.pop_child(side);
+    //         spine.push(next_node);
+    //         node_index = new_index;
+    //     }
 
-            // The only thing to be fixed here is the leaf spine node
-            let leaf =
-                SharedPointer::make_mut(spine.last_mut().unwrap_or(&mut self.root).leaf_mut());
-            let range = match side {
-                Side::Back => node_index + 1..leaf.slots(),
-                Side::Front => 0..node_index,
-            };
-            assert!(node_index < leaf.len());
-            for _ in range {
-                leaf.buffer.pop(side);
-                self.len -= 1;
-            }
+    //     // The only thing to be fixed here is the leaf spine node
+    //     let leaf =
+    //         SharedPointer::make_mut(spine.last_mut().unwrap_or(&mut self.root).leaf_mut());
+    //     let range = match side {
+    //         Side::Back => node_index + 1..leaf.len(),
+    //         Side::Front => 0..node_index,
+    //     };
+    //     assert!(node_index < leaf.len());
+    //     for _ in range {
+    //         leaf.pop(side);
+    //         self.len -= 1;
+    //     }
 
-            // Now we are done, we can reverse the spine here to get it back to normal
-            spine.reverse();
-        }
-    }
+    //     // Now we are done, we can reverse the spine here to get it back to normal
+    //     spine.reverse();
+    // }
+    // }
 
     /// Splits the vector at the given index into two vectors. `self` is replaced with every element
     /// before the given index and a new vector containing everything after and including the index.
@@ -1520,12 +1690,210 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// assert_eq!(v, vector![1]);
     /// assert_eq!(last_half, vector![2, 3]);
     /// ```
-    pub fn split_off(&mut self, at: usize) -> InternalVector<A, P> {
-        // TODO: This is not really the most efficient way to do this, specialize this function.
-        let mut result = self.clone();
-        result.slice_to_end(at);
-        self.slice_from_start(at);
-        result
+    pub fn split_off(
+        &mut self,
+        at: usize,
+    ) -> InternalVector<A, P, Internal, Leaf, BorrowedInternal> {
+        if at == 0 {
+            // We can early out because the result is self and self becomes empty.
+            mem::replace(self, InternalVector::new())
+        } else if at >= self.len() {
+            // We can early out because the result is empty and self remains unchanged.
+            InternalVector::new()
+        } else {
+            // We know now that the split position lies within the vector allowing us to make some
+            // simplifications.
+            let original_len = self.len();
+            // println!("Slicing at {} out of {}", at, self.len);
+            // println!("Roflskates {:#?}", self);
+            let (position, subposition) = self.find_node_info_for_index(at).unwrap();
+            let mut result = InternalVector::new();
+            // println!(
+            //     "Split off position {} {:?}, {} {}",
+            //     at, position, subposition, original_len
+            // );
+            // println!(
+            //     "derp should be here {} {} {} {}",
+            //     self.left_spine.iter().map(|x| x.len()).sum::<usize>(),
+            //     self.root.len(),
+            //     self.right_spine.iter().map(|x| x.len()).sum::<usize>(),
+            //     self.height()
+            // );
+            match position {
+                Some((Side::Front, node_position)) => {
+                    // The left spine is has the node getting split
+                    // println!("LEL {}", self.left_spine.len());
+                    result.left_spine = self.left_spine.split_off(node_position + 1);
+                    let mut split_node = self.left_spine.pop().unwrap();
+                    result
+                        .left_spine
+                        .insert(0, split_node.split_at_position(subposition));
+                    mem::swap(&mut self.root, &mut result.root);
+                    mem::swap(&mut self.right_spine, &mut result.right_spine);
+                    self.root = split_node;
+                }
+                None => {
+                    // The root node is getting split
+                    // println!("RAER {}", self.root.len());
+                    mem::swap(&mut self.right_spine, &mut result.right_spine);
+                    result.root = self.root.split_at_position(subposition);
+                    // println!("preroflskates {:#?}", result);
+                }
+                Some((Side::Back, node_position)) => {
+                    // The right spine is getting split
+                    // println!("preroflskates {:#?}", self);
+
+                    // Derp I think this is reversed completely
+                    result.right_spine = self.right_spine.split_off(node_position + 1);
+                    let mut split_node = self.right_spine.pop().unwrap();
+                    // println!("preroflskates {:#?}", split_node.len());
+                    mem::swap(&mut result.right_spine, &mut self.right_spine);
+                    let split_right = split_node.split_at_position(subposition);
+                    // println!("roflskates {:#?}", self);
+
+                    // Problem is here I think and potentially with the split off above.
+                    self.right_spine.insert(0, split_node);
+                    result.right_spine.push(split_right);
+
+                    // println!(
+                    //     "now derp should be here {} {}",
+                    //     self.right_spine.iter().map(|x| x.len()).sum::<usize>(),
+                    //     result.right_spine.iter().map(|x| x.len()).sum::<usize>(),
+                    // );
+                }
+            }
+
+            // println!(
+            //     "should be here {} {}",
+            //     self.root.slots(),
+            //     self.root.len()
+            //         + self.right_spine.iter().map(|x| x.len()).sum::<usize>()
+            //         + self.left_spine.iter().map(|x| x.len()).sum::<usize>()
+            // );
+
+            result.len = original_len - at;
+            self.len = at;
+            // println!("Lol {} vs {}", self.root.slots(), result.root.slots());
+            // println!("roflskates {:#?}", self);
+
+            self.right_spine.reverse();
+            while self
+                .right_spine
+                .last()
+                .map(|x| x.is_empty())
+                .unwrap_or(false)
+            {
+                // println!("lul");
+                self.right_spine.pop().unwrap();
+            }
+            self.right_spine.reverse();
+
+            while self.root.is_empty()
+                && (self.left_spine.is_empty() || self.right_spine.is_empty())
+            {
+                // Basically only the left branch has nodes - we pop a node from the top of the
+                // left spine to serve as root. We know the left spine cannot be empty because in
+                // that case we would fallen into one of the first two ifs.
+                let node = if self.left_spine.is_empty() {
+                    self.right_spine.pop()
+                } else {
+                    self.left_spine.pop()
+                }
+                .unwrap();
+                self.root = node;
+                // println!("lol a {} {}", self.root.level(), self.left_spine.len());
+            }
+
+            // println!("roflskates2 {:#?}", self);
+            if self.fill_spine(Side::Back) {
+                self.fixup_spine_tops();
+                self.empty_leaf(Side::Back);
+            }
+            // if self.fill_spine(Side::Front) {
+            //     self.fixup_spine_tops();
+            //     self.empty_leaf(Side::Front);
+            // }
+            self.fixup_spine_tops();
+
+            // println!("here");
+
+            result.left_spine.reverse();
+            while result
+                .left_spine
+                .last()
+                .map(|x| x.is_empty())
+                .unwrap_or(false)
+            {
+                // println!("lul");
+                result.left_spine.pop().unwrap();
+            }
+            result.left_spine.reverse();
+
+            while result.root.is_empty()
+                && (result.left_spine.is_empty() || result.right_spine.is_empty())
+            {
+                // Basically only the right branch has nodes - we pop a node from the top of the
+                // left spine to serve as root. We know the right spine cannot be empty because in
+                // that case we would fallen into one of the first two ifs.
+                let node = if result.left_spine.is_empty() {
+                    result.right_spine.pop()
+                } else {
+                    result.left_spine.pop()
+                }
+                .unwrap();
+                result.root = node;
+                // println!("lol a {} {}", result.root.level(), result.left_spine.len());
+            }
+
+            if result.fill_spine(Side::Front) {
+                result.fixup_spine_tops();
+                // println!("leldongs");
+                result.empty_leaf(Side::Front);
+            }
+            // if result.fill_spine(Side::Back) {
+            //     result.fixup_spine_tops();
+            //     result.empty_leaf(Side::Back);
+            // }
+            result.fixup_spine_tops();
+
+            // for part in self.left_spine.iter() {
+            //     println!("LS Gargablegar {}", part.level());
+            // }
+            // println!("RO Gargablegar {}", self.root.level());
+            // for part in self.right_spine.iter() {
+            //     println!("RS Gargablegar {}", part.level());
+            // }
+
+            // self.assert_invariants();
+            // result.assert_invariants();
+
+            result
+        }
+    }
+
+    fn fill_spine(&mut self, side: Side) -> bool {
+        let spine = match side {
+            Side::Front => &mut self.left_spine,
+            Side::Back => &mut self.right_spine,
+        };
+        // println!("Gablegar {}", spine.len());
+        spine.reverse();
+        let result = loop {
+            match spine.last_mut().unwrap_or(&mut self.root) {
+                NodeRc::Internal(internal) => {
+                    //
+                    // println!("Gargablegar {} {}", internal.slots(), internal.level(),);
+                    let child = SharedPointer::make_mut(internal).pop_child(side);
+                    spine.push(child);
+                }
+                NodeRc::Leaf(leaf) => {
+                    // println!("Derp {}", leaf.len());
+                    break leaf.is_empty();
+                }
+            }
+        };
+        spine.reverse();
+        result && !spine.is_empty()
     }
 
     /// Inserts the item into the vector at the given index.
@@ -1542,6 +1910,8 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     pub fn insert(&mut self, index: usize, element: A) {
         // TODO: This is not really the most efficient way to do this, specialize this function.
         let last_part = self.split_off(index);
+        // println!("RAWWWWWWWWWWWWWWWR result {:#?}", last_part);
+        // println!("RAWWWWWWWWWWWWWWWR self {:#?}", self);
         self.push_back(element);
         self.append(last_part);
     }
@@ -2015,16 +2385,19 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// assert_eq!(v, vector![9, 8, 0, 1, 2, 3, 4, 5, 6, 7]);
     /// assert_eq!(secondary, vector!['j', 'i', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
     /// ```
-    pub fn dual_sort_range_by<F, R, T, Q>(
+    pub fn dual_sort_range_by<F, R, T, Q, Internal2, Leaf2, BorrowedInternal2>(
         &mut self,
         f: &F,
         range: R,
-        secondary: &mut InternalVector<T, Q>,
+        secondary: &mut InternalVector<T, Q, Internal2, Leaf2, BorrowedInternal2>,
     ) where
         F: Fn(&A, &A) -> cmp::Ordering,
         R: RangeBounds<usize> + Clone,
         T: Clone + Debug,
         Q: SharedPointerKind,
+        Internal2: InternalTrait<Q, Leaf2, Item = T, Borrowed = BorrowedInternal2>,
+        BorrowedInternal2: BorrowedInternalTrait<Q, Leaf2, InternalChild = Internal2> + Debug,
+        Leaf2: LeafTrait<Item = T>,
     {
         let mut focus = self.focus_mut();
         focus.narrow(range.clone(), |focus| {
@@ -2079,17 +2452,20 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// assert_eq!(v, vector![9, 8, 0, 1, 2, 3, 4, 5, 6, 7]);
     /// assert_eq!(secondary, vector!['j', 'i', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
     /// ```
-    pub fn dual_sort_range_by_key<F, K, R, T, Q>(
+    pub fn dual_sort_range_by_key<F, K, R, T, Q, Internal2, Leaf2, BorrowedInternal2>(
         &mut self,
         f: &F,
         range: R,
-        secondary: &mut InternalVector<T, Q>,
+        secondary: &mut InternalVector<T, Q, Internal2, Leaf2, BorrowedInternal2>,
     ) where
         F: Fn(&A) -> K,
         K: Ord,
         R: RangeBounds<usize> + Clone,
         T: Debug + Clone,
         Q: SharedPointerKind,
+        Internal2: InternalTrait<Q, Leaf2, Item = T, Borrowed = BorrowedInternal2>,
+        BorrowedInternal2: BorrowedInternalTrait<Q, Leaf2, InternalChild = Internal2> + Debug,
+        Leaf2: LeafTrait<Item = T>,
     {
         let comp = |x: &A, y: &A| f(x).cmp(&f(y));
         let mut focus = self.focus_mut();
@@ -2134,11 +2510,17 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// v.dual_sort_by(&Ord::cmp, &mut secondary);
     /// assert_eq!(v, vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     /// ```
-    pub fn dual_sort_by<F, T, Q>(&mut self, f: &F, secondary: &mut InternalVector<T, Q>)
-    where
+    pub fn dual_sort_by<F, T, Q, Internal2, Leaf2, BorrowedInternal2>(
+        &mut self,
+        f: &F,
+        secondary: &mut InternalVector<T, Q, Internal2, Leaf2, BorrowedInternal2>,
+    ) where
         F: Fn(&A, &A) -> cmp::Ordering,
         T: Debug + Clone,
         Q: SharedPointerKind,
+        Internal2: InternalTrait<Q, Leaf2, Item = T, Borrowed = BorrowedInternal2>,
+        BorrowedInternal2: BorrowedInternalTrait<Q, Leaf2, InternalChild = Internal2> + Debug,
+        Leaf2: LeafTrait<Item = T>,
     {
         self.dual_sort_range_by(f, .., secondary);
     }
@@ -2174,7 +2556,7 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     }
 
     /// Returns a reference the spine of the requested side of the tree.
-    fn spine_ref(&self, side: Side) -> &Vec<NodeRc<A, P>> {
+    fn spine_ref(&self, side: Side) -> &Vec<NodeRc<A, P, Internal, Leaf>> {
         match side {
             Side::Front => &self.left_spine,
             Side::Back => &self.right_spine,
@@ -2182,7 +2564,7 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     }
 
     /// Returns a mutable reference the spine of the requested side of the tree.
-    fn spine_mut(&mut self, side: Side) -> &mut Vec<NodeRc<A, P>> {
+    fn spine_mut(&mut self, side: Side) -> &mut Vec<NodeRc<A, P, Internal, Leaf>> {
         match side {
             Side::Front => &mut self.left_spine,
             Side::Back => &mut self.right_spine,
@@ -2190,7 +2572,7 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     }
 
     /// Returns a reference to the leaf on the requested side of the tree.
-    fn leaf_ref(&self, side: Side) -> &SharedPointer<Leaf<A>, P> {
+    fn leaf_ref(&self, side: Side) -> &SharedPointer<Leaf, P> {
         self.spine_ref(side)
             .first()
             .unwrap_or(&self.root)
@@ -2198,7 +2580,7 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     }
 
     /// Returns a mutable reference to the leaf on the requested side of the tree.
-    fn leaf_mut(&mut self, side: Side) -> &mut SharedPointer<Leaf<A>, P> {
+    fn leaf_mut(&mut self, side: Side) -> &mut SharedPointer<Leaf, P> {
         match side {
             Side::Front => self
                 .left_spine
@@ -2228,14 +2610,14 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// assert_eq!(f.get(1), Some(&2));
     /// assert_eq!(f.get(2), Some(&3));
     /// ```
-    pub fn focus(&self) -> Focus<A, P> {
+    pub fn focus(&self) -> Focus<A, P, Internal, Leaf, BorrowedInternal> {
         Focus::new(self)
     }
 
     /// Returns a mutable focus over the vector. A focus tracks the last leaf and positions which
     /// was read. The path down this tree is saved in the focus and is used to accelerate lookups in
     /// nearby locations.
-    pub fn focus_mut(&mut self) -> FocusMut<A, P> {
+    pub fn focus_mut(&mut self) -> FocusMut<A, P, Internal, Leaf, BorrowedInternal> {
         let mut nodes = Vec::new();
         for node in self.left_spine.iter_mut() {
             if !node.is_empty() {
@@ -2258,7 +2640,7 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// nearby locations.
     pub fn focus_mut_fn<F>(&mut self, f: &F)
     where
-        F: Fn(&mut FocusMut<A, P>),
+        F: Fn(&mut FocusMut<A, P, Internal, Leaf, BorrowedInternal>),
     {
         let mut nodes = Vec::new();
         for node in self.left_spine.iter_mut() {
@@ -2286,7 +2668,7 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// assert_eq!(iter.next(), Some(&3));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter(&self) -> Iter<A, P> {
+    pub fn iter(&self) -> Iter<A, P, Internal, Leaf, BorrowedInternal> {
         Iter {
             front: 0,
             back: self.len(),
@@ -2308,7 +2690,7 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
     /// assert_eq!(iter.next(), Some(&mut 3));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_mut(&mut self) -> IterMut<A, P> {
+    pub fn iter_mut(&mut self) -> IterMut<A, P, Internal, Leaf, BorrowedInternal> {
         IterMut {
             front: 0,
             back: self.len(),
@@ -2376,12 +2758,13 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
 
         // Invariant 6
         // The spine nodes must have their RRB invariants fulfilled
-        for spine in &self.left_spine {
-            spine.debug_check_invariants();
+        for (level, spine) in self.left_spine.iter().enumerate() {
+            spine.debug_check_invariants(spine.len(), level);
         }
-        self.root.debug_check_invariants();
-        for spine in &self.right_spine {
-            spine.debug_check_invariants();
+        self.root
+            .debug_check_invariants(self.root.len(), self.left_spine.len());
+        for (level, spine) in self.right_spine.iter().enumerate() {
+            spine.debug_check_invariants(spine.len(), level);
         }
 
         // Invariant 7
@@ -2390,12 +2773,23 @@ impl<A: Clone + Debug, P: SharedPointerKind> InternalVector<A, P> {
         let root_len = self.root.len();
         let right_spine_len = self.right_spine.iter().map(|x| x.len()).sum::<usize>();
 
+        // println!(
+        //     "derpledoo {} {} {}",
+        //     left_spine_len, root_len, right_spine_len
+        // );
         assert_eq!(self.len, left_spine_len + root_len + right_spine_len);
         true
     }
 }
 
-impl<A: Clone + Debug + Ord, P: SharedPointerKind> InternalVector<A, P> {
+impl<A, P, Internal, Leaf, BorrowedInternal> InternalVector<A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + Ord,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     /// Sorts the entire sequence by the natural comparator on the sequence.
     ///
     /// # Examples
@@ -2425,10 +2819,15 @@ impl<A: Clone + Debug + Ord, P: SharedPointerKind> InternalVector<A, P> {
     /// assert_eq!(v, vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     /// assert_eq!(secondary, vector!['j', 'i','h', 'g', 'f', 'e', 'd', 'c', 'b', 'a']);
     /// ```
-    pub fn dual_sort<T, Q>(&mut self, secondary: &mut InternalVector<T, Q>)
-    where
+    pub fn dual_sort<T, Q, Internal2, Leaf2, BorrowedInternal2>(
+        &mut self,
+        secondary: &mut InternalVector<T, Q, Internal2, Leaf2, BorrowedInternal2>,
+    ) where
         T: Debug + Clone,
         Q: SharedPointerKind,
+        Internal2: InternalTrait<Q, Leaf2, Item = T, Borrowed = BorrowedInternal2>,
+        BorrowedInternal2: BorrowedInternalTrait<Q, Leaf2, InternalChild = Internal2> + Debug,
+        Leaf2: LeafTrait<Item = T>,
     {
         self.dual_sort_by(&Ord::cmp, secondary)
     }
@@ -2465,17 +2864,30 @@ impl<A: Clone + Debug + Ord, P: SharedPointerKind> InternalVector<A, P> {
     /// assert_eq!(v, vector![9, 8, 7, 6, 5, 0, 1, 2, 3, 4]);
     /// assert_eq!(secondary, vector!['a', 'b', 'c', 'd', 'e', 'j', 'i','h', 'g', 'f']);
     /// ```
-    pub fn dual_sort_range<R, T, Q>(&mut self, range: R, secondary: &mut InternalVector<T, Q>)
-    where
+    pub fn dual_sort_range<R, T, Q, Internal2, Leaf2, BorrowedInternal2>(
+        &mut self,
+        range: R,
+        secondary: &mut InternalVector<T, Q, Internal2, Leaf2, BorrowedInternal2>,
+    ) where
         R: RangeBounds<usize> + Clone,
         T: Debug + Clone,
         Q: SharedPointerKind,
+        Internal2: InternalTrait<Q, Leaf2, Item = T, Borrowed = BorrowedInternal2>,
+        BorrowedInternal2: BorrowedInternalTrait<Q, Leaf2, InternalChild = Internal2> + Debug,
+        Leaf2: LeafTrait<Item = T>,
     {
         self.dual_sort_range_by(&Ord::cmp, range, secondary)
     }
 }
 
-impl<A: Clone + Debug + PartialEq, P: SharedPointerKind> InternalVector<A, P> {
+impl<A, P, Internal, Leaf, BorrowedInternal> InternalVector<A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + PartialEq,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     /// Tests whether the node is equal to the given vector. This is mainly used for
     /// debugging purposes.
     #[allow(dead_code)]
@@ -2483,17 +2895,17 @@ impl<A: Clone + Debug + PartialEq, P: SharedPointerKind> InternalVector<A, P> {
         if self.len() == v.len() {
             let mut iter = v.iter();
             for spine in self.left_spine.iter() {
-                if !spine.equal_iter(&mut iter) {
+                if !spine.equal_iter_debug(&mut iter) {
                     println!("Left: {:?} {:?}", self, v);
                     return false;
                 }
             }
-            if !self.root.equal_iter(&mut iter) {
+            if !self.root.equal_iter_debug(&mut iter) {
                 println!("Root: {:?} {:?}", self, v);
                 return false;
             }
             for spine in self.right_spine.iter().rev() {
-                if !spine.equal_iter(&mut iter) {
+                if !spine.equal_iter_debug(&mut iter) {
                     println!("Right: {:?} {:?}", self, v);
                     return false;
                 }
@@ -2505,33 +2917,82 @@ impl<A: Clone + Debug + PartialEq, P: SharedPointerKind> InternalVector<A, P> {
     }
 }
 
-impl<A: Clone + Debug, P: SharedPointerKind> Default for InternalVector<A, P> {
+impl<A, P, Internal, Leaf, BorrowedInternal> Default
+    for InternalVector<A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<A: Clone + Debug + PartialEq, P: SharedPointerKind> PartialEq for InternalVector<A, P> {
+impl<A, P, Internal, Leaf, BorrowedInternal> PartialEq
+    for InternalVector<A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + PartialEq,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     fn eq(&self, other: &Self) -> bool {
         self.len() == other.len() && self.iter().eq(other.iter())
     }
 }
 
-impl<A: Clone + Debug + Eq, P: SharedPointerKind> Eq for InternalVector<A, P> {}
+impl<A, P, Internal, Leaf, BorrowedInternal> Eq
+    for InternalVector<A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + Eq,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
+}
 
-impl<A: Clone + Debug + PartialOrd, P: SharedPointerKind> PartialOrd for InternalVector<A, P> {
+impl<A, P, Internal, Leaf, BorrowedInternal> PartialOrd
+    for InternalVector<A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + PartialOrd,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         self.iter().partial_cmp(other.iter())
     }
 }
 
-impl<A: Clone + Debug + Ord, P: SharedPointerKind> Ord for InternalVector<A, P> {
+impl<A, P, Internal, Leaf, BorrowedInternal> Ord
+    for InternalVector<A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + Ord,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         self.iter().cmp(other.iter())
     }
 }
 
-impl<A: Clone + Debug + Hash, P: SharedPointerKind> Hash for InternalVector<A, P> {
+impl<A, P, Internal, Leaf, BorrowedInternal> Hash
+    for InternalVector<A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + Hash,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     fn hash<H: Hasher>(&self, state: &mut H) {
         for i in self {
             i.hash(state)
@@ -2539,7 +3000,15 @@ impl<A: Clone + Debug + Hash, P: SharedPointerKind> Hash for InternalVector<A, P
     }
 }
 
-impl<A: Clone + Debug, P: SharedPointerKind> FromIterator<A> for InternalVector<A, P> {
+impl<A, P, Internal, Leaf, BorrowedInternal> FromIterator<A>
+    for InternalVector<A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self {
         let mut result = InternalVector::default();
         for item in iter {
@@ -2550,24 +3019,48 @@ impl<A: Clone + Debug, P: SharedPointerKind> FromIterator<A> for InternalVector<
 }
 
 /// derp
-pub type Vector<A> = InternalVector<A, RcK>;
+pub type Vector<A> =
+    InternalVector<A, RcK, Internal<A, RcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, RcK, Leaf<A>>>;
 /// derp
-pub type ThreadSafeVector<A> = InternalVector<A, ArcK>;
+pub type ThreadSafeVector<A> = InternalVector<
+    A,
+    ArcK,
+    Internal<A, ArcK, Leaf<A>>,
+    Leaf<A>,
+    BorrowedInternal<A, ArcK, Leaf<A>>,
+>;
 
 /// An iterator for a Vector.
 #[derive(Clone, Debug)]
-pub struct Iter<'a, A: Clone + Debug, P: SharedPointerKind> {
+pub struct Iter<'a, A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + 'a,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     front: usize,
     back: usize,
-    focus: Focus<'a, A, P>,
+    focus: Focus<'a, A, P, Internal, Leaf, BorrowedInternal>,
 }
 
-impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> Iterator for Iter<'a, A, P> {
+impl<'a, A, P, Internal, Leaf, BorrowedInternal> Iterator
+    for Iter<'a, A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     type Item = &'a A;
 
     fn next(&mut self) -> Option<&'a A> {
+        // This focus is broken
         if self.front != self.back {
-            let focus: &'a mut Focus<A, P> = unsafe { &mut *(&mut self.focus as *mut _) };
+            let focus: &'a mut Focus<A, P, Internal, Leaf, BorrowedInternal> =
+                unsafe { &mut *(&mut self.focus as *mut _) };
             let result = focus.get(self.front).unwrap();
             self.front += 1;
             Some(result)
@@ -2582,20 +3075,37 @@ impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> Iterator for Iter<'a, A, P
     }
 }
 
-impl<'a, A: 'a + Clone + Debug, P: SharedPointerKind> IntoIterator for &'a InternalVector<A, P> {
+impl<'a, A, P, Internal, Leaf, BorrowedInternal> IntoIterator
+    for &'a InternalVector<A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + 'a,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     type Item = &'a A;
-    type IntoIter = Iter<'a, A, P>;
+    type IntoIter = Iter<'a, A, P, Internal, Leaf, BorrowedInternal>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
-impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> DoubleEndedIterator for Iter<'a, A, P> {
+impl<'a, A, P, Internal, Leaf, BorrowedInternal> DoubleEndedIterator
+    for Iter<'a, A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + 'a,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     fn next_back(&mut self) -> Option<&'a A> {
         if self.front != self.back {
             self.back -= 1;
-            let focus: &'a mut Focus<A, P> = unsafe { &mut *(&mut self.focus as *mut _) };
+            let focus: &'a mut Focus<A, P, Internal, Leaf, BorrowedInternal> =
+                unsafe { &mut *(&mut self.focus as *mut _) };
             focus.get(self.back)
         } else {
             None
@@ -2603,24 +3113,58 @@ impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> DoubleEndedIterator for It
     }
 }
 
-impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> ExactSizeIterator for Iter<'a, A, P> {}
-
-impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> FusedIterator for Iter<'a, A, P> {}
-
-/// An iterator for a Vector.
-#[derive(Debug)]
-pub struct IterMut<'a, A: Clone + Debug, P: SharedPointerKind> {
-    front: usize,
-    back: usize,
-    focus: FocusMut<'a, A, P>,
+impl<'a, A, P, Internal, Leaf, BorrowedInternal> ExactSizeIterator
+    for Iter<'a, A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + 'a,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
 }
 
-impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> Iterator for IterMut<'a, A, P> {
+impl<'a, A, P, Internal, Leaf, BorrowedInternal> FusedIterator
+    for Iter<'a, A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + 'a,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
+}
+
+/// An iterator for a Vector.
+// #[derive(Debug)]
+pub struct IterMut<'a, A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
+    front: usize,
+    back: usize,
+    focus: FocusMut<'a, A, P, Internal, Leaf, BorrowedInternal>,
+}
+
+impl<'a, A, P, Internal, Leaf, BorrowedInternal> Iterator
+    for IterMut<'a, A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + 'a,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     type Item = &'a mut A;
 
     fn next(&mut self) -> Option<&'a mut A> {
         if self.front != self.back {
-            let focus: &'a mut FocusMut<A, P> = unsafe { &mut *(&mut self.focus as *mut _) };
+            let focus: &'a mut FocusMut<A, P, Internal, Leaf, BorrowedInternal> =
+                unsafe { &mut *(&mut self.focus as *mut _) };
             let result = focus.get(self.front).unwrap();
             self.front += 1;
             Some(result)
@@ -2635,22 +3179,37 @@ impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> Iterator for IterMut<'a, A
     }
 }
 
-impl<'a, A: 'a + Clone + Debug, P: SharedPointerKind> IntoIterator
-    for &'a mut InternalVector<A, P>
+impl<'a, A, P, Internal, Leaf, BorrowedInternal> IntoIterator
+    for &'a mut InternalVector<A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + 'a,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
 {
     type Item = &'a mut A;
-    type IntoIter = IterMut<'a, A, P>;
+    type IntoIter = IterMut<'a, A, P, Internal, Leaf, BorrowedInternal>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
     }
 }
 
-impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> DoubleEndedIterator for IterMut<'a, A, P> {
+impl<'a, A, P, Internal, Leaf, BorrowedInternal> DoubleEndedIterator
+    for IterMut<'a, A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + 'a,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
     fn next_back(&mut self) -> Option<&'a mut A> {
         if self.front != self.back {
             self.back -= 1;
-            let focus: &'a mut FocusMut<A, P> = unsafe { &mut *(&mut self.focus as *mut _) };
+            let focus: &'a mut FocusMut<A, P, Internal, Leaf, BorrowedInternal> =
+                unsafe { &mut *(&mut self.focus as *mut _) };
             focus.get(self.back)
         } else {
             None
@@ -2658,9 +3217,27 @@ impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> DoubleEndedIterator for It
     }
 }
 
-impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> ExactSizeIterator for IterMut<'a, A, P> {}
+impl<'a, A, P, Internal, Leaf, BorrowedInternal> ExactSizeIterator
+    for IterMut<'a, A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + 'a,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
+}
 
-impl<'a, A: Clone + Debug + 'a, P: SharedPointerKind> FusedIterator for IterMut<'a, A, P> {}
+impl<'a, A, P, Internal, Leaf, BorrowedInternal> FusedIterator
+    for IterMut<'a, A, P, Internal, Leaf, BorrowedInternal>
+where
+    A: Clone + Debug + 'a,
+    P: SharedPointerKind,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Item = A>,
+{
+}
 
 #[allow(clippy::cognitive_complexity)]
 #[cfg(test)]
@@ -2670,7 +3247,7 @@ mod test {
     use proptest::proptest;
     use proptest_derive::Arbitrary;
 
-    const MAX_EXTEND_SIZE: usize = 2000;
+    const MAX_EXTEND_SIZE: usize = 1000;
 
     #[derive(Arbitrary)]
     enum Action<A: Clone + Debug + Arbitrary + 'static> {
@@ -2707,13 +3284,13 @@ mod test {
                 }
                 Action::ExtendFront(items) => {
                     fmt.write_str(&format!(
-                        "let v = vec!{:?}; for item in v.into_iter() {{ vector.push_front(item); }}\n",
+                        "let v: Vec<u64> = vec!{:?}; for item in v.into_iter() {{ vector.push_front(item); }}\n",
                         items
                     ))?;
                 }
                 Action::ExtendBack(items) => {
                     fmt.write_str(&format!(
-                        "let v = vec!{:?}; for item in v.into_iter() {{ vector.push_back(item); }}\n",
+                        "let v: Vec<u64> = vec!{:?}; for item in v.into_iter() {{ vector.push_back(item); }}\n",
                         items
                     ))?;
                 }
@@ -2731,13 +3308,13 @@ mod test {
                 }
                 Action::ConcatFront(items) => {
                     fmt.write_str(&format!(
-                        "let v = vec!{:?}; let mut new_vector = Vector::new(); for item in v.into_iter() {{ new_vector.push_front(item); }} new_vector.concatenate(vector); vector = new_vector; \n",
+                        "let v: Vec<u64> = vec!{:?}; let mut new_vector = Vector::new(); for item in v.into_iter() {{ new_vector.push_front(item); }} new_vector.append(vector); vector = new_vector; \n",
                         items
                     ))?;
                 }
                 Action::ConcatBack(items) => {
                     fmt.write_str(&format!(
-                        "let v = vec!{:?}; let mut new_vector = Vector::new(); for item in v.into_iter() {{ new_vector.push_back(item); }} vector.concatenate(new_vector); \n",
+                        "let v: Vec<u64> = vec!{:?}; let mut new_vector = Vector::new(); for item in v.into_iter() {{ new_vector.push_back(item); }} vector.append(new_vector); \n",
                         items
                     ))?;
                 }
@@ -2973,8 +3550,19 @@ mod test {
         let mut v = Vector::new();
         const N: usize = 1_000;
         for i in 0..N {
+            // println!("{} inserted {}", i, v.height());
             v.insert(v.len() / 2, i);
             v.assert_invariants();
+
+            let first_half = (1..i + 1).step_by(2);
+            let second_half = (0..i + 1).step_by(2).rev();
+
+            let mut vector = Vec::new();
+            vector.extend(first_half);
+            vector.extend(second_half);
+
+            assert_eq!(v.iter().copied().collect::<Vec<usize>>(), vector);
+            // println!("\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
         }
         let first_half = (1..N).step_by(2);
         let second_half = (0..N).step_by(2).rev();
@@ -2987,6 +3575,46 @@ mod test {
 
         println!("{} {}", v.len(), v.height());
     }
+
+    // #[test]
+    // pub fn inserts_2() {
+    //     let mut v = Vector::new();
+    //     v.push_front(N);
+    //     const N: usize = 1_000;
+    //     for i in 0..N {
+    //         v.insert(v.len() - 1, i);
+    //         // println!("{} inserted\nDerplcakes {:#?}", i, v);
+    //         v.assert_invariants();
+
+    //         let mut vector = Vec::new();
+    //         vector.extend(0..=i);
+    //         vector.push(N);
+
+    //         assert_eq!(v.iter().copied().collect::<Vec<usize>>(), vector);
+    //         // println!("\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+    //     }
+
+    //     let mut vector = Vec::new();
+    //     vector.extend(0..=N);
+
+    //     assert_eq!(v.iter().copied().collect::<Vec<usize>>(), vector);
+
+    //     println!("{} {}", v.len(), v.height());
+    // }
+
+    // #[test]
+    // pub fn inserts_3() {
+    //     let mut v = Vector::new();
+    //     v.push_front(N);
+    //     const N: usize = 100_000;
+    //     for i in 0..N {
+    //         v.insert(v.len()/2 - 1 - v.len() * 3 / 10, i);
+    //         // println!("{} inserted\nDerplcakes {:#?}", i, v);
+    //         v.assert_invariants();
+
+    //         // println!("\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+    //     }
+    // }
 
     #[test]
     fn test_equal_range() {
