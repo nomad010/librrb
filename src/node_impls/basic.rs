@@ -447,7 +447,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         self.get_child_mut_at_slot(index)
     }
 
-    fn pop_child(&mut self, side: Side) -> Option<BorrowedNode<A, P, Self::InternalChild, Leaf>> {
+    fn pop_child(&mut self, side: Side) -> Option<BorrowedNode<P, Self::InternalChild, Leaf>> {
         let child = self.get_child_mut_at_side(side)?.0.borrow_node();
         if side == Side::Front {
             self.children.range_mut().start += 1;
@@ -950,10 +950,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         self.children.free_slots()
     }
 
-    fn get_child_ref_at_slot(
-        &self,
-        idx: usize,
-    ) -> Option<(NodeRef<Leaf::Item, P, Self, Leaf>, Range<usize>)> {
+    fn get_child_ref_at_slot(&self, idx: usize) -> Option<(NodeRef<P, Self, Leaf>, Range<usize>)> {
         if let Some(range) = self.sizes.get_child_range(idx) {
             match self.children {
                 ChildList::Internals(ref internals) => {
@@ -971,7 +968,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     fn get_child_ref_for_position(
         &self,
         position: usize,
-    ) -> Option<(NodeRef<Leaf::Item, P, Self, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeRef<P, Self, Leaf>, Range<usize>)> {
         if let Some((child_idx, _)) = self.sizes.position_info_for(position) {
             self.get_child_ref_at_slot(child_idx)
         } else {

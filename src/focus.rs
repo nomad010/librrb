@@ -432,7 +432,7 @@ where
     Leaf: LeafTrait,
 {
     origins: Vec<Rc<&'a mut InternalVector<P, Internal, Leaf, BorrowedInternal>>>,
-    pub(crate) nodes: Vec<BorrowedNode<Leaf::Item, P, Internal, Leaf>>,
+    pub(crate) nodes: Vec<BorrowedNode<P, Internal, Leaf>>,
     len: usize,
     // Focus part
     // This indicates the index of the root in the node list and the range of that is covered by it
@@ -473,7 +473,7 @@ where
 
     pub(crate) fn from_vectors(
         origins: Vec<Rc<&'a mut InternalVector<P, Internal, Leaf, BorrowedInternal>>>,
-        nodes: Vec<BorrowedNode<Leaf::Item, P, Internal, Leaf>>,
+        nodes: Vec<BorrowedNode<P, Internal, Leaf>>,
     ) -> Self {
         let mut len = 0;
         for node in nodes.iter() {
