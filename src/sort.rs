@@ -15,7 +15,7 @@ pub(crate) fn do_single_sort<A, R, F, P, Internal, Leaf, BorrowedInternal>(
     R: RngCore,
     F: Fn(&A, &A) -> cmp::Ordering,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait<Item = A>,
 {
@@ -208,10 +208,10 @@ pub(crate) fn do_dual_sort<
     F: Fn(&A, &A) -> cmp::Ordering,
     P: SharedPointerKind,
     Q: SharedPointerKind,
-    Internal1: InternalTrait<P, Leaf1, Item = A, Borrowed = BorrowedInternal1>,
+    Internal1: InternalTrait<P, Leaf1, Borrowed = BorrowedInternal1>,
     BorrowedInternal1: BorrowedInternalTrait<P, Leaf1, InternalChild = Internal1> + Debug,
     Leaf1: LeafTrait<Item = A>,
-    Internal2: InternalTrait<Q, Leaf2, Item = B, Borrowed = BorrowedInternal2>,
+    Internal2: InternalTrait<Q, Leaf2, Borrowed = BorrowedInternal2>,
     BorrowedInternal2: BorrowedInternalTrait<Q, Leaf2, InternalChild = Internal2> + Debug,
     Leaf2: LeafTrait<Item = B>,
 {

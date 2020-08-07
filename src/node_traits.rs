@@ -1,10 +1,7 @@
 use crate::Side;
 use archery::{SharedPointer, SharedPointerKind};
 use std::fmt::Debug;
-use std::mem;
 use std::ops::Range;
-
-use crate::circular::{BorrowBufferMut, CircularBuffer, CircularBufferError};
 
 pub trait BorrowedLeafTrait {
     type Item;
@@ -123,7 +120,7 @@ pub trait LeafTrait: Clone + std::fmt::Debug {
 }
 
 pub trait BorrowedInternalTrait<P: SharedPointerKind, Leaf: LeafTrait> {
-    type InternalChild: InternalTrait<P, Leaf, Item = Leaf::Item>;
+    type InternalChild: InternalTrait<P, Leaf>;
 
     fn len(&self) -> usize;
 
@@ -184,10 +181,8 @@ pub trait BorrowedInternalTrait<P: SharedPointerKind, Leaf: LeafTrait> {
     }
 }
 
-pub trait InternalTrait<P: SharedPointerKind, Leaf: LeafTrait<Item = Self::Item>>:
-    Clone + std::fmt::Debug
-{
-    type Item: Clone + std::fmt::Debug;
+pub trait InternalTrait<P: SharedPointerKind, Leaf: LeafTrait>: Clone + std::fmt::Debug {
+    // type Item: Clone + std::fmt::Debug;
     type Borrowed: BorrowedInternalTrait<P, Leaf> + std::fmt::Debug;
 
     /// Constructs a new empty internal node that is at the given level in the tree.
@@ -211,15 +206,15 @@ pub trait InternalTrait<P: SharedPointerKind, Leaf: LeafTrait<Item = Self::Item>
     fn pack_children(&mut self);
 
     /// Returns a reference to the element at the given index in the tree.
-    fn get(&self, idx: usize) -> Option<&Self::Item>;
+    fn get(&self, idx: usize) -> Option<&Leaf::Item>;
 
     /// Returns a mutable reference to the element at the given index in the tree.
-    fn get_mut(&mut self, idx: usize) -> Option<&mut Self::Item>;
+    fn get_mut(&mut self, idx: usize) -> Option<&mut Leaf::Item>;
 
     /// Removes and returns the node at the given side of this node.
     /// # Panics
     // This should panic if the node is empty.
-    fn pop_child(&mut self, side: Side) -> NodeRc<Self::Item, P, Self, Leaf>;
+    fn pop_child(&mut self, side: Side) -> NodeRc<P, Self, Leaf>;
 
     // fn pop_grandchild(&mut self, side: Side) -> NodeRc<Self::Item, P, Self, Leaf>;
 
@@ -228,7 +223,7 @@ pub trait InternalTrait<P: SharedPointerKind, Leaf: LeafTrait<Item = Self::Item>
     /// Adds a node to the given side of this node.
     /// # Panics
     // This should panic if the node does not have a slot free.
-    fn push_child(&mut self, side: Side, node: NodeRc<Self::Item, P, Self, Leaf>);
+    fn push_child(&mut self, side: Side, node: NodeRc<P, Self, Leaf>);
 
     fn borrow_node(&mut self) -> Self::Borrowed;
 
@@ -261,12 +256,12 @@ pub trait InternalTrait<P: SharedPointerKind, Leaf: LeafTrait<Item = Self::Item>
     fn get_child_ref_at_slot(
         &self,
         idx: usize,
-    ) -> Option<(NodeRef<Self::Item, P, Self, Leaf>, Range<usize>)>;
+    ) -> Option<(NodeRef<Leaf::Item, P, Self, Leaf>, Range<usize>)>;
 
     fn get_child_ref_at_side(
         &self,
         side: Side,
-    ) -> Option<(NodeRef<Self::Item, P, Self, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeRef<Leaf::Item, P, Self, Leaf>, Range<usize>)> {
         match side {
             Side::Front => self.get_child_ref_at_slot(0),
             Side::Back => self.get_child_ref_at_slot(self.slots().saturating_sub(1)),
@@ -277,7 +272,7 @@ pub trait InternalTrait<P: SharedPointerKind, Leaf: LeafTrait<Item = Self::Item>
     fn get_child_ref_for_position(
         &self,
         position: usize,
-    ) -> Option<(NodeRef<Self::Item, P, Self, Leaf>, Range<usize>)>;
+    ) -> Option<(NodeRef<Leaf::Item, P, Self, Leaf>, Range<usize>)>;
 
     /// Returns a mutable reference to the Rc of the child node at the given slot in this node.
     fn get_child_mut_at_slot(
@@ -317,30 +312,28 @@ pub trait InternalTrait<P: SharedPointerKind, Leaf: LeafTrait<Item = Self::Item>
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
     #[allow(dead_code)]
-    fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, Self::Item>) -> bool
+    fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, Leaf::Item>) -> bool
     where
-        Self::Item: PartialEq;
+        Leaf::Item: PartialEq;
 }
 
 /// Represents an arbitrary node in the tree.
 #[derive(Debug)]
-pub enum NodeRc<A, P, Internal, Leaf>
+pub enum NodeRc<P, Internal, Leaf>
 where
-    A: Clone + std::fmt::Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A>,
-    Leaf: LeafTrait<Item = A>,
+    Internal: InternalTrait<P, Leaf>,
+    Leaf: LeafTrait,
 {
     Leaf(SharedPointer<Leaf, P>),
     Internal(SharedPointer<Internal, P>),
 }
 
-impl<A, P, Internal, Leaf> Clone for NodeRc<A, P, Internal, Leaf>
+impl<P, Internal, Leaf> Clone for NodeRc<P, Internal, Leaf>
 where
-    A: Clone + std::fmt::Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A>,
-    Leaf: LeafTrait<Item = A>,
+    Internal: InternalTrait<P, Leaf>,
+    Leaf: LeafTrait,
 {
     fn clone(&self) -> Self {
         match self {
@@ -350,12 +343,11 @@ where
     }
 }
 
-impl<A, P, Internal, Leaf> NodeRc<A, P, Internal, Leaf>
+impl<P, Internal, Leaf> NodeRc<P, Internal, Leaf>
 where
-    A: Clone + std::fmt::Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A>,
-    Leaf: LeafTrait<Item = A>,
+    Internal: InternalTrait<P, Leaf>,
+    Leaf: LeafTrait,
 {
     /// Constructs a new empty of the same level.
     pub fn new_empty(&self) -> Self {
@@ -441,7 +433,7 @@ where
     }
 
     /// Returns the element at the given position in the node.
-    pub fn get(&self, idx: usize) -> Option<&A> {
+    pub fn get(&self, idx: usize) -> Option<&Leaf::Item> {
         match self {
             NodeRc::Leaf(x) => x.get(idx),
             NodeRc::Internal(x) => x.get(idx),
@@ -449,7 +441,7 @@ where
     }
 
     /// Returns the element at the given position in the node.
-    pub fn get_mut(&mut self, idx: usize) -> Option<&mut A> {
+    pub fn get_mut(&mut self, idx: usize) -> Option<&mut Leaf::Item> {
         match self {
             NodeRc::Leaf(ref mut x) => SharedPointer::make_mut(x).get_mut(idx),
             NodeRc::Internal(ref mut x) => SharedPointer::make_mut(x).get_mut(idx),
@@ -529,7 +521,7 @@ where
         }
     }
 
-    pub fn borrow_node(&mut self) -> BorrowedNode<A, P, Internal, Leaf> {
+    pub fn borrow_node(&mut self) -> BorrowedNode<Leaf::Item, P, Internal, Leaf> {
         match self {
             NodeRc::Internal(internal) => {
                 BorrowedNode::Internal(SharedPointer::make_mut(internal).borrow_node())
@@ -570,17 +562,17 @@ where
     }
 }
 
-impl<A, P, Internal, Leaf> NodeRc<A, P, Internal, Leaf>
+impl<P, Internal, Leaf> NodeRc<P, Internal, Leaf>
 where
-    A: Clone + std::fmt::Debug + PartialEq,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A>,
-    Leaf: LeafTrait<Item = A>,
+    Internal: InternalTrait<P, Leaf>,
+    Leaf: LeafTrait,
+    Leaf::Item: PartialEq,
 {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
     #[allow(dead_code)]
-    pub(crate) fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, A>) -> bool {
+    pub(crate) fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, Leaf::Item>) -> bool {
         match self {
             NodeRc::Internal(ref internal) => internal.equal_iter_debug(iter),
             NodeRc::Leaf(ref leaf) => leaf.equal_iter_debug(iter),
@@ -593,7 +585,7 @@ pub enum BorrowedNode<A, P, Internal, Leaf>
 where
     A: Clone + std::fmt::Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A>,
+    Internal: InternalTrait<P, Leaf>,
     Leaf: LeafTrait<Item = A>,
 {
     Internal(Internal::Borrowed),
@@ -604,7 +596,7 @@ impl<A, P, Internal, Leaf> BorrowedNode<A, P, Internal, Leaf>
 where
     A: Clone + std::fmt::Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A>,
+    Internal: InternalTrait<P, Leaf>,
     Leaf: LeafTrait<Item = A>,
 {
     pub fn len(&self) -> usize {
@@ -701,7 +693,7 @@ pub enum NodeRef<'a, A, P, Internal, Leaf>
 where
     A: Clone + std::fmt::Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A>,
+    Internal: InternalTrait<P, Leaf>,
     Leaf: LeafTrait<Item = A>,
 {
     Leaf(&'a SharedPointer<Leaf, P>),
@@ -712,7 +704,7 @@ impl<'a, A, P, Internal, Leaf> NodeRef<'a, A, P, Internal, Leaf>
 where
     A: Clone + std::fmt::Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A>,
+    Internal: InternalTrait<P, Leaf>,
     Leaf: LeafTrait<Item = A>,
 {
     /// Returns the size of the of node.
@@ -808,7 +800,7 @@ impl<'a, A, P, Internal, Leaf> NodeRef<'a, A, P, Internal, Leaf>
 where
     A: Clone + std::fmt::Debug + PartialEq,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A>,
+    Internal: InternalTrait<P, Leaf>,
     Leaf: LeafTrait<Item = A>,
 {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
@@ -828,7 +820,7 @@ pub enum NodeMut<'a, P, Internal, Leaf>
 where
     P: SharedPointerKind,
     Internal: InternalTrait<P, Leaf>,
-    Leaf: LeafTrait<Item = <Internal as InternalTrait<P, Leaf>>::Item>,
+    Leaf: LeafTrait,
 {
     Leaf(&'a mut SharedPointer<Leaf, P>),
     Internal(&'a mut SharedPointer<Internal, P>),
@@ -838,7 +830,7 @@ impl<'a, P, Internal, Leaf> NodeMut<'a, P, Internal, Leaf>
 where
     P: SharedPointerKind,
     Internal: InternalTrait<P, Leaf>,
-    Leaf: LeafTrait<Item = <Internal as InternalTrait<P, Leaf>>::Item>,
+    Leaf: LeafTrait,
 {
     /// Returns the size of the of node.
     pub fn len(&self) -> usize {
@@ -943,7 +935,7 @@ impl<'a, P, Internal, Leaf> NodeMut<'a, P, Internal, Leaf>
 where
     P: SharedPointerKind,
     Internal: InternalTrait<P, Leaf>,
-    Leaf: LeafTrait<Item = <Internal as InternalTrait<P, Leaf>>::Item>,
+    Leaf: LeafTrait,
     Leaf::Item: Clone + std::fmt::Debug + PartialEq,
 {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for

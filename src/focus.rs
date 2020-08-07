@@ -6,8 +6,6 @@ use crate::node_traits::{
     BorrowedInternalTrait, BorrowedLeafTrait, BorrowedNode, InternalTrait, LeafTrait, NodeMut,
     NodeRc, NodeRef,
 };
-use crate::nodes::Leaf;
-use crate::nodes::{BorrowedChildList, ChildList, Internal};
 
 use crate::vector::InternalVector;
 use crate::Side;
@@ -45,7 +43,7 @@ struct PartialFocus<A, P, Internal, Leaf>
 where
     A: Clone + Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A>,
+    Internal: InternalTrait<P, Leaf>,
     Leaf: LeafTrait<Item = A>,
 {
     path: Vec<(SharedPointer<Internal, P>, Range<usize>)>,
@@ -57,7 +55,7 @@ impl<'a, A, P, Internal, Leaf> PartialFocus<A, P, Internal, Leaf>
 where
     A: Clone + Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A>,
+    Internal: InternalTrait<P, Leaf>,
     Leaf: LeafTrait<Item = A>,
 {
     /// A helper method to compute the remainder of a path down a tree to a particular index.
@@ -97,7 +95,7 @@ where
     }
 
     /// Constructs the focus from a tree node. This will focus on the first element in the node.
-    fn from_tree(tree: &'a NodeRc<A, P, Internal, Leaf>) -> Self {
+    fn from_tree(tree: &'a NodeRc<P, Internal, Leaf>) -> Self {
         match tree {
             NodeRc::Internal(internal) => {
                 let mut path = vec![(internal.clone(), 0..tree.len())];
@@ -150,11 +148,11 @@ pub struct Focus<'a, A, P, Internal, Leaf, BorrowedInternal>
 where
     A: Clone + Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait<Item = A>,
 {
-    tree: &'a InternalVector<A, P, Internal, Leaf, BorrowedInternal>,
+    tree: &'a InternalVector<P, Internal, Leaf, BorrowedInternal>,
     spine_position: Option<(Side, usize)>,
     spine_node_focus: PartialFocus<A, P, Internal, Leaf>,
     focus_range: Range<usize>,
@@ -165,7 +163,7 @@ impl<'a, A, P, Internal, Leaf, BorrowedInternal> Focus<'a, A, P, Internal, Leaf,
 where
     A: Clone + Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait<Item = A>,
 {
@@ -180,7 +178,7 @@ where
     /// let mut focus = Focus::new(&v);
     /// assert_eq!(focus.get(0), Some(&1));
     /// ```
-    pub fn new(tree: &'a InternalVector<A, P, Internal, Leaf, BorrowedInternal>) -> Self {
+    pub fn new(tree: &'a InternalVector<P, Internal, Leaf, BorrowedInternal>) -> Self {
         Focus::narrowed_tree(tree, 0..tree.len())
     }
 
@@ -197,7 +195,7 @@ where
     /// assert_eq!(focus.get(0), Some(&2));
     /// ```
     pub fn narrowed_tree(
-        tree: &'a InternalVector<A, P, Internal, Leaf, BorrowedInternal>,
+        tree: &'a InternalVector<P, Internal, Leaf, BorrowedInternal>,
         mut range: Range<usize>,
     ) -> Self {
         if range.start >= tree.len() {
@@ -434,11 +432,11 @@ pub struct FocusMut<'a, A, P, Internal, Leaf, BorrowedInternal>
 where
     A: Clone + Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait<Item = A>,
 {
-    origins: Vec<Rc<&'a mut InternalVector<A, P, Internal, Leaf, BorrowedInternal>>>,
+    origins: Vec<Rc<&'a mut InternalVector<P, Internal, Leaf, BorrowedInternal>>>,
     pub(crate) nodes: Vec<BorrowedNode<A, P, Internal, Leaf>>,
     len: usize,
     // Focus part
@@ -464,7 +462,7 @@ impl<'a, A, P, Internal, Leaf, BorrowedInternal>
 where
     A: Clone + Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait<Item = A>,
 {
@@ -481,7 +479,7 @@ where
     }
 
     pub(crate) fn from_vectors(
-        origins: Vec<Rc<&'a mut InternalVector<A, P, Internal, Leaf, BorrowedInternal>>>,
+        origins: Vec<Rc<&'a mut InternalVector<P, Internal, Leaf, BorrowedInternal>>>,
         nodes: Vec<BorrowedNode<A, P, Internal, Leaf>>,
     ) -> Self {
         let mut len = 0;
@@ -888,13 +886,6 @@ where
             .map(|x| &x.1)
             .unwrap_or(&self.root.as_ref().unwrap().1)
             .start;
-
-        let mut skipped_items = self
-            .path
-            .last()
-            .map(|x| &x.1)
-            .unwrap_or(&self.root.as_ref().unwrap().1)
-            .clone();
         loop {
             let (parent, parent_subrange) = self.path.last_mut().unwrap();
             let parent = unsafe { &mut **parent };

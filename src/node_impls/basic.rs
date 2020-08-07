@@ -695,7 +695,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     }
 
     /// Returns a copy of the Rc of the node at the given position in the node.
-    pub fn get_child_node(&self, idx: usize) -> Option<NodeRc<A, P, Internal<A, P, Leaf>, Leaf>> {
+    pub fn get_child_node(&self, idx: usize) -> Option<NodeRc<P, Internal<A, P, Leaf>, Leaf>> {
         // TODO: Get rid of this function
         match self {
             ChildList::Leaves(children) => children
@@ -749,7 +749,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
 impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>>
     InternalTrait<P, Leaf> for Internal<A, P, Leaf>
 {
-    type Item = A;
+    // type Item = A;
     type Borrowed = BorrowedInternal<A, P, Leaf>;
 
     fn empty_internal(level: usize) -> Self {
@@ -887,7 +887,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         }
     }
 
-    fn get(&self, idx: usize) -> Option<&Self::Item> {
+    fn get(&self, idx: usize) -> Option<&Leaf::Item> {
         if let Some((array_idx, new_idx)) = self.sizes.position_info_for(idx) {
             self.children.get(array_idx, new_idx)
         } else {
@@ -895,7 +895,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         }
     }
 
-    fn get_mut(&mut self, idx: usize) -> Option<&mut Self::Item> {
+    fn get_mut(&mut self, idx: usize) -> Option<&mut Leaf::Item> {
         if let Some((array_idx, new_idx)) = self.sizes.position_info_for(idx) {
             self.children.get_mut(array_idx, new_idx)
         } else {
@@ -903,7 +903,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         }
     }
 
-    fn pop_child(&mut self, side: Side) -> NodeRc<Self::Item, P, Self, Leaf> {
+    fn pop_child(&mut self, side: Side) -> NodeRc<P, Self, Leaf> {
         SharedPointer::make_mut(&mut self.sizes).pop_child(side);
         match self.children {
             ChildList::Internals(ref mut children) => NodeRc::Internal(children.pop(side)),
@@ -911,7 +911,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         }
     }
 
-    fn push_child(&mut self, side: Side, node: NodeRc<Self::Item, P, Self, Leaf>) {
+    fn push_child(&mut self, side: Side, node: NodeRc<P, Self, Leaf>) {
         SharedPointer::make_mut(&mut self.sizes).push_child(side, node.len());
         match self.children {
             ChildList::Internals(ref mut children) => children.push(side, node.internal()),
@@ -966,7 +966,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     fn get_child_ref_at_slot(
         &self,
         idx: usize,
-    ) -> Option<(NodeRef<Self::Item, P, Self, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeRef<Leaf::Item, P, Self, Leaf>, Range<usize>)> {
         if let Some(range) = self.sizes.get_child_range(idx) {
             match self.children {
                 ChildList::Internals(ref internals) => {
@@ -984,7 +984,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     fn get_child_ref_for_position(
         &self,
         position: usize,
-    ) -> Option<(NodeRef<Self::Item, P, Self, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeRef<Leaf::Item, P, Self, Leaf>, Range<usize>)> {
         if let Some((child_idx, _)) = self.sizes.position_info_for(position) {
             self.get_child_ref_at_slot(child_idx)
         } else {
@@ -1250,9 +1250,9 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         // }
     }
 
-    fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, Self::Item>) -> bool
+    fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, Leaf::Item>) -> bool
     where
-        Self::Item: PartialEq,
+        Leaf::Item: PartialEq,
     {
         let mut result = true;
         match &self.children {
