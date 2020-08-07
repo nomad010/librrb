@@ -146,25 +146,27 @@ where
 /// A focus for the entire the tree. Like a `PartialFocus`, but this also takes the position in the
 /// spine into account.
 #[derive(Clone, Debug)]
-pub struct Focus<'a, A, P, Internal, Leaf>
+pub struct Focus<'a, A, P, Internal, Leaf, BorrowedInternal>
 where
     A: Clone + Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A>,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait<Item = A>,
 {
-    tree: &'a InternalVector<A, P, Internal, Leaf>,
+    tree: &'a InternalVector<A, P, Internal, Leaf, BorrowedInternal>,
     spine_position: Option<(Side, usize)>,
     spine_node_focus: PartialFocus<A, P, Internal, Leaf>,
     focus_range: Range<usize>,
     range: Range<usize>,
 }
 
-impl<'a, A, P, Internal, Leaf> Focus<'a, A, P, Internal, Leaf>
+impl<'a, A, P, Internal, Leaf, BorrowedInternal> Focus<'a, A, P, Internal, Leaf, BorrowedInternal>
 where
     A: Clone + Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A>,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait<Item = A>,
 {
     /// Constructs a new focus for a Vector.
@@ -178,7 +180,7 @@ where
     /// let mut focus = Focus::new(&v);
     /// assert_eq!(focus.get(0), Some(&1));
     /// ```
-    pub fn new(tree: &'a InternalVector<A, P, Internal, Leaf>) -> Self {
+    pub fn new(tree: &'a InternalVector<A, P, Internal, Leaf, BorrowedInternal>) -> Self {
         Focus::narrowed_tree(tree, 0..tree.len())
     }
 
@@ -195,7 +197,7 @@ where
     /// assert_eq!(focus.get(0), Some(&2));
     /// ```
     pub fn narrowed_tree(
-        tree: &'a InternalVector<A, P, Internal, Leaf>,
+        tree: &'a InternalVector<A, P, Internal, Leaf, BorrowedInternal>,
         mut range: Range<usize>,
     ) -> Self {
         if range.start >= tree.len() {
@@ -427,15 +429,16 @@ where
 // }
 
 /// A focus of the elements of a vector. The focus allows mutation of the elements in the vector.
-#[derive(Debug)]
-pub struct FocusMut<'a, A, P, Internal, Leaf>
+// #[derive(Debug)]
+pub struct FocusMut<'a, A, P, Internal, Leaf, BorrowedInternal>
 where
     A: Clone + Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A>,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait<Item = A>,
 {
-    origins: Vec<Rc<&'a mut InternalVector<A, P, Internal, Leaf>>>,
+    origins: Vec<Rc<&'a mut InternalVector<A, P, Internal, Leaf, BorrowedInternal>>>,
     pub(crate) nodes: Vec<BorrowedNode<A, P, Internal, Leaf>>,
     len: usize,
     // Focus part
@@ -456,11 +459,13 @@ where
     leaf_range: Range<usize>,
 }
 
-impl<'a, A, P, Internal, Leaf> FocusMut<'a, A, P, Internal, Leaf>
+impl<'a, A, P, Internal, Leaf, BorrowedInternal>
+    FocusMut<'a, A, P, Internal, Leaf, BorrowedInternal>
 where
     A: Clone + Debug,
     P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Item = A>,
+    Internal: InternalTrait<P, Leaf, Item = A, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait<Item = A>,
 {
     fn empty(&mut self) -> Self {
@@ -476,7 +481,7 @@ where
     }
 
     pub(crate) fn from_vectors(
-        origins: Vec<Rc<&'a mut InternalVector<A, P, Internal, Leaf>>>,
+        origins: Vec<Rc<&'a mut InternalVector<A, P, Internal, Leaf, BorrowedInternal>>>,
         nodes: Vec<BorrowedNode<A, P, Internal, Leaf>>,
     ) -> Self {
         let mut len = 0;
@@ -557,9 +562,20 @@ where
             return result;
         }
         // index is now 1..self.len()
+        println!(
+            "index = {} {:#?}",
+            index,
+            self.nodes.iter().map(|x| x.len()).collect::<Vec<_>>()
+        );
         let (self_child_position, mut subindex) = self.find_node_info_for_index(index).unwrap();
         self.len = index;
+        println!("After find node info {} {}", self_child_position, subindex);
         let mut right_nodes = self.nodes.split_off(self_child_position);
+        println!(
+            "right nodes = {} {:#?}",
+            subindex,
+            right_nodes.iter().map(|x| x.len()).collect::<Vec<_>>()
+        );
         right_nodes.reverse();
 
         loop {
@@ -569,10 +585,15 @@ where
             let node = right_nodes.pop().unwrap();
             match node {
                 BorrowedNode::Internal(mut internal) => {
-                    let mut new_internal = internal.split_at_position(subindex);
-
-                    let new_internal = internal.split_at_position(subindex);
-                    subindex -= new_internal.range().start;
+                    let (new_subindex, mut new_internal) = internal.split_at_position(subindex);
+                    println!(
+                        "New subindex {} {} {:?} {}",
+                        subindex,
+                        new_subindex,
+                        new_internal.range(),
+                        new_internal.len()
+                    );
+                    subindex = new_subindex;
                     let child = new_internal.pop_child(Side::Front).unwrap();
                     // let (child_idx, new_subindex) = internal.position_info_for(subindex).unwrap();
                     // subindex = new_subindex;
@@ -593,7 +614,7 @@ where
                     if !new_internal.is_empty() {
                         right_nodes.push(BorrowedNode::Internal(new_internal));
                     }
-                    right_nodes.push(child.borrow_node());
+                    right_nodes.push(child);
                 }
                 BorrowedNode::Leaf(mut leaf) => {
                     let new_leaf = leaf.split_at(subindex);
@@ -645,6 +666,7 @@ where
     /// Panics if the given index is greater than the focus' length.
     ///
     pub fn split_at_fn<F: FnMut(&mut Self, &mut Self)>(&mut self, index: usize, mut f: F) {
+        println!("Splitting at {} of {}", index, self.len());
         let mut result = self.split_at(index);
         f(self, &mut result);
         self.combine(result);
@@ -652,10 +674,8 @@ where
 
     fn combine(&mut self, mut other: Self) {
         // Recombine both side FocusMuts into back into the original FocusMut
-        unimplemented!()
-        /*
         if self.is_empty() {
-            mem::replace(self, other);
+            *self = other;
             return;
         } else if other.is_empty() {
             return;
@@ -679,7 +699,7 @@ where
                 // If we have a borrowed Leaf as the root then we could have exhausted the list.
                 if right_level + 1 == right_parent.level() {
                     // The parent range must be updated to include the whole borrowed node now.
-                    right_parent.internal_mut().children.range_mut().start -= 1;
+                    right_parent.internal_mut().unpop_child(Side::Front);
                 } else {
                     other.nodes.push(left_node);
                 }
@@ -690,7 +710,6 @@ where
         other.nodes.reverse();
         self.nodes.append(&mut other.nodes);
         self.len += other.len;
-        */
     }
 
     /// Derp
@@ -739,7 +758,10 @@ where
     ///     assert_eq!(focus.get(2), None);
     /// });
     /// ```
-    pub fn narrow<R: RangeBounds<usize>, F: FnMut(&mut FocusMut<A, P, Internal, Leaf>)>(
+    pub fn narrow<
+        R: RangeBounds<usize>,
+        F: FnMut(&mut FocusMut<A, P, Internal, Leaf, BorrowedInternal>),
+    >(
         &mut self,
         range: R,
         mut f: F,
@@ -800,6 +822,13 @@ where
                 let root = &mut self.nodes[*root];
                 match root {
                     BorrowedNode::Internal(internal) => {
+                        println!(
+                            "{} - {} = {} out of {}",
+                            idx,
+                            range.start,
+                            idx - range.start,
+                            internal.len()
+                        );
                         let (subchild, subchild_range) = internal
                             .get_child_mut_for_position(idx - range.start)
                             .unwrap();
@@ -978,14 +1007,11 @@ where
     }
 
     fn assert_invariants(&self) -> bool {
-        unimplemented!()
-        /*
         let mut cumulative = 0;
         for node in self.nodes.iter() {
-            cumulative += node.assert_size_invariants();
+            cumulative += node.len();
         }
         cumulative == self.len
-        */
     }
 }
 

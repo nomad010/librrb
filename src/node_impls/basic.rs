@@ -403,7 +403,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     }
 
     fn slots(&self) -> usize {
-        unimplemented!()
+        self.children.range().len()
     }
 
     fn range(&self) -> Range<usize> {
@@ -443,18 +443,26 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         &mut self,
         position: usize,
     ) -> Option<(NodeMut<P, Self::InternalChild, Leaf>, Range<usize>)> {
-        let index = self.sizes.position_info_for(position + self.left_size())?.0;
+        let index = self.position_info_for(position)?.0;
         self.get_child_mut_at_slot(index)
     }
 
-    fn pop_child(&mut self, side: Side) -> Option<NodeMut<P, Self::InternalChild, Leaf>> {
-        let child = self.get_child_mut_at_side(side)?.0;
+    fn pop_child(&mut self, side: Side) -> Option<BorrowedNode<A, P, Self::InternalChild, Leaf>> {
+        let child = self.get_child_mut_at_side(side)?.0.borrow_node();
         if side == Side::Front {
             self.children.range_mut().start += 1;
         } else {
             self.children.range_mut().end -= 1;
         }
         Some(child)
+    }
+
+    fn unpop_child(&mut self, side: Side) {
+        if side == Side::Front {
+            self.children.range_mut().start -= 1;
+        } else {
+            self.children.range_mut().end += 1;
+        }
     }
 
     fn split_at_child(&mut self, index: usize) -> Self {
@@ -464,12 +472,18 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         }
     }
 
-    fn split_at_position(&mut self, position: usize) -> Self {
-        let index = self
-            .sizes
-            .position_info_for(position + self.left_size())
-            .unwrap();
-        self.split_at_child(index.0)
+    fn split_at_position(&mut self, position: usize) -> (usize, Self) {
+        let index = self.position_info_for(position).unwrap();
+        println!(
+            "rawr split says {:?} for {} {} {:?}",
+            index,
+            self.len(),
+            self.slots(),
+            self.range()
+        );
+        let result = self.split_at_child(index.0);
+        println!("nogtma {}", result.len());
+        (index.1, result)
     }
 }
 
@@ -513,6 +527,11 @@ impl<'a, A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item 
     }
 
     fn split_at(&mut self, index: usize) -> Self {
+        println!(
+            "Splitting RAwr borrowchildlist at {} out of {:?}",
+            index,
+            self.range()
+        );
         match self {
             BorrowedChildList::Internals(ref mut children) => {
                 let new_children = children.split_at(index);

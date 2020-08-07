@@ -143,7 +143,7 @@ pub trait BorrowedInternalTrait<P: SharedPointerKind, Leaf: LeafTrait> {
 
     fn split_at_child(&mut self, index: usize) -> Self;
 
-    fn split_at_position(&mut self, position: usize) -> Self;
+    fn split_at_position(&mut self, position: usize) -> (usize, Self);
 
     /// Returns a mutable reference to the Rc of the child node at the given slot in this node.
     fn get_child_mut_at_slot(
@@ -167,8 +167,14 @@ pub trait BorrowedInternalTrait<P: SharedPointerKind, Leaf: LeafTrait> {
         position: usize,
     ) -> Option<(NodeMut<P, Self::InternalChild, Leaf>, Range<usize>)>;
 
-    ///
-    fn pop_child(&mut self, side: Side) -> Option<NodeMut<P, Self::InternalChild, Leaf>>;
+    /// Logically pops a child from the node. The child is then returned.
+    fn pop_child(
+        &mut self,
+        side: Side,
+    ) -> Option<BorrowedNode<Leaf::Item, P, Self::InternalChild, Leaf>>;
+
+    /// Undoes the popping that has occurred via a call to `pop_child`.
+    fn unpop_child(&mut self, side: Side);
 
     /// Checks the invariants that this node may hold if any.
     #[allow(dead_code)]
