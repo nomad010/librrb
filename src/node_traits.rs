@@ -422,7 +422,7 @@ where
     /// Returns the level of the node.
     pub fn level(&self) -> usize {
         match self {
-            NodeRc::Leaf(x) => 0,
+            NodeRc::Leaf(_) => 0,
             NodeRc::Internal(x) => x.level(),
         }
     }
@@ -608,7 +608,7 @@ where
 
     pub fn level(&self) -> usize {
         match self {
-            BorrowedNode::Leaf(leaf) => 0,
+            BorrowedNode::Leaf(_) => 0,
             BorrowedNode::Internal(internal) => internal.level(),
         }
     }
@@ -734,7 +734,7 @@ where
     /// Returns the level of the node.
     pub fn level(&self) -> usize {
         match self {
-            NodeRef::Leaf(x) => 0,
+            NodeRef::Leaf(_) => 0,
             NodeRef::Internal(x) => x.level(),
         }
     }

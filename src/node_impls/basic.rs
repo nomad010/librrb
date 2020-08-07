@@ -694,19 +694,6 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         }
     }
 
-    /// Returns a copy of the Rc of the node at the given position in the node.
-    pub fn get_child_node(&self, idx: usize) -> Option<NodeRc<P, Internal<A, P, Leaf>, Leaf>> {
-        // TODO: Get rid of this function
-        match self {
-            ChildList::Leaves(children) => children
-                .get(idx)
-                .map(|x| NodeRc::Leaf(SharedPointer::clone(x))),
-            ChildList::Internals(children) => children
-                .get(idx)
-                .map(|x| NodeRc::Internal(SharedPointer::clone(x))),
-        }
-    }
-
     /// Returns the length of the child list.
     pub fn slots(&self) -> usize {
         match self {

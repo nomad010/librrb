@@ -39,24 +39,22 @@ use archery::{SharedPointer, SharedPointerKind};
 ///
 /// This tracks the path down to a particular leaf in the tree.
 #[derive(Clone, Debug)]
-struct PartialFocus<A, P, Internal, Leaf>
+struct PartialFocus<P, Internal, Leaf>
 where
-    A: Clone + Debug,
     P: SharedPointerKind,
     Internal: InternalTrait<P, Leaf>,
-    Leaf: LeafTrait<Item = A>,
+    Leaf: LeafTrait,
 {
     path: Vec<(SharedPointer<Internal, P>, Range<usize>)>,
     leaf: SharedPointer<Leaf, P>,
     leaf_range: Range<usize>,
 }
 
-impl<'a, A, P, Internal, Leaf> PartialFocus<A, P, Internal, Leaf>
+impl<'a, P, Internal, Leaf> PartialFocus<P, Internal, Leaf>
 where
-    A: Clone + Debug,
     P: SharedPointerKind,
     Internal: InternalTrait<P, Leaf>,
-    Leaf: LeafTrait<Item = A>,
+    Leaf: LeafTrait,
 {
     /// A helper method to compute the remainder of a path down a tree to a particular index.
     fn tree_path(
@@ -129,7 +127,7 @@ where
 
     /// Gets an element from the tree. If the element does not exist this will return `None`. This
     /// will move the focus along if necessary.
-    fn get(&mut self, idx: usize) -> Option<&A> {
+    fn get(&mut self, idx: usize) -> Option<&Leaf::Item> {
         if self.path.is_empty() {
             self.leaf.get(idx)
         } else if idx >= self.path[0].0.len() {
@@ -144,28 +142,26 @@ where
 /// A focus for the entire the tree. Like a `PartialFocus`, but this also takes the position in the
 /// spine into account.
 #[derive(Clone, Debug)]
-pub struct Focus<'a, A, P, Internal, Leaf, BorrowedInternal>
+pub struct Focus<'a, P, Internal, Leaf, BorrowedInternal>
 where
-    A: Clone + Debug,
     P: SharedPointerKind,
     Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Item = A>,
+    Leaf: LeafTrait,
 {
     tree: &'a InternalVector<P, Internal, Leaf, BorrowedInternal>,
     spine_position: Option<(Side, usize)>,
-    spine_node_focus: PartialFocus<A, P, Internal, Leaf>,
+    spine_node_focus: PartialFocus<P, Internal, Leaf>,
     focus_range: Range<usize>,
     range: Range<usize>,
 }
 
-impl<'a, A, P, Internal, Leaf, BorrowedInternal> Focus<'a, A, P, Internal, Leaf, BorrowedInternal>
+impl<'a, P, Internal, Leaf, BorrowedInternal> Focus<'a, P, Internal, Leaf, BorrowedInternal>
 where
-    A: Clone + Debug,
     P: SharedPointerKind,
     Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Item = A>,
+    Leaf: LeafTrait,
 {
     /// Constructs a new focus for a Vector.
     ///
@@ -293,7 +289,7 @@ where
     /// assert_eq!(focus.get(2), Some(&3));
     /// assert_eq!(focus.get(3), None);
     /// ```
-    pub fn get(&mut self, idx: usize) -> Option<&A> {
+    pub fn get(&mut self, idx: usize) -> Option<&Leaf::Item> {
         let new_idx = idx + self.range.start;
         if self.range.contains(&new_idx) {
             if !self.focus_range.contains(&new_idx) {
@@ -306,7 +302,7 @@ where
     }
 
     /// Derp
-    pub fn index(&mut self, idx: usize) -> &A {
+    pub fn index(&mut self, idx: usize) -> &Leaf::Item {
         self.get(idx).unwrap()
     }
 
@@ -428,16 +424,15 @@ where
 
 /// A focus of the elements of a vector. The focus allows mutation of the elements in the vector.
 // #[derive(Debug)]
-pub struct FocusMut<'a, A, P, Internal, Leaf, BorrowedInternal>
+pub struct FocusMut<'a, P, Internal, Leaf, BorrowedInternal>
 where
-    A: Clone + Debug,
     P: SharedPointerKind,
     Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Item = A>,
+    Leaf: LeafTrait,
 {
     origins: Vec<Rc<&'a mut InternalVector<P, Internal, Leaf, BorrowedInternal>>>,
-    pub(crate) nodes: Vec<BorrowedNode<A, P, Internal, Leaf>>,
+    pub(crate) nodes: Vec<BorrowedNode<Leaf::Item, P, Internal, Leaf>>,
     len: usize,
     // Focus part
     // This indicates the index of the root in the node list and the range of that is covered by it
@@ -457,14 +452,12 @@ where
     leaf_range: Range<usize>,
 }
 
-impl<'a, A, P, Internal, Leaf, BorrowedInternal>
-    FocusMut<'a, A, P, Internal, Leaf, BorrowedInternal>
+impl<'a, P, Internal, Leaf, BorrowedInternal> FocusMut<'a, P, Internal, Leaf, BorrowedInternal>
 where
-    A: Clone + Debug,
     P: SharedPointerKind,
     Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Item = A>,
+    Leaf: LeafTrait,
 {
     fn empty(&mut self) -> Self {
         FocusMut {
@@ -480,7 +473,7 @@ where
 
     pub(crate) fn from_vectors(
         origins: Vec<Rc<&'a mut InternalVector<P, Internal, Leaf, BorrowedInternal>>>,
-        nodes: Vec<BorrowedNode<A, P, Internal, Leaf>>,
+        nodes: Vec<BorrowedNode<Leaf::Item, P, Internal, Leaf>>,
     ) -> Self {
         let mut len = 0;
         for node in nodes.iter() {
@@ -758,7 +751,7 @@ where
     /// ```
     pub fn narrow<
         R: RangeBounds<usize>,
-        F: FnMut(&mut FocusMut<A, P, Internal, Leaf, BorrowedInternal>),
+        F: FnMut(&mut FocusMut<P, Internal, Leaf, BorrowedInternal>),
     >(
         &mut self,
         range: R,
@@ -841,7 +834,6 @@ where
                                 ));
                             }
                             NodeMut::Leaf(subchild) => {
-                                let leaf_len = subchild.len();
                                 let leaf: *mut Leaf = SharedPointer::make_mut(subchild);
                                 self.leaf = Some(leaf);
                                 self.leaf_range = absolute_subchild_range;
@@ -945,7 +937,7 @@ where
     /// assert_eq!(focus.get(2), Some(&mut 3));
     /// assert_eq!(focus.get(3), None);
     /// ```
-    pub fn get(&mut self, idx: usize) -> Option<&mut A> {
+    pub fn get(&mut self, idx: usize) -> Option<&mut Leaf::Item> {
         self.move_focus(idx);
         if self.leaf_range.contains(&idx) {
             if let Some(leaf) = self.leaf {
@@ -976,7 +968,7 @@ where
     /// assert_eq!(focus.index(1), &mut 2);
     /// assert_eq!(focus.index(2), &mut 3);
     /// ```
-    pub fn index(&mut self, idx: usize) -> &mut A {
+    pub fn index(&mut self, idx: usize) -> &mut Leaf::Item {
         self.get(idx).expect("Index out of range.")
     }
 

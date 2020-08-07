@@ -1389,8 +1389,6 @@ where
                     Side::Front,
                 );
             }
-            let left = self.right_spine.last_mut().unwrap_or(&mut self.root);
-            let right = other.left_spine.last_mut().unwrap_or(&mut other.root);
             // println!(
             //     "OOH {} {} {:?} {} --- {} {} {:?} {}",
             //     left.len(),
@@ -2552,14 +2550,6 @@ where
         }
     }
 
-    /// Returns a mutable reference the spine of the requested side of the tree.
-    fn spine_mut(&mut self, side: Side) -> &mut Vec<NodeRc<P, Internal, Leaf>> {
-        match side {
-            Side::Front => &mut self.left_spine,
-            Side::Back => &mut self.right_spine,
-        }
-    }
-
     /// Returns a reference to the leaf on the requested side of the tree.
     fn leaf_ref(&self, side: Side) -> &SharedPointer<Leaf, P> {
         self.spine_ref(side)
@@ -2599,14 +2589,14 @@ where
     /// assert_eq!(f.get(1), Some(&2));
     /// assert_eq!(f.get(2), Some(&3));
     /// ```
-    pub fn focus(&self) -> Focus<Leaf::Item, P, Internal, Leaf, BorrowedInternal> {
+    pub fn focus(&self) -> Focus<P, Internal, Leaf, BorrowedInternal> {
         Focus::new(self)
     }
 
     /// Returns a mutable focus over the vector. A focus tracks the last leaf and positions which
     /// was read. The path down this tree is saved in the focus and is used to accelerate lookups in
     /// nearby locations.
-    pub fn focus_mut(&mut self) -> FocusMut<Leaf::Item, P, Internal, Leaf, BorrowedInternal> {
+    pub fn focus_mut(&mut self) -> FocusMut<P, Internal, Leaf, BorrowedInternal> {
         let mut nodes = Vec::new();
         for node in self.left_spine.iter_mut() {
             if !node.is_empty() {
@@ -2629,7 +2619,7 @@ where
     /// nearby locations.
     pub fn focus_mut_fn<F>(&mut self, f: &F)
     where
-        F: Fn(&mut FocusMut<Leaf::Item, P, Internal, Leaf, BorrowedInternal>),
+        F: Fn(&mut FocusMut<P, Internal, Leaf, BorrowedInternal>),
     {
         let mut nodes = Vec::new();
         for node in self.left_spine.iter_mut() {
@@ -3021,7 +3011,7 @@ where
 {
     front: usize,
     back: usize,
-    focus: Focus<'a, Leaf::Item, P, Internal, Leaf, BorrowedInternal>,
+    focus: Focus<'a, P, Internal, Leaf, BorrowedInternal>,
 }
 
 impl<'a, P, Internal, Leaf, BorrowedInternal> Iterator
@@ -3037,7 +3027,7 @@ where
     fn next(&mut self) -> Option<&'a Leaf::Item> {
         // This focus is broken
         if self.front != self.back {
-            let focus: &'a mut Focus<Leaf::Item, P, Internal, Leaf, BorrowedInternal> =
+            let focus: &'a mut Focus<P, Internal, Leaf, BorrowedInternal> =
                 unsafe { &mut *(&mut self.focus as *mut _) };
             let result = focus.get(self.front).unwrap();
             self.front += 1;
@@ -3082,7 +3072,7 @@ where
     fn next_back(&mut self) -> Option<&'a Leaf::Item> {
         if self.front != self.back {
             self.back -= 1;
-            let focus: &'a mut Focus<Leaf::Item, P, Internal, Leaf, BorrowedInternal> =
+            let focus: &'a mut Focus<P, Internal, Leaf, BorrowedInternal> =
                 unsafe { &mut *(&mut self.focus as *mut _) };
             focus.get(self.back)
         } else {
@@ -3124,7 +3114,7 @@ where
 {
     front: usize,
     back: usize,
-    focus: FocusMut<'a, Leaf::Item, P, Internal, Leaf, BorrowedInternal>,
+    focus: FocusMut<'a, P, Internal, Leaf, BorrowedInternal>,
 }
 
 impl<'a, P, Internal, Leaf, BorrowedInternal> Iterator
@@ -3140,7 +3130,7 @@ where
 
     fn next(&mut self) -> Option<&'a mut Leaf::Item> {
         if self.front != self.back {
-            let focus: &'a mut FocusMut<Leaf::Item, P, Internal, Leaf, BorrowedInternal> =
+            let focus: &'a mut FocusMut<P, Internal, Leaf, BorrowedInternal> =
                 unsafe { &mut *(&mut self.focus as *mut _) };
             let result = focus.get(self.front).unwrap();
             self.front += 1;
@@ -3185,7 +3175,7 @@ where
     fn next_back(&mut self) -> Option<&'a mut Leaf::Item> {
         if self.front != self.back {
             self.back -= 1;
-            let focus: &'a mut FocusMut<Leaf::Item, P, Internal, Leaf, BorrowedInternal> =
+            let focus: &'a mut FocusMut<P, Internal, Leaf, BorrowedInternal> =
                 unsafe { &mut *(&mut self.focus as *mut _) };
             focus.get(self.back)
         } else {
