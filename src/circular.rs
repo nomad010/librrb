@@ -7,19 +7,6 @@ use std::fmt::{self, Debug, Formatter};
 use std::iter::FusedIterator;
 use std::mem;
 use std::ops::Range;
-use thiserror::Error;
-
-#[derive(Debug, Error, Eq, PartialEq)]
-pub enum CircularBufferError {
-    #[error("Tried to pop an element from an empty buffer")]
-    EmptyBuffer,
-    #[error("tried to insert an element into a full buffer")]
-    FullBuffer,
-    // #[error("tried to access an element past the end of the buffer")]
-    // IndexOutOfBounds,
-}
-
-type Result<T> = std::result::Result<T, CircularBufferError>;
 
 pub(crate) struct BorrowBufferMut<A: Debug> {
     pub(crate) range: Range<usize>,
@@ -164,14 +151,14 @@ impl<A: Debug> CircularBuffer<A> {
     /// Attempts to add an element to the end of the buffer.
     ///
     /// Returns Err() in the event the buffer is full.
-    pub fn try_push_back(&mut self, item: A) -> Result<()> {
+    pub fn try_push_back(&mut self, item: A) -> Option<()> {
         if self.is_full() {
-            Err(CircularBufferError::FullBuffer)
+            None
         } else {
             let back = (self.front + self.len) % RRB_WIDTH;
             self.data[back] = mem::MaybeUninit::new(item);
             self.len += 1;
-            Ok(())
+            Some(())
         }
     }
 
@@ -185,16 +172,16 @@ impl<A: Debug> CircularBuffer<A> {
     /// Attempts to remove an element from the end of the buffer.
     ///
     /// Returns Err(()) if the buffer is empty.
-    pub fn try_pop_back(&mut self) -> Result<A> {
+    pub fn try_pop_back(&mut self) -> Option<A> {
         if self.is_empty() {
-            Err(CircularBufferError::EmptyBuffer)
+            None
         } else {
             self.len -= 1;
             let back = (self.front + self.len) % RRB_WIDTH;
             let result = unsafe {
                 mem::replace(&mut self.data[back], mem::MaybeUninit::uninit()).assume_init()
             };
-            Ok(result)
+            Some(result)
         }
     }
 
@@ -208,14 +195,14 @@ impl<A: Debug> CircularBuffer<A> {
     /// Attempts to add an element to the front of the buffer.
     ///
     /// Returns Err(()) in the event the buffer is already full.
-    pub fn try_push_front(&mut self, item: A) -> Result<()> {
+    pub fn try_push_front(&mut self, item: A) -> Option<()> {
         if self.is_full() {
-            Err(CircularBufferError::FullBuffer)
+            None
         } else {
             self.front = (self.front + RRB_WIDTH - 1) % RRB_WIDTH;
             self.len += 1;
             self.data[self.front] = mem::MaybeUninit::new(item);
-            Ok(())
+            Some(())
         }
     }
 
@@ -229,16 +216,16 @@ impl<A: Debug> CircularBuffer<A> {
     /// Attempts to remove an element from the front of the buffer.
     ///
     /// Returns Err(()) if the buffer is empty.
-    pub fn try_pop_front(&mut self) -> Result<A> {
+    pub fn try_pop_front(&mut self) -> Option<A> {
         if self.is_empty() {
-            Err(CircularBufferError::EmptyBuffer)
+            None
         } else {
             let result = unsafe {
                 mem::replace(&mut self.data[self.front], mem::MaybeUninit::uninit()).assume_init()
             };
             self.len -= 1;
             self.front = (self.front + 1) % RRB_WIDTH;
-            Ok(result)
+            Some(result)
         }
     }
 
@@ -262,7 +249,7 @@ impl<A: Debug> CircularBuffer<A> {
     /// Attempts to remove an element from a side of the buffer.
     ///
     /// Returns Err(()) if the buffer is empty.
-    pub fn try_pop(&mut self, side: Side) -> Result<A> {
+    pub fn try_pop(&mut self, side: Side) -> Option<A> {
         match side {
             Side::Back => self.try_pop_back(),
             Side::Front => self.try_pop_front(),
@@ -744,13 +731,13 @@ mod test {
 
         // Back
         assert_eq!(empty.back(), None);
-        assert_eq!(empty.try_pop_back(), Err(CircularBufferError::EmptyBuffer));
+        assert_eq!(empty.try_pop_back(), None);
         assert_eq!(empty.back_mut(), None);
 
         // Front
         assert_eq!(empty.front(), None);
         assert_eq!(empty.front_mut(), None);
-        assert_eq!(empty.try_pop_front(), Err(CircularBufferError::EmptyBuffer));
+        assert_eq!(empty.try_pop_front(), None);
 
         // Iter
         assert_eq!(empty.iter().collect::<Vec<_>>(), empty_ref_vector);
@@ -774,8 +761,8 @@ mod test {
         assert_eq!(single.back(), Some(&item));
         assert_eq!(single.back_mut(), Some(&mut item));
         let mut back = single.clone();
-        assert_eq!(back.try_pop_back(), Ok(item));
-        assert_eq!(back.try_pop_back(), Err(CircularBufferError::EmptyBuffer));
+        assert_eq!(back.try_pop_back(), Some(item));
+        assert_eq!(back.try_pop_back(), None);
         assert_eq!(back.back(), None);
         assert_eq!(back.back_mut(), None);
 
@@ -783,8 +770,8 @@ mod test {
         assert_eq!(single.front(), Some(&item));
         assert_eq!(single.front_mut(), Some(&mut item));
         let mut front = single.clone();
-        assert_eq!(front.try_pop_front(), Ok(item));
-        assert_eq!(front.try_pop_front(), Err(CircularBufferError::EmptyBuffer));
+        assert_eq!(front.try_pop_front(), Some(item));
+        assert_eq!(front.try_pop_front(), None);
 
         // Iter
         assert_eq!(
@@ -815,17 +802,17 @@ mod test {
         assert_eq!(buffer.back(), Some(&0));
         assert_eq!(buffer.back_mut(), Some(&mut 0));
         let mut back = buffer.clone();
-        assert_eq!(back.try_pop_back(), Ok(0));
-        assert_eq!(back.try_pop_back(), Ok(1));
-        assert_eq!(back.try_pop_back(), Ok(2));
-        assert_eq!(back.try_pop_back(), Ok(3));
-        assert_eq!(back.try_pop_back(), Ok(4));
-        assert_eq!(back.try_pop_back(), Ok(5));
-        assert_eq!(back.try_pop_back(), Ok(6));
-        assert_eq!(back.try_pop_back(), Ok(7));
-        assert_eq!(back.try_pop_back(), Ok(8));
-        assert_eq!(back.try_pop_back(), Ok(9));
-        assert_eq!(back.try_pop_back(), Err(CircularBufferError::EmptyBuffer));
+        assert_eq!(back.try_pop_back(), Some(0));
+        assert_eq!(back.try_pop_back(), Some(1));
+        assert_eq!(back.try_pop_back(), Some(2));
+        assert_eq!(back.try_pop_back(), Some(3));
+        assert_eq!(back.try_pop_back(), Some(4));
+        assert_eq!(back.try_pop_back(), Some(5));
+        assert_eq!(back.try_pop_back(), Some(6));
+        assert_eq!(back.try_pop_back(), Some(7));
+        assert_eq!(back.try_pop_back(), Some(8));
+        assert_eq!(back.try_pop_back(), Some(9));
+        assert_eq!(back.try_pop_back(), None);
         assert_eq!(back.back(), None);
         assert_eq!(back.back_mut(), None);
 
@@ -833,17 +820,17 @@ mod test {
         assert_eq!(buffer.front(), Some(&9));
         assert_eq!(buffer.front_mut(), Some(&mut 9));
         let mut front = buffer.clone();
-        assert_eq!(front.try_pop_front(), Ok(9));
-        assert_eq!(front.try_pop_front(), Ok(8));
-        assert_eq!(front.try_pop_front(), Ok(7));
-        assert_eq!(front.try_pop_front(), Ok(6));
-        assert_eq!(front.try_pop_front(), Ok(5));
-        assert_eq!(front.try_pop_front(), Ok(4));
-        assert_eq!(front.try_pop_front(), Ok(3));
-        assert_eq!(front.try_pop_front(), Ok(2));
-        assert_eq!(front.try_pop_front(), Ok(1));
-        assert_eq!(front.try_pop_front(), Ok(0));
-        assert_eq!(front.try_pop_front(), Err(CircularBufferError::EmptyBuffer));
+        assert_eq!(front.try_pop_front(), Some(9));
+        assert_eq!(front.try_pop_front(), Some(8));
+        assert_eq!(front.try_pop_front(), Some(7));
+        assert_eq!(front.try_pop_front(), Some(6));
+        assert_eq!(front.try_pop_front(), Some(5));
+        assert_eq!(front.try_pop_front(), Some(4));
+        assert_eq!(front.try_pop_front(), Some(3));
+        assert_eq!(front.try_pop_front(), Some(2));
+        assert_eq!(front.try_pop_front(), Some(1));
+        assert_eq!(front.try_pop_front(), Some(0));
+        assert_eq!(front.try_pop_front(), None);
     }
 
     #[test]
@@ -878,7 +865,7 @@ mod test {
         let mut buffer: CircularBuffer<()> = CircularBuffer::new();
         assert_eq!(mem::size_of_val(&buffer), 16); // We need to allocate 2 usizes for front and len
         buffer.push_back(());
-        assert_eq!(buffer.try_pop_back(), Ok(()));
-        assert_eq!(buffer.try_pop_back(), Err(CircularBufferError::EmptyBuffer));
+        assert_eq!(buffer.try_pop_back(), Some(()));
+        assert_eq!(buffer.try_pop_back(), None);
     }
 }

@@ -157,7 +157,7 @@ impl SizeTable {
     }
 
     /// Returns true if this node is empty.
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.len() == 0
     }
 }

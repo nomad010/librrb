@@ -5,6 +5,22 @@ use crate::{Side, RRB_WIDTH};
 use archery::{SharedPointer, SharedPointerKind};
 use std::ops::Range;
 
+impl<I: Clone + std::fmt::Debug, P: SharedPointerKind> Entry for SharedPointer<I, P> {
+    type Item = I;
+
+    fn new(item: Self::Item) -> Self {
+        SharedPointer::new(item)
+    }
+
+    fn load(&self) -> &Self::Item {
+        &self
+    }
+
+    fn load_mut(&mut self) -> &mut Self::Item {
+        SharedPointer::make_mut(self)
+    }
+}
+
 #[derive(Debug)]
 pub struct BorrowedLeaf<A: Clone + std::fmt::Debug> {
     buffer: BorrowBufferMut<A>,

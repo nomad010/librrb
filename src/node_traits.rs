@@ -1,5 +1,4 @@
 use crate::Side;
-use archery::{SharedPointer, SharedPointerKind};
 use std::fmt::Debug;
 use std::ops::Range;
 
@@ -12,23 +11,6 @@ pub trait Entry: Clone + std::fmt::Debug {
 
     fn load_mut(&mut self) -> &mut Self::Item;
 }
-
-impl<I: Clone + std::fmt::Debug, P: SharedPointerKind> Entry for SharedPointer<I, P> {
-    type Item = I;
-
-    fn new(item: Self::Item) -> Self {
-        SharedPointer::new(item)
-    }
-
-    fn load(&self) -> &Self::Item {
-        &self
-    }
-
-    fn load_mut(&mut self) -> &mut Self::Item {
-        SharedPointer::make_mut(self)
-    }
-}
-
 pub trait BorrowedLeafTrait {
     type Item;
 
