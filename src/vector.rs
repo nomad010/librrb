@@ -249,12 +249,11 @@
 //! [Vector::singleton]: ./struct.InternalVector.html#method.singleton
 
 use crate::focus::{Focus, FocusMut};
-use crate::node_traits::{BorrowedInternalTrait, Entry, InternalTrait, LeafTrait, NodeRc};
-// use crate::node_impls::basic::;.
 use crate::node_impls::basic::{BorrowedInternal, Internal, Leaf};
+use crate::node_traits::{BorrowedInternalTrait, Entry, InternalTrait, LeafTrait, NodeRc};
 use crate::sort::{do_dual_sort, do_single_sort};
 use crate::{Side, RRB_WIDTH};
-use archery::{ArcK, RcK, SharedPointerKind};
+use archery::{ArcK, RcK};
 use rand_core::SeedableRng;
 use std::borrow::Borrow;
 use std::cmp;
@@ -389,25 +388,22 @@ macro_rules! vector_ts {
 //
 /// A container for representing sequence of elements
 #[derive(Debug)]
-pub struct InternalVector<P, Internal, Leaf, BorrowedInternal>
+pub struct InternalVector<Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
 {
-    pub(crate) left_spine: Vec<NodeRc<P, Internal, Leaf>>,
-    pub(crate) right_spine: Vec<NodeRc<P, Internal, Leaf>>,
-    pub(crate) root: NodeRc<P, Internal, Leaf>,
+    pub(crate) left_spine: Vec<NodeRc<Internal, Leaf>>,
+    pub(crate) right_spine: Vec<NodeRc<Internal, Leaf>>,
+    pub(crate) root: NodeRc<Internal, Leaf>,
     len: usize,
 }
 
-impl<P, Internal, Leaf, BorrowedInternal> Clone
-    for InternalVector<P, Internal, Leaf, BorrowedInternal>
+impl<Internal, Leaf, BorrowedInternal> Clone for InternalVector<Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
 {
     fn clone(&self) -> Self {
@@ -420,11 +416,10 @@ where
     }
 }
 
-impl<P, Internal, Leaf, BorrowedInternal> InternalVector<P, Internal, Leaf, BorrowedInternal>
+impl<Internal, Leaf, BorrowedInternal> InternalVector<Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
 {
     /// Constructs a new empty vector.
@@ -512,7 +507,7 @@ where
     /// iterator, while the root is in the middle.
     pub(crate) fn spine_iter(
         &self,
-    ) -> impl Iterator<Item = (Option<(Side, usize)>, &NodeRc<P, Internal, Leaf>)> + DoubleEndedIterator
+    ) -> impl Iterator<Item = (Option<(Side, usize)>, &NodeRc<Internal, Leaf>)> + DoubleEndedIterator
     {
         let left_spine_iter = self
             .left_spine
@@ -1166,15 +1161,14 @@ where
         debug_assert_eq!(other.left_spine.len(), other.right_spine.len());
         debug_assert_eq!(self.right_spine.len(), other.left_spine.len());
 
-        let packer = |new_node: NodeRc<P, Internal, Leaf>,
-                      parent_node: &mut Internal::InternalEntry,
-                      side| {
-            if !new_node.is_empty() {
-                let parent = parent_node.load_mut();
-                // println!("gar {} vs {}", parent.level(), new_node.level());
-                parent.push_child(side, new_node);
-            }
-        };
+        let packer =
+            |new_node: NodeRc<Internal, Leaf>, parent_node: &mut Internal::InternalEntry, side| {
+                if !new_node.is_empty() {
+                    let parent = parent_node.load_mut();
+                    // println!("gar {} vs {}", parent.level(), new_node.level());
+                    parent.push_child(side, new_node);
+                }
+            };
 
         // More efficient to work from front to back here, but we need to remove elements
         // We reverse to make this more efficient
@@ -1681,7 +1675,7 @@ where
     /// assert_eq!(v, vector![1]);
     /// assert_eq!(last_half, vector![2, 3]);
     /// ```
-    pub fn split_off(&mut self, at: usize) -> InternalVector<P, Internal, Leaf, BorrowedInternal> {
+    pub fn split_off(&mut self, at: usize) -> InternalVector<Internal, Leaf, BorrowedInternal> {
         if at == 0 {
             // We can early out because the result is self and self becomes empty.
             mem::replace(self, InternalVector::new())
@@ -2373,17 +2367,16 @@ where
     /// assert_eq!(v, vector![9, 8, 0, 1, 2, 3, 4, 5, 6, 7]);
     /// assert_eq!(secondary, vector!['j', 'i', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
     /// ```
-    pub fn dual_sort_range_by<F, R, Q, Internal2, Leaf2, BorrowedInternal2>(
+    pub fn dual_sort_range_by<F, R, Internal2, Leaf2, BorrowedInternal2>(
         &mut self,
         f: &F,
         range: R,
-        secondary: &mut InternalVector<Q, Internal2, Leaf2, BorrowedInternal2>,
+        secondary: &mut InternalVector<Internal2, Leaf2, BorrowedInternal2>,
     ) where
         F: Fn(&Leaf::Item, &Leaf::Item) -> cmp::Ordering,
         R: RangeBounds<usize> + Clone,
-        Q: SharedPointerKind,
-        Internal2: InternalTrait<Q, Leaf2, Borrowed = BorrowedInternal2>,
-        BorrowedInternal2: BorrowedInternalTrait<Q, Leaf2, InternalChild = Internal2> + Debug,
+        Internal2: InternalTrait<Leaf2, Borrowed = BorrowedInternal2>,
+        BorrowedInternal2: BorrowedInternalTrait<Leaf2, InternalChild = Internal2> + Debug,
         Leaf2: LeafTrait,
     {
         let mut focus = self.focus_mut();
@@ -2439,18 +2432,17 @@ where
     /// assert_eq!(v, vector![9, 8, 0, 1, 2, 3, 4, 5, 6, 7]);
     /// assert_eq!(secondary, vector!['j', 'i', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
     /// ```
-    pub fn dual_sort_range_by_key<F, K, R, Q, Internal2, Leaf2, BorrowedInternal2>(
+    pub fn dual_sort_range_by_key<F, K, R, Internal2, Leaf2, BorrowedInternal2>(
         &mut self,
         f: &F,
         range: R,
-        secondary: &mut InternalVector<Q, Internal2, Leaf2, BorrowedInternal2>,
+        secondary: &mut InternalVector<Internal2, Leaf2, BorrowedInternal2>,
     ) where
         F: Fn(&Leaf::Item) -> K,
         K: Ord,
         R: RangeBounds<usize> + Clone,
-        Q: SharedPointerKind,
-        Internal2: InternalTrait<Q, Leaf2, Borrowed = BorrowedInternal2>,
-        BorrowedInternal2: BorrowedInternalTrait<Q, Leaf2, InternalChild = Internal2> + Debug,
+        Internal2: InternalTrait<Leaf2, Borrowed = BorrowedInternal2>,
+        BorrowedInternal2: BorrowedInternalTrait<Leaf2, InternalChild = Internal2> + Debug,
         Leaf2: LeafTrait,
     {
         let comp = |x: &Leaf::Item, y: &Leaf::Item| f(x).cmp(&f(y));
@@ -2496,15 +2488,14 @@ where
     /// v.dual_sort_by(&Ord::cmp, &mut secondary);
     /// assert_eq!(v, vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     /// ```
-    pub fn dual_sort_by<F, Q, Internal2, Leaf2, BorrowedInternal2>(
+    pub fn dual_sort_by<F, Internal2, Leaf2, BorrowedInternal2>(
         &mut self,
         f: &F,
-        secondary: &mut InternalVector<Q, Internal2, Leaf2, BorrowedInternal2>,
+        secondary: &mut InternalVector<Internal2, Leaf2, BorrowedInternal2>,
     ) where
         F: Fn(&Leaf::Item, &Leaf::Item) -> cmp::Ordering,
-        Q: SharedPointerKind,
-        Internal2: InternalTrait<Q, Leaf2, Borrowed = BorrowedInternal2>,
-        BorrowedInternal2: BorrowedInternalTrait<Q, Leaf2, InternalChild = Internal2> + Debug,
+        Internal2: InternalTrait<Leaf2, Borrowed = BorrowedInternal2>,
+        BorrowedInternal2: BorrowedInternalTrait<Leaf2, InternalChild = Internal2> + Debug,
         Leaf2: LeafTrait,
     {
         self.dual_sort_range_by(f, .., secondary);
@@ -2541,7 +2532,7 @@ where
     }
 
     /// Returns a reference the spine of the requested side of the tree.
-    fn spine_ref(&self, side: Side) -> &Vec<NodeRc<P, Internal, Leaf>> {
+    fn spine_ref(&self, side: Side) -> &Vec<NodeRc<Internal, Leaf>> {
         match side {
             Side::Front => &self.left_spine,
             Side::Back => &self.right_spine,
@@ -2587,14 +2578,14 @@ where
     /// assert_eq!(f.get(1), Some(&2));
     /// assert_eq!(f.get(2), Some(&3));
     /// ```
-    pub fn focus(&self) -> Focus<P, Internal, Leaf, BorrowedInternal> {
+    pub fn focus(&self) -> Focus<Internal, Leaf, BorrowedInternal> {
         Focus::new(self)
     }
 
     /// Returns a mutable focus over the vector. A focus tracks the last leaf and positions which
     /// was read. The path down this tree is saved in the focus and is used to accelerate lookups in
     /// nearby locations.
-    pub fn focus_mut(&mut self) -> FocusMut<P, Internal, Leaf, BorrowedInternal> {
+    pub fn focus_mut(&mut self) -> FocusMut<Internal, Leaf, BorrowedInternal> {
         let mut nodes = Vec::new();
         for node in self.left_spine.iter_mut() {
             if !node.is_empty() {
@@ -2617,7 +2608,7 @@ where
     /// nearby locations.
     pub fn focus_mut_fn<F>(&mut self, f: &F)
     where
-        F: Fn(&mut FocusMut<P, Internal, Leaf, BorrowedInternal>),
+        F: Fn(&mut FocusMut<Internal, Leaf, BorrowedInternal>),
     {
         let mut nodes = Vec::new();
         for node in self.left_spine.iter_mut() {
@@ -2645,7 +2636,7 @@ where
     /// assert_eq!(iter.next(), Some(&3));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter(&self) -> Iter<P, Internal, Leaf, BorrowedInternal> {
+    pub fn iter(&self) -> Iter<Internal, Leaf, BorrowedInternal> {
         Iter {
             front: 0,
             back: self.len(),
@@ -2667,7 +2658,7 @@ where
     /// assert_eq!(iter.next(), Some(&mut 3));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_mut(&mut self) -> IterMut<P, Internal, Leaf, BorrowedInternal> {
+    pub fn iter_mut(&mut self) -> IterMut<Internal, Leaf, BorrowedInternal> {
         IterMut {
             front: 0,
             back: self.len(),
@@ -2759,11 +2750,10 @@ where
     }
 }
 
-impl<P, Internal, Leaf, BorrowedInternal> InternalVector<P, Internal, Leaf, BorrowedInternal>
+impl<Internal, Leaf, BorrowedInternal> InternalVector<Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: Ord,
 {
@@ -2796,13 +2786,12 @@ where
     /// assert_eq!(v, vector![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     /// assert_eq!(secondary, vector!['j', 'i','h', 'g', 'f', 'e', 'd', 'c', 'b', 'a']);
     /// ```
-    pub fn dual_sort<Q, Internal2, Leaf2, BorrowedInternal2>(
+    pub fn dual_sort<Internal2, Leaf2, BorrowedInternal2>(
         &mut self,
-        secondary: &mut InternalVector<Q, Internal2, Leaf2, BorrowedInternal2>,
+        secondary: &mut InternalVector<Internal2, Leaf2, BorrowedInternal2>,
     ) where
-        Q: SharedPointerKind,
-        Internal2: InternalTrait<Q, Leaf2, Borrowed = BorrowedInternal2>,
-        BorrowedInternal2: BorrowedInternalTrait<Q, Leaf2, InternalChild = Internal2> + Debug,
+        Internal2: InternalTrait<Leaf2, Borrowed = BorrowedInternal2>,
+        BorrowedInternal2: BorrowedInternalTrait<Leaf2, InternalChild = Internal2> + Debug,
         Leaf2: LeafTrait,
     {
         self.dual_sort_by(&Ord::cmp, secondary)
@@ -2840,26 +2829,24 @@ where
     /// assert_eq!(v, vector![9, 8, 7, 6, 5, 0, 1, 2, 3, 4]);
     /// assert_eq!(secondary, vector!['a', 'b', 'c', 'd', 'e', 'j', 'i','h', 'g', 'f']);
     /// ```
-    pub fn dual_sort_range<R, Q, Internal2, Leaf2, BorrowedInternal2>(
+    pub fn dual_sort_range<R, Internal2, Leaf2, BorrowedInternal2>(
         &mut self,
         range: R,
-        secondary: &mut InternalVector<Q, Internal2, Leaf2, BorrowedInternal2>,
+        secondary: &mut InternalVector<Internal2, Leaf2, BorrowedInternal2>,
     ) where
         R: RangeBounds<usize> + Clone,
-        Q: SharedPointerKind,
-        Internal2: InternalTrait<Q, Leaf2, Borrowed = BorrowedInternal2>,
-        BorrowedInternal2: BorrowedInternalTrait<Q, Leaf2, InternalChild = Internal2> + Debug,
+        Internal2: InternalTrait<Leaf2, Borrowed = BorrowedInternal2>,
+        BorrowedInternal2: BorrowedInternalTrait<Leaf2, InternalChild = Internal2> + Debug,
         Leaf2: LeafTrait,
     {
         self.dual_sort_range_by(&Ord::cmp, range, secondary)
     }
 }
 
-impl<P, Internal, Leaf, BorrowedInternal> InternalVector<P, Internal, Leaf, BorrowedInternal>
+impl<Internal, Leaf, BorrowedInternal> InternalVector<Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: PartialEq,
 {
@@ -2892,12 +2879,10 @@ where
     }
 }
 
-impl<P, Internal, Leaf, BorrowedInternal> Default
-    for InternalVector<P, Internal, Leaf, BorrowedInternal>
+impl<Internal, Leaf, BorrowedInternal> Default for InternalVector<Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
 {
     fn default() -> Self {
@@ -2905,12 +2890,11 @@ where
     }
 }
 
-impl<P, Internal, Leaf, BorrowedInternal> PartialEq
-    for InternalVector<P, Internal, Leaf, BorrowedInternal>
+impl<Internal, Leaf, BorrowedInternal> PartialEq
+    for InternalVector<Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: PartialEq,
 {
@@ -2919,22 +2903,20 @@ where
     }
 }
 
-impl<P, Internal, Leaf, BorrowedInternal> Eq for InternalVector<P, Internal, Leaf, BorrowedInternal>
+impl<Internal, Leaf, BorrowedInternal> Eq for InternalVector<Internal, Leaf, BorrowedInternal>
 where
     Leaf::Item: Eq,
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
 {
 }
 
-impl<P, Internal, Leaf, BorrowedInternal> PartialOrd
-    for InternalVector<P, Internal, Leaf, BorrowedInternal>
+impl<Internal, Leaf, BorrowedInternal> PartialOrd
+    for InternalVector<Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: PartialOrd,
 {
@@ -2943,12 +2925,10 @@ where
     }
 }
 
-impl<P, Internal, Leaf, BorrowedInternal> Ord
-    for InternalVector<P, Internal, Leaf, BorrowedInternal>
+impl<Internal, Leaf, BorrowedInternal> Ord for InternalVector<Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: Ord,
 {
@@ -2957,12 +2937,10 @@ where
     }
 }
 
-impl<P, Internal, Leaf, BorrowedInternal> Hash
-    for InternalVector<P, Internal, Leaf, BorrowedInternal>
+impl<Internal, Leaf, BorrowedInternal> Hash for InternalVector<Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: Hash,
 {
@@ -2973,12 +2951,11 @@ where
     }
 }
 
-impl<P, Internal, Leaf, BorrowedInternal> FromIterator<Leaf::Item>
-    for InternalVector<P, Internal, Leaf, BorrowedInternal>
+impl<Internal, Leaf, BorrowedInternal> FromIterator<Leaf::Item>
+    for InternalVector<Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
 {
     fn from_iter<I: IntoIterator<Item = Leaf::Item>>(iter: I) -> Self {
@@ -2992,32 +2969,29 @@ where
 
 /// derp
 pub type Vector<A> =
-    InternalVector<RcK, Internal<A, RcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, RcK, Leaf<A>>>;
+    InternalVector<Internal<A, RcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, RcK, Leaf<A>>>;
 /// derp
 pub type ThreadSafeVector<A> =
-    InternalVector<ArcK, Internal<A, ArcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, ArcK, Leaf<A>>>;
+    InternalVector<Internal<A, ArcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, ArcK, Leaf<A>>>;
 
 /// An iterator for a Vector.
 #[derive(Clone, Debug)]
-pub struct Iter<'a, P, Internal, Leaf, BorrowedInternal>
+pub struct Iter<'a, Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: 'a,
 {
     front: usize,
     back: usize,
-    focus: Focus<'a, P, Internal, Leaf, BorrowedInternal>,
+    focus: Focus<'a, Internal, Leaf, BorrowedInternal>,
 }
 
-impl<'a, P, Internal, Leaf, BorrowedInternal> Iterator
-    for Iter<'a, P, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf, BorrowedInternal> Iterator for Iter<'a, Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
 {
     type Item = &'a Leaf::Item;
@@ -3025,7 +2999,7 @@ where
     fn next(&mut self) -> Option<&'a Leaf::Item> {
         // This focus is broken
         if self.front != self.back {
-            let focus: &'a mut Focus<P, Internal, Leaf, BorrowedInternal> =
+            let focus: &'a mut Focus<Internal, Leaf, BorrowedInternal> =
                 unsafe { &mut *(&mut self.focus as *mut _) };
             let result = focus.get(self.front).unwrap();
             self.front += 1;
@@ -3041,36 +3015,34 @@ where
     }
 }
 
-impl<'a, P, Internal, Leaf, BorrowedInternal> IntoIterator
-    for &'a InternalVector<P, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf, BorrowedInternal> IntoIterator
+    for &'a InternalVector<Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: 'a,
 {
     type Item = &'a Leaf::Item;
-    type IntoIter = Iter<'a, P, Internal, Leaf, BorrowedInternal>;
+    type IntoIter = Iter<'a, Internal, Leaf, BorrowedInternal>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
-impl<'a, P, Internal, Leaf, BorrowedInternal> DoubleEndedIterator
-    for Iter<'a, P, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf, BorrowedInternal> DoubleEndedIterator
+    for Iter<'a, Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: 'a,
 {
     fn next_back(&mut self) -> Option<&'a Leaf::Item> {
         if self.front != self.back {
             self.back -= 1;
-            let focus: &'a mut Focus<P, Internal, Leaf, BorrowedInternal> =
+            let focus: &'a mut Focus<Internal, Leaf, BorrowedInternal> =
                 unsafe { &mut *(&mut self.focus as *mut _) };
             focus.get(self.back)
         } else {
@@ -3079,23 +3051,21 @@ where
     }
 }
 
-impl<'a, P, Internal, Leaf, BorrowedInternal> ExactSizeIterator
-    for Iter<'a, P, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf, BorrowedInternal> ExactSizeIterator
+    for Iter<'a, Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: 'a,
 {
 }
 
-impl<'a, P, Internal, Leaf, BorrowedInternal> FusedIterator
-    for Iter<'a, P, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf, BorrowedInternal> FusedIterator
+    for Iter<'a, Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: 'a,
 {
@@ -3103,24 +3073,22 @@ where
 
 /// An iterator for a Vector.
 // #[derive(Debug)]
-pub struct IterMut<'a, P, Internal, Leaf, BorrowedInternal>
+pub struct IterMut<'a, Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
 {
     front: usize,
     back: usize,
-    focus: FocusMut<'a, P, Internal, Leaf, BorrowedInternal>,
+    focus: FocusMut<'a, Internal, Leaf, BorrowedInternal>,
 }
 
-impl<'a, P, Internal, Leaf, BorrowedInternal> Iterator
-    for IterMut<'a, P, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf, BorrowedInternal> Iterator
+    for IterMut<'a, Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: 'a,
 {
@@ -3128,7 +3096,7 @@ where
 
     fn next(&mut self) -> Option<&'a mut Leaf::Item> {
         if self.front != self.back {
-            let focus: &'a mut FocusMut<P, Internal, Leaf, BorrowedInternal> =
+            let focus: &'a mut FocusMut<Internal, Leaf, BorrowedInternal> =
                 unsafe { &mut *(&mut self.focus as *mut _) };
             let result = focus.get(self.front).unwrap();
             self.front += 1;
@@ -3144,36 +3112,34 @@ where
     }
 }
 
-impl<'a, P, Internal, Leaf, BorrowedInternal> IntoIterator
-    for &'a mut InternalVector<P, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf, BorrowedInternal> IntoIterator
+    for &'a mut InternalVector<Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: 'a,
 {
     type Item = &'a mut Leaf::Item;
-    type IntoIter = IterMut<'a, P, Internal, Leaf, BorrowedInternal>;
+    type IntoIter = IterMut<'a, Internal, Leaf, BorrowedInternal>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
     }
 }
 
-impl<'a, P, Internal, Leaf, BorrowedInternal> DoubleEndedIterator
-    for IterMut<'a, P, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf, BorrowedInternal> DoubleEndedIterator
+    for IterMut<'a, Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: 'a,
 {
     fn next_back(&mut self) -> Option<&'a mut Leaf::Item> {
         if self.front != self.back {
             self.back -= 1;
-            let focus: &'a mut FocusMut<P, Internal, Leaf, BorrowedInternal> =
+            let focus: &'a mut FocusMut<Internal, Leaf, BorrowedInternal> =
                 unsafe { &mut *(&mut self.focus as *mut _) };
             focus.get(self.back)
         } else {
@@ -3182,23 +3148,21 @@ where
     }
 }
 
-impl<'a, P, Internal, Leaf, BorrowedInternal> ExactSizeIterator
-    for IterMut<'a, P, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf, BorrowedInternal> ExactSizeIterator
+    for IterMut<'a, Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: 'a,
 {
 }
 
-impl<'a, P, Internal, Leaf, BorrowedInternal> FusedIterator
-    for IterMut<'a, P, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf, BorrowedInternal> FusedIterator
+    for IterMut<'a, Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
     Leaf::Item: 'a,
 {

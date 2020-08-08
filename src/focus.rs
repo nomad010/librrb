@@ -14,8 +14,6 @@ use std::mem;
 use std::ops::{Bound, Range, RangeBounds};
 use std::rc::Rc;
 
-use archery::{SharedPointer, SharedPointerKind};
-
 // #[derive(Debug, Clone)]
 // pub(crate) struct RefMutRcByPtr<'a, A>(pub(crate) Rc<&'a mut A>);
 
@@ -39,10 +37,9 @@ use archery::{SharedPointer, SharedPointerKind};
 ///
 /// This tracks the path down to a particular leaf in the tree.
 #[derive(Clone, Debug)]
-struct PartialFocus<P, Internal, Leaf>
+struct PartialFocus<Internal, Leaf>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf>,
+    Internal: InternalTrait<Leaf>,
     Leaf: LeafTrait,
 {
     path: Vec<(Internal::InternalEntry, Range<usize>)>,
@@ -50,10 +47,9 @@ where
     leaf_range: Range<usize>,
 }
 
-impl<'a, P, Internal, Leaf> PartialFocus<P, Internal, Leaf>
+impl<'a, Internal, Leaf> PartialFocus<Internal, Leaf>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf>,
+    Internal: InternalTrait<Leaf>,
     Leaf: LeafTrait,
 {
     /// A helper method to compute the remainder of a path down a tree to a particular index.
@@ -93,11 +89,11 @@ where
     }
 
     /// Constructs the focus from a tree node. This will focus on the first element in the node.
-    fn from_tree(tree: &'a NodeRc<P, Internal, Leaf>) -> Self {
+    fn from_tree(tree: &'a NodeRc<Internal, Leaf>) -> Self {
         match tree {
             NodeRc::Internal(internal) => {
                 let mut path = vec![(internal.clone(), 0..tree.len())];
-                let (leaf_range, leaf) = PartialFocus::<P, Internal, Leaf>::tree_path(&mut path, 0);
+                let (leaf_range, leaf) = PartialFocus::<Internal, Leaf>::tree_path(&mut path, 0);
                 PartialFocus {
                     path,
                     leaf,
@@ -120,7 +116,7 @@ where
             }
             let new_idx = idx - self.path.last().unwrap().1.start;
             let (leaf_range, leaf) =
-                PartialFocus::<P, Internal, Leaf>::tree_path(&mut self.path, new_idx);
+                PartialFocus::<Internal, Leaf>::tree_path(&mut self.path, new_idx);
             self.leaf_range = leaf_range;
             self.leaf = leaf;
         }
@@ -143,25 +139,23 @@ where
 /// A focus for the entire the tree. Like a `PartialFocus`, but this also takes the position in the
 /// spine into account.
 #[derive(Clone, Debug)]
-pub struct Focus<'a, P, Internal, Leaf, BorrowedInternal>
+pub struct Focus<'a, Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
 {
-    tree: &'a InternalVector<P, Internal, Leaf, BorrowedInternal>,
+    tree: &'a InternalVector<Internal, Leaf, BorrowedInternal>,
     spine_position: Option<(Side, usize)>,
-    spine_node_focus: PartialFocus<P, Internal, Leaf>,
+    spine_node_focus: PartialFocus<Internal, Leaf>,
     focus_range: Range<usize>,
     range: Range<usize>,
 }
 
-impl<'a, P, Internal, Leaf, BorrowedInternal> Focus<'a, P, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf, BorrowedInternal> Focus<'a, Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
 {
     /// Constructs a new focus for a Vector.
@@ -175,7 +169,7 @@ where
     /// let mut focus = Focus::new(&v);
     /// assert_eq!(focus.get(0), Some(&1));
     /// ```
-    pub fn new(tree: &'a InternalVector<P, Internal, Leaf, BorrowedInternal>) -> Self {
+    pub fn new(tree: &'a InternalVector<Internal, Leaf, BorrowedInternal>) -> Self {
         Focus::narrowed_tree(tree, 0..tree.len())
     }
 
@@ -192,7 +186,7 @@ where
     /// assert_eq!(focus.get(0), Some(&2));
     /// ```
     pub fn narrowed_tree(
-        tree: &'a InternalVector<P, Internal, Leaf, BorrowedInternal>,
+        tree: &'a InternalVector<Internal, Leaf, BorrowedInternal>,
         mut range: Range<usize>,
     ) -> Self {
         if range.start >= tree.len() {
@@ -425,39 +419,38 @@ where
 
 /// A focus of the elements of a vector. The focus allows mutation of the elements in the vector.
 // #[derive(Debug)]
-pub struct FocusMut<'a, P, Internal, Leaf, BorrowedInternal>
+pub struct FocusMut<'a, Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
 {
-    origins: Vec<Rc<&'a mut InternalVector<P, Internal, Leaf, BorrowedInternal>>>,
-    pub(crate) nodes: Vec<BorrowedNode<P, Internal, Leaf>>,
+    origins: Vec<Rc<&'a mut InternalVector<Internal, Leaf, BorrowedInternal>>>,
+    pub(crate) nodes: Vec<BorrowedNode<Internal, Leaf>>,
     len: usize,
     // Focus part
     // This indicates the index of the root in the node list and the range of that is covered by it
     root: Option<(usize, Range<usize>)>,
     // The listing of internal nodes below the borrowed root node along with their associated ranges
     path:
-        Vec<(
-            *mut <<Internal as InternalTrait<P, Leaf>>::Borrowed as BorrowedInternalTrait<
-                P,
-                Leaf,
-            >>::InternalChild,
-            Range<usize>,
-        )>,
+        Vec<
+            (
+                *mut <<Internal as InternalTrait<Leaf>>::Borrowed as BorrowedInternalTrait<
+                    Leaf,
+                >>::InternalChild,
+                Range<usize>,
+            ),
+        >,
     // The leaf of the focus part, might not exist if the borrowed root is a leaf node
     leaf: Option<*mut Leaf>,
     // The range that is covered by the lowest part of the focus
     leaf_range: Range<usize>,
 }
 
-impl<'a, P, Internal, Leaf, BorrowedInternal> FocusMut<'a, P, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf, BorrowedInternal> FocusMut<'a, Internal, Leaf, BorrowedInternal>
 where
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
 {
     fn empty(&mut self) -> Self {
@@ -473,8 +466,8 @@ where
     }
 
     pub(crate) fn from_vectors(
-        origins: Vec<Rc<&'a mut InternalVector<P, Internal, Leaf, BorrowedInternal>>>,
-        nodes: Vec<BorrowedNode<P, Internal, Leaf>>,
+        origins: Vec<Rc<&'a mut InternalVector<Internal, Leaf, BorrowedInternal>>>,
+        nodes: Vec<BorrowedNode<Internal, Leaf>>,
     ) -> Self {
         let mut len = 0;
         for node in nodes.iter() {
@@ -752,7 +745,7 @@ where
     /// ```
     pub fn narrow<
         R: RangeBounds<usize>,
-        F: FnMut(&mut FocusMut<P, Internal, Leaf, BorrowedInternal>),
+        F: FnMut(&mut FocusMut<Internal, Leaf, BorrowedInternal>),
     >(
         &mut self,
         range: R,
@@ -829,13 +822,11 @@ where
 
                         match subchild {
                             NodeMut::Internal(subchild) => {
-                                self.path.push((
-                                    SharedPointer::make_mut(subchild),
-                                    absolute_subchild_range,
-                                ));
+                                self.path
+                                    .push((subchild.load_mut(), absolute_subchild_range));
                             }
                             NodeMut::Leaf(subchild) => {
-                                let leaf: *mut Leaf = SharedPointer::make_mut(subchild);
+                                let leaf: *mut Leaf = subchild.load_mut();
                                 self.leaf = Some(leaf);
                                 self.leaf_range = absolute_subchild_range;
                                 return;
@@ -891,13 +882,13 @@ where
             // idx = new_idx;
             match child_node {
                 NodeMut::Internal(internal) => {
-                    let new_root = SharedPointer::make_mut(internal);
+                    let new_root = internal.load_mut();
                     self.path.push((new_root, child_subrange));
                 }
                 NodeMut::Leaf(leaf) => {
                     // skipped_items.start += this_skipped_items;
                     // skipped_items.end = skipped_items.start + leaf_len;
-                    self.leaf = Some(SharedPointer::make_mut(leaf));
+                    self.leaf = Some(leaf.load_mut());
                     self.leaf_range = child_subrange;
                     break;
                 }

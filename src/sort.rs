@@ -1,21 +1,19 @@
 use crate::focus::FocusMut;
 use crate::node_traits::{BorrowedInternalTrait, InternalTrait, LeafTrait};
-use archery::SharedPointerKind;
 use rand_core::RngCore;
 use std::cmp;
 use std::fmt::Debug;
 use std::mem;
 
-pub(crate) fn do_single_sort<R, F, P, Internal, Leaf, BorrowedInternal>(
-    focus: &mut FocusMut<P, Internal, Leaf, BorrowedInternal>,
+pub(crate) fn do_single_sort<R, F, Internal, Leaf, BorrowedInternal>(
+    focus: &mut FocusMut<Internal, Leaf, BorrowedInternal>,
     rng: &mut R,
     comparator: &F,
 ) where
     R: RngCore,
     F: Fn(&Leaf::Item, &Leaf::Item) -> cmp::Ordering,
-    P: SharedPointerKind,
-    Internal: InternalTrait<P, Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<P, Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait,
 {
     if focus.len() <= 1 {
@@ -185,8 +183,6 @@ pub(crate) fn do_single_sort<R, F, P, Internal, Leaf, BorrowedInternal>(
 pub(crate) fn do_dual_sort<
     R,
     F,
-    P,
-    Q,
     Internal1,
     Leaf1,
     Internal2,
@@ -194,20 +190,18 @@ pub(crate) fn do_dual_sort<
     BorrowedInternal1,
     BorrowedInternal2,
 >(
-    focus: &mut FocusMut<P, Internal1, Leaf1, BorrowedInternal1>,
-    dual: &mut FocusMut<Q, Internal2, Leaf2, BorrowedInternal2>,
+    focus: &mut FocusMut<Internal1, Leaf1, BorrowedInternal1>,
+    dual: &mut FocusMut<Internal2, Leaf2, BorrowedInternal2>,
     rng: &mut R,
     comparator: &F,
 ) where
     R: RngCore,
     F: Fn(&Leaf1::Item, &Leaf1::Item) -> cmp::Ordering,
-    P: SharedPointerKind,
-    Q: SharedPointerKind,
-    Internal1: InternalTrait<P, Leaf1, Borrowed = BorrowedInternal1>,
-    BorrowedInternal1: BorrowedInternalTrait<P, Leaf1, InternalChild = Internal1> + Debug,
+    Internal1: InternalTrait<Leaf1, Borrowed = BorrowedInternal1>,
+    BorrowedInternal1: BorrowedInternalTrait<Leaf1, InternalChild = Internal1> + Debug,
     Leaf1: LeafTrait,
-    Internal2: InternalTrait<Q, Leaf2, Borrowed = BorrowedInternal2>,
-    BorrowedInternal2: BorrowedInternalTrait<Q, Leaf2, InternalChild = Internal2> + Debug,
+    Internal2: InternalTrait<Leaf2, Borrowed = BorrowedInternal2>,
+    BorrowedInternal2: BorrowedInternalTrait<Leaf2, InternalChild = Internal2> + Debug,
     Leaf2: LeafTrait,
 {
     if focus.len() <= 1 {

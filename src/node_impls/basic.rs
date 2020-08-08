@@ -389,7 +389,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
 }
 
 impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>>
-    BorrowedInternalTrait<P, Leaf> for BorrowedInternal<A, P, Leaf>
+    BorrowedInternalTrait<Leaf> for BorrowedInternal<A, P, Leaf>
 {
     type InternalChild = Internal<A, P, Leaf>;
 
@@ -425,7 +425,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     fn get_child_mut_at_slot(
         &mut self,
         idx: usize,
-    ) -> Option<(NodeMut<P, Self::InternalChild, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeMut<Self::InternalChild, Leaf>, Range<usize>)> {
         let left_skipped = self.children.range().start;
         let mut subrange = self.sizes.get_child_range(idx + left_skipped)?;
         subrange.start -= self.left_size();
@@ -442,12 +442,12 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     fn get_child_mut_for_position(
         &mut self,
         position: usize,
-    ) -> Option<(NodeMut<P, Self::InternalChild, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeMut<Self::InternalChild, Leaf>, Range<usize>)> {
         let index = self.position_info_for(position)?.0;
         self.get_child_mut_at_slot(index)
     }
 
-    fn pop_child(&mut self, side: Side) -> Option<BorrowedNode<P, Self::InternalChild, Leaf>> {
+    fn pop_child(&mut self, side: Side) -> Option<BorrowedNode<Self::InternalChild, Leaf>> {
         let child = self.get_child_mut_at_side(side)?.0.borrow_node();
         if side == Side::Front {
             self.children.range_mut().start += 1;
@@ -734,7 +734,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
 // }
 
 impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>>
-    InternalTrait<P, Leaf> for Internal<A, P, Leaf>
+    InternalTrait<Leaf> for Internal<A, P, Leaf>
 {
     // type Item = A;
     type Borrowed = BorrowedInternal<A, P, Leaf>;
@@ -893,7 +893,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         }
     }
 
-    fn pop_child(&mut self, side: Side) -> NodeRc<P, Self, Leaf> {
+    fn pop_child(&mut self, side: Side) -> NodeRc<Self, Leaf> {
         SharedPointer::make_mut(&mut self.sizes).pop_child(side);
         match self.children {
             ChildList::Internals(ref mut children) => NodeRc::Internal(children.pop(side)),
@@ -901,7 +901,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         }
     }
 
-    fn push_child(&mut self, side: Side, node: NodeRc<P, Self, Leaf>) {
+    fn push_child(&mut self, side: Side, node: NodeRc<Self, Leaf>) {
         SharedPointer::make_mut(&mut self.sizes).push_child(side, node.len());
         match self.children {
             ChildList::Internals(ref mut children) => children.push(side, node.internal()),
@@ -953,7 +953,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         self.children.free_slots()
     }
 
-    fn get_child_ref_at_slot(&self, idx: usize) -> Option<(NodeRef<P, Self, Leaf>, Range<usize>)> {
+    fn get_child_ref_at_slot(&self, idx: usize) -> Option<(NodeRef<Self, Leaf>, Range<usize>)> {
         if let Some(range) = self.sizes.get_child_range(idx) {
             match self.children {
                 ChildList::Internals(ref internals) => {
@@ -971,7 +971,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     fn get_child_ref_for_position(
         &self,
         position: usize,
-    ) -> Option<(NodeRef<P, Self, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeRef<Self, Leaf>, Range<usize>)> {
         if let Some((child_idx, _)) = self.sizes.position_info_for(position) {
             self.get_child_ref_at_slot(child_idx)
         } else {
@@ -979,10 +979,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         }
     }
 
-    fn get_child_mut_at_slot(
-        &mut self,
-        idx: usize,
-    ) -> Option<(NodeMut<P, Self, Leaf>, Range<usize>)> {
+    fn get_child_mut_at_slot(&mut self, idx: usize) -> Option<(NodeMut<Self, Leaf>, Range<usize>)> {
         if let Some(range) = self.sizes.get_child_range(idx) {
             match self.children {
                 ChildList::Internals(ref mut internals) => {
@@ -1000,7 +997,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     fn get_child_mut_for_position(
         &mut self,
         position: usize,
-    ) -> Option<(NodeMut<P, Self, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeMut<Self, Leaf>, Range<usize>)> {
         if let Some((child_idx, _)) = self.sizes.position_info_for(position) {
             self.get_child_mut_at_slot(child_idx)
         } else {
