@@ -249,12 +249,12 @@
 //! [Vector::singleton]: ./struct.InternalVector.html#method.singleton
 
 use crate::focus::{Focus, FocusMut};
-use crate::node_traits::{BorrowedInternalTrait, InternalTrait, LeafTrait, NodeRc};
+use crate::node_traits::{BorrowedInternalTrait, Entry, InternalTrait, LeafTrait, NodeRc};
 // use crate::node_impls::basic::;.
 use crate::node_impls::basic::{BorrowedInternal, Internal, Leaf};
 use crate::sort::{do_dual_sort, do_single_sort};
 use crate::{Side, RRB_WIDTH};
-use archery::{ArcK, RcK, SharedPointer, SharedPointerKind};
+use archery::{ArcK, RcK, SharedPointerKind};
 use rand_core::SeedableRng;
 use std::borrow::Borrow;
 use std::cmp;
@@ -441,7 +441,7 @@ where
         InternalVector {
             left_spine: vec![],
             right_spine: vec![],
-            root: NodeRc::Leaf(SharedPointer::new(Leaf::empty())),
+            root: NodeRc::Leaf(Internal::LeafEntry::new(Leaf::empty())),
             len: 0,
         }
     }
@@ -460,7 +460,7 @@ where
         InternalVector {
             left_spine: vec![],
             right_spine: vec![],
-            root: NodeRc::Leaf(SharedPointer::new(Leaf::with_item(item))),
+            root: NodeRc::Leaf(Internal::LeafEntry::new(Leaf::with_item(item))),
             len: 1,
         }
     }
@@ -533,7 +533,7 @@ where
     /// bubble up full nodes. This will also handle expandung the tree.
     fn complete_leaf(&mut self, side: Side) {
         debug_assert_eq!(self.left_spine.len(), self.right_spine.len());
-        debug_assert_eq!(self.leaf_ref(side).free_space(), 0);
+        debug_assert_eq!(self.leaf_ref(side).load().free_space(), 0);
         let (spine, other_spine) = match side {
             Side::Back => (&mut self.right_spine, &mut self.left_spine),
             Side::Front => (&mut self.left_spine, &mut self.right_spine),
@@ -548,12 +548,11 @@ where
             }
 
             let full_node = mem::replace(node, node.new_empty());
-            let parent_node = SharedPointer::make_mut(
-                spine
-                    .get_mut(idx + 1)
-                    .unwrap_or(&mut self.root)
-                    .internal_mut(),
-            );
+            let parent_node = spine
+                .get_mut(idx + 1)
+                .unwrap_or(&mut self.root)
+                .internal_mut()
+                .load_mut();
             parent_node.push_child(side, full_node);
         }
 
@@ -562,9 +561,9 @@ where
             // same height as the old root. We decant half the old root into this new node.
             // Finally, we create a new node of height one more than the old root and set that as
             // the new root. We leave the root empty
-            let new_root = NodeRc::Internal(SharedPointer::new(Internal::empty_internal(
-                self.root.level() + 1,
-            )));
+            let new_root = NodeRc::Internal(Internal::InternalEntry::new(
+                Internal::empty_internal(self.root.level() + 1),
+            ));
             let mut new_node = mem::replace(&mut self.root, new_root);
             let mut other_new_node = new_node.new_empty();
             new_node.share_children_with(&mut other_new_node, side.negate(), RRB_WIDTH / 2);
@@ -579,11 +578,10 @@ where
     /// Pushes an item into a side leaf of the tree. This fixes up some invariants in the case that
     /// the root sits directly above the leaves.
     fn push_side(&mut self, side: Side, item: Leaf::Item) {
-        if self.leaf_ref(side).free_space() == 0 {
+        if self.leaf_ref(side).load().free_space() == 0 {
             self.complete_leaf(side);
         }
-
-        SharedPointer::make_mut(self.leaf_mut(side)).push(side, item);
+        self.leaf_mut(side).load_mut().push(side, item);
         self.len += 1;
 
         if self.spine_ref(side).len() == 1 {
@@ -670,7 +668,7 @@ where
                 .get_mut(level + 1)
                 .unwrap_or(&mut self.root)
                 .internal_mut();
-            let child = SharedPointer::make_mut(node).pop_child(side);
+            let child = node.load_mut().pop_child(side);
             spine[level] = child;
         }
 
@@ -748,16 +746,16 @@ where
         if self.spine_ref(side).is_empty() {
             if !self.root.is_empty() {
                 self.len -= 1;
-                Some(SharedPointer::make_mut(self.root.leaf_mut()).pop(side))
+                Some(self.root.leaf_mut().load_mut().pop(side))
             } else {
                 None
             }
         } else {
             // Can never be none as the is of height at least 1
             let leaf = self.leaf_mut(side);
-            let item = SharedPointer::make_mut(leaf).pop(side);
+            let item = leaf.load_mut().pop(side);
 
-            if leaf.is_empty() {
+            if leaf.load().is_empty() {
                 self.empty_leaf(side);
             } else if self.spine_ref(side).len() == 1 {
                 self.fixup_spine_tops();
@@ -826,7 +824,7 @@ where
     /// ```
     pub fn front(&self) -> Option<&Leaf::Item> {
         let leaf = self.left_spine.first().unwrap_or(&self.root);
-        leaf.leaf_ref().front()
+        leaf.leaf_ref().load().front()
     }
 
     /// Returns a mutable reference to the item at the front of the sequence. If the tree is empty
@@ -843,7 +841,7 @@ where
     /// ```
     pub fn front_mut(&mut self) -> Option<&mut Leaf::Item> {
         let leaf = self.left_spine.first_mut().unwrap_or(&mut self.root);
-        SharedPointer::make_mut(leaf.leaf_mut()).front_mut()
+        leaf.leaf_mut().load_mut().front_mut()
     }
 
     /// Returns a reference to the item at the back of the sequence. If the tree is empty this
@@ -860,7 +858,7 @@ where
     /// ```
     pub fn back(&self) -> Option<&Leaf::Item> {
         let leaf = self.right_spine.first().unwrap_or(&self.root);
-        leaf.leaf_ref().back()
+        leaf.leaf_ref().load().back()
     }
 
     /// Returns a mutable reference to the item at the back of the sequence. If the tree is empty
@@ -877,7 +875,7 @@ where
     /// ```
     pub fn back_mut(&mut self) -> Option<&mut Leaf::Item> {
         let leaf = self.right_spine.first_mut().unwrap_or(&mut self.root);
-        SharedPointer::make_mut(leaf.leaf_mut()).back_mut()
+        leaf.leaf_mut().load_mut().back_mut()
     }
 
     /// Derp
@@ -1138,9 +1136,9 @@ where
             // The root moves to either the left or right spine and the root becomes empty
             // We replace the left with root here and right with an empty node
             // println!("Adding to self");
-            let new_root = NodeRc::Internal(SharedPointer::new(Internal::empty_internal(
-                self.root.level() + 1,
-            )));
+            let new_root = NodeRc::Internal(Internal::InternalEntry::new(
+                Internal::empty_internal(self.root.level() + 1),
+            ));
             let mut new_left = mem::replace(&mut self.root, new_root);
             let mut new_right = new_left.new_empty();
             new_left.share_children_with(&mut new_right, Side::Back, new_left.slots() / 2);
@@ -1152,9 +1150,9 @@ where
             // The root moves to either the left or right spine and the root becomes empty
             // We replace the right with root here and left with an empty node
             // println!("Adding to other");
-            let new_root = NodeRc::Internal(SharedPointer::new(Internal::empty_internal(
-                other.root.level() + 1,
-            )));
+            let new_root = NodeRc::Internal(Internal::InternalEntry::new(
+                Internal::empty_internal(other.root.level() + 1),
+            ));
             let mut new_right = mem::replace(&mut other.root, new_root);
             let mut new_left = new_right.new_empty();
             new_right.share_children_with(&mut new_left, Side::Front, new_right.slots() / 2);
@@ -1169,10 +1167,10 @@ where
         debug_assert_eq!(self.right_spine.len(), other.left_spine.len());
 
         let packer = |new_node: NodeRc<P, Internal, Leaf>,
-                      parent_node: &mut SharedPointer<Internal, P>,
+                      parent_node: &mut Internal::InternalEntry,
                       side| {
             if !new_node.is_empty() {
-                let parent = &mut SharedPointer::make_mut(parent_node);
+                let parent = parent_node.load_mut();
                 // println!("gar {} vs {}", parent.level(), new_node.level());
                 parent.push_child(side, new_node);
             }
@@ -1233,8 +1231,8 @@ where
             let mut left_node = self.right_spine.pop().unwrap();
             let mut right_node = other.left_spine.pop().unwrap();
 
-            let left = SharedPointer::make_mut(left_node.internal_mut());
-            let right = SharedPointer::make_mut(right_node.internal_mut());
+            let left = left_node.internal_mut().load_mut();
+            let right = right_node.internal_mut().load_mut();
 
             left.pack_children();
             println!(
@@ -1417,9 +1415,9 @@ where
         }
 
         if !other.root.is_empty() {
-            let new_root = NodeRc::Internal(SharedPointer::new(Internal::empty_internal(
-                self.root.level() + 1,
-            )));
+            let new_root = NodeRc::Internal(Internal::InternalEntry::new(
+                Internal::empty_internal(self.root.level() + 1),
+            ));
             let old_root = mem::replace(&mut self.root, new_root);
             self.left_spine.push(old_root);
             self.right_spine.push(other.root);
@@ -1873,12 +1871,12 @@ where
                 NodeRc::Internal(internal) => {
                     //
                     // println!("Gargablegar {} {}", internal.slots(), internal.level(),);
-                    let child = SharedPointer::make_mut(internal).pop_child(side);
+                    let child = internal.load_mut().pop_child(side);
                     spine.push(child);
                 }
                 NodeRc::Leaf(leaf) => {
                     // println!("Derp {}", leaf.len());
-                    break leaf.is_empty();
+                    break leaf.load().is_empty();
                 }
             }
         };
@@ -2551,7 +2549,7 @@ where
     }
 
     /// Returns a reference to the leaf on the requested side of the tree.
-    fn leaf_ref(&self, side: Side) -> &SharedPointer<Leaf, P> {
+    fn leaf_ref(&self, side: Side) -> &Internal::LeafEntry {
         self.spine_ref(side)
             .first()
             .unwrap_or(&self.root)
@@ -2559,7 +2557,7 @@ where
     }
 
     /// Returns a mutable reference to the leaf on the requested side of the tree.
-    fn leaf_mut(&mut self, side: Side) -> &mut SharedPointer<Leaf, P> {
+    fn leaf_mut(&mut self, side: Side) -> &mut Internal::LeafEntry {
         match side {
             Side::Front => self
                 .left_spine

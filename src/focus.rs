@@ -3,8 +3,8 @@
 //! A focus tracks the last leaf and positions which was read. The path down this tree is saved in
 //! the focus and is used to accelerate lookups in nearby locations.
 use crate::node_traits::{
-    BorrowedInternalTrait, BorrowedLeafTrait, BorrowedNode, InternalTrait, LeafTrait, NodeMut,
-    NodeRc, NodeRef,
+    BorrowedInternalTrait, BorrowedLeafTrait, BorrowedNode, Entry, InternalTrait, LeafTrait,
+    NodeMut, NodeRc, NodeRef,
 };
 
 use crate::vector::InternalVector;
@@ -45,8 +45,8 @@ where
     Internal: InternalTrait<P, Leaf>,
     Leaf: LeafTrait,
 {
-    path: Vec<(SharedPointer<Internal, P>, Range<usize>)>,
-    leaf: SharedPointer<Leaf, P>,
+    path: Vec<(Internal::InternalEntry, Range<usize>)>,
+    leaf: Internal::LeafEntry,
     leaf_range: Range<usize>,
 }
 
@@ -58,12 +58,12 @@ where
 {
     /// A helper method to compute the remainder of a path down a tree to a particular index.
     fn tree_path(
-        nodes: &mut Vec<(SharedPointer<Internal, P>, Range<usize>)>,
+        nodes: &mut Vec<(Internal::InternalEntry, Range<usize>)>,
         mut idx: usize,
-    ) -> (Range<usize>, SharedPointer<Leaf, P>) {
+    ) -> (Range<usize>, Internal::LeafEntry) {
         while let Some((previous_root, range)) = nodes.last() {
             let (next_node, next_range) = if let Some((subchild, subchild_range)) =
-                previous_root.get_child_ref_for_position(idx)
+                previous_root.load().get_child_ref_for_position(idx)
             {
                 let subrange_len = subchild_range.end - subchild_range.start;
                 let absolute_subrange_start = range.start + subchild_range.start;
@@ -79,10 +79,10 @@ where
                     //     internal.len()
                     // );
                     idx -= subchild_range.start;
-                    (SharedPointer::clone(internal), absolute_subrange)
+                    (internal.clone(), absolute_subrange)
                 } else {
                     // println!("Done {:?}", absolute_subrange);
-                    return (absolute_subrange, SharedPointer::clone(subchild.leaf()));
+                    return (absolute_subrange, subchild.leaf().clone());
                 }
             } else {
                 panic!("Attempt to move a focus to an out of bounds location.")
@@ -97,7 +97,7 @@ where
         match tree {
             NodeRc::Internal(internal) => {
                 let mut path = vec![(internal.clone(), 0..tree.len())];
-                let (leaf_range, leaf) = PartialFocus::tree_path(&mut path, 0);
+                let (leaf_range, leaf) = PartialFocus::<P, Internal, Leaf>::tree_path(&mut path, 0);
                 PartialFocus {
                     path,
                     leaf,
@@ -107,7 +107,7 @@ where
             NodeRc::Leaf(leaf) => PartialFocus {
                 path: Vec::new(),
                 leaf: leaf.clone(),
-                leaf_range: 0..leaf.len(),
+                leaf_range: 0..leaf.load().len(),
             },
         }
     }
@@ -119,7 +119,8 @@ where
                 self.path.pop();
             }
             let new_idx = idx - self.path.last().unwrap().1.start;
-            let (leaf_range, leaf) = PartialFocus::tree_path(&mut self.path, new_idx);
+            let (leaf_range, leaf) =
+                PartialFocus::<P, Internal, Leaf>::tree_path(&mut self.path, new_idx);
             self.leaf_range = leaf_range;
             self.leaf = leaf;
         }
@@ -129,12 +130,12 @@ where
     /// will move the focus along if necessary.
     fn get(&mut self, idx: usize) -> Option<&Leaf::Item> {
         if self.path.is_empty() {
-            self.leaf.get(idx)
-        } else if idx >= self.path[0].0.len() {
+            self.leaf.load().get(idx)
+        } else if idx >= self.path[0].0.load().len() {
             None
         } else {
             self.move_focus(idx);
-            self.leaf.get(idx - self.leaf_range.start)
+            self.leaf.load().get(idx - self.leaf_range.start)
         }
     }
 }

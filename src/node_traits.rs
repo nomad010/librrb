@@ -3,7 +3,7 @@ use archery::{SharedPointer, SharedPointerKind};
 use std::fmt::Debug;
 use std::ops::Range;
 
-pub trait Entry: Clone {
+pub trait Entry: Clone + std::fmt::Debug {
     type Item: Clone + std::fmt::Debug;
 
     fn new(item: Self::Item) -> Self;
@@ -337,8 +337,8 @@ where
     Internal: InternalTrait<P, Leaf>,
     Leaf: LeafTrait,
 {
-    Leaf(SharedPointer<Leaf, P>),
-    Internal(SharedPointer<Internal, P>),
+    Leaf(Internal::LeafEntry),
+    Internal(Internal::InternalEntry),
 }
 
 impl<P, Internal, Leaf> Clone for NodeRc<P, Internal, Leaf>
@@ -364,8 +364,10 @@ where
     /// Constructs a new empty of the same level.
     pub fn new_empty(&self) -> Self {
         match self {
-            NodeRc::Internal(x) => NodeRc::Internal(SharedPointer::new(x.new_empty())),
-            NodeRc::Leaf(_) => NodeRc::Leaf(SharedPointer::new(Leaf::empty())),
+            NodeRc::Internal(x) => {
+                NodeRc::Internal(Internal::InternalEntry::new(x.load().new_empty()))
+            }
+            NodeRc::Leaf(_) => NodeRc::Leaf(Internal::LeafEntry::new(Leaf::empty())),
         }
     }
 
@@ -381,20 +383,18 @@ where
     ) -> usize {
         match self {
             NodeRc::Internal(ref mut origin_internal) => {
-                let destination_internal = SharedPointer::make_mut(destination.internal_mut());
-                SharedPointer::make_mut(origin_internal).share_children_with(
+                let destination_internal = destination.internal_mut().load_mut();
+                origin_internal.load_mut().share_children_with(
                     destination_internal,
                     share_side,
                     len,
                 )
             }
             NodeRc::Leaf(ref mut origin_leaf) => {
-                let destination_leaf = SharedPointer::make_mut(destination.leaf_mut());
-                SharedPointer::make_mut(origin_leaf).share_children_with(
-                    destination_leaf,
-                    share_side,
-                    len,
-                )
+                let destination_leaf = destination.leaf_mut().load_mut();
+                origin_leaf
+                    .load_mut()
+                    .share_children_with(destination_leaf, share_side, len)
             }
         }
     }
@@ -402,32 +402,32 @@ where
     /// Returns the size of the of node.
     pub fn len(&self) -> usize {
         match self {
-            NodeRc::Leaf(x) => x.len(),
-            NodeRc::Internal(x) => x.len(),
+            NodeRc::Leaf(x) => x.load().len(),
+            NodeRc::Internal(x) => x.load().len(),
         }
     }
 
     /// Returns the number of direct children of the node.
     pub fn slots(&self) -> usize {
         match self {
-            NodeRc::Leaf(x) => x.len(),
-            NodeRc::Internal(x) => x.slots(),
+            NodeRc::Leaf(x) => x.load().len(),
+            NodeRc::Internal(x) => x.load().slots(),
         }
     }
 
     /// Returns whether the node is completely empty.
     pub fn is_empty(&self) -> bool {
         match self {
-            NodeRc::Leaf(x) => x.is_empty(),
-            NodeRc::Internal(x) => x.is_empty(),
+            NodeRc::Leaf(x) => x.load().is_empty(),
+            NodeRc::Internal(x) => x.load().is_empty(),
         }
     }
 
     /// Returns whether the node is completely full.
     pub fn is_full(&self) -> bool {
         match self {
-            NodeRc::Leaf(x) => x.is_full(),
-            NodeRc::Internal(x) => x.is_full(),
+            NodeRc::Leaf(x) => x.load().is_full(),
+            NodeRc::Internal(x) => x.load().is_full(),
         }
     }
 
@@ -435,7 +435,7 @@ where
     pub fn level(&self) -> usize {
         match self {
             NodeRc::Leaf(_) => 0,
-            NodeRc::Internal(x) => x.level(),
+            NodeRc::Internal(x) => x.load().level(),
         }
     }
 
@@ -447,24 +447,24 @@ where
     /// Returns the element at the given position in the node.
     pub fn get(&self, idx: usize) -> Option<&Leaf::Item> {
         match self {
-            NodeRc::Leaf(x) => x.get(idx),
-            NodeRc::Internal(x) => x.get(idx),
+            NodeRc::Leaf(x) => x.load().get(idx),
+            NodeRc::Internal(x) => x.load().get(idx),
         }
     }
 
     /// Returns the element at the given position in the node.
     pub fn get_mut(&mut self, idx: usize) -> Option<&mut Leaf::Item> {
         match self {
-            NodeRc::Leaf(ref mut x) => SharedPointer::make_mut(x).get_mut(idx),
-            NodeRc::Internal(ref mut x) => SharedPointer::make_mut(x).get_mut(idx),
+            NodeRc::Leaf(ref mut x) => x.load_mut().get_mut(idx),
+            NodeRc::Internal(ref mut x) => x.load_mut().get_mut(idx),
         }
     }
 
     /// Returns the number of children that can be inserted into this node.
     pub fn free_slots(&self) -> usize {
         match self {
-            NodeRc::Leaf(x) => x.free_space(),
-            NodeRc::Internal(x) => x.free_slots(),
+            NodeRc::Leaf(x) => x.load().free_space(),
+            NodeRc::Internal(x) => x.load().free_slots(),
         }
     }
 
@@ -473,7 +473,7 @@ where
     /// # Panics
     ///
     /// Panics if `self` is not a leaf node.
-    pub fn leaf(self) -> SharedPointer<Leaf, P> {
+    pub fn leaf(self) -> Internal::LeafEntry {
         if let NodeRc::Leaf(x) = self {
             x
         } else {
@@ -486,7 +486,7 @@ where
     /// # Panics
     ///
     /// Panics if `self` is not an internal node.
-    pub fn internal(self) -> SharedPointer<Internal, P> {
+    pub fn internal(self) -> Internal::InternalEntry {
         if let NodeRc::Internal(x) = self {
             x
         } else {
@@ -499,7 +499,7 @@ where
     /// # Panics
     ///
     /// Panics if `self` is not a leaf node.
-    pub fn leaf_ref(&self) -> &SharedPointer<Leaf, P> {
+    pub fn leaf_ref(&self) -> &Internal::LeafEntry {
         if let NodeRc::Leaf(x) = self {
             x
         } else {
@@ -512,7 +512,7 @@ where
     /// # Panics
     ///
     /// Panics if `self` is not a leaf node.
-    pub fn leaf_mut(&mut self) -> &mut SharedPointer<Leaf, P> {
+    pub fn leaf_mut(&mut self) -> &mut Internal::LeafEntry {
         if let NodeRc::Leaf(x) = self {
             x
         } else {
@@ -525,7 +525,7 @@ where
     /// # Panics
     ///
     /// Panics if `self` is not a internal node.
-    pub fn internal_mut(&mut self) -> &mut SharedPointer<Internal, P> {
+    pub fn internal_mut(&mut self) -> &mut Internal::InternalEntry {
         if let NodeRc::Internal(x) = self {
             x
         } else {
@@ -535,32 +535,30 @@ where
 
     pub fn borrow_node(&mut self) -> BorrowedNode<P, Internal, Leaf> {
         match self {
-            NodeRc::Internal(internal) => {
-                BorrowedNode::Internal(SharedPointer::make_mut(internal).borrow_node())
-            }
-            NodeRc::Leaf(leaf) => BorrowedNode::Leaf(SharedPointer::make_mut(leaf).borrow_node()),
+            NodeRc::Internal(internal) => BorrowedNode::Internal(internal.load_mut().borrow_node()),
+            NodeRc::Leaf(leaf) => BorrowedNode::Leaf(leaf.load_mut().borrow_node()),
         }
     }
 
     pub fn split_at_child(&mut self, idx: usize) -> Self {
         match self {
-            NodeRc::Internal(internal) => NodeRc::Internal(SharedPointer::new(
-                SharedPointer::make_mut(internal).split_at_child(idx),
+            NodeRc::Internal(internal) => NodeRc::Internal(Internal::InternalEntry::new(
+                internal.load_mut().split_at_child(idx),
             )),
             NodeRc::Leaf(leaf) => {
-                NodeRc::Leaf(SharedPointer::new(SharedPointer::make_mut(leaf).split(idx)))
+                NodeRc::Leaf(Internal::LeafEntry::new(leaf.load_mut().split(idx)))
             }
         }
     }
 
     pub fn split_at_position(&mut self, position: usize) -> Self {
         match self {
-            NodeRc::Internal(internal) => NodeRc::Internal(SharedPointer::new(
-                SharedPointer::make_mut(internal).split_at_position(position),
+            NodeRc::Internal(internal) => NodeRc::Internal(Internal::InternalEntry::new(
+                internal.load_mut().split_at_position(position),
             )),
-            NodeRc::Leaf(leaf) => NodeRc::Leaf(SharedPointer::new(
-                SharedPointer::make_mut(leaf).split(position),
-            )),
+            NodeRc::Leaf(leaf) => {
+                NodeRc::Leaf(Internal::LeafEntry::new(leaf.load_mut().split(position)))
+            }
         }
     }
 
@@ -568,8 +566,12 @@ where
     #[allow(dead_code)]
     pub fn debug_check_invariants(&self, reported_size: usize, reported_level: usize) {
         match self {
-            NodeRc::Leaf(x) => x.debug_check_invariants(reported_size, reported_level),
-            NodeRc::Internal(x) => x.debug_check_invariants(reported_size, reported_level),
+            NodeRc::Leaf(x) => x
+                .load()
+                .debug_check_invariants(reported_size, reported_level),
+            NodeRc::Internal(x) => x
+                .load()
+                .debug_check_invariants(reported_size, reported_level),
         }
     }
 }
@@ -586,8 +588,8 @@ where
     #[allow(dead_code)]
     pub(crate) fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, Leaf::Item>) -> bool {
         match self {
-            NodeRc::Internal(ref internal) => internal.equal_iter_debug(iter),
-            NodeRc::Leaf(ref leaf) => leaf.equal_iter_debug(iter),
+            NodeRc::Internal(ref internal) => internal.load().equal_iter_debug(iter),
+            NodeRc::Leaf(ref leaf) => leaf.load().equal_iter_debug(iter),
         }
     }
 }
@@ -705,8 +707,8 @@ where
     Internal: InternalTrait<P, Leaf>,
     Leaf: LeafTrait,
 {
-    Leaf(&'a SharedPointer<Leaf, P>),
-    Internal(&'a SharedPointer<Internal, P>),
+    Leaf(&'a Internal::LeafEntry),
+    Internal(&'a Internal::InternalEntry),
 }
 
 impl<'a, P, Internal, Leaf> NodeRef<'a, P, Internal, Leaf>
@@ -718,24 +720,24 @@ where
     /// Returns the size of the of node.
     pub fn len(&self) -> usize {
         match self {
-            NodeRef::Leaf(x) => x.len(),
-            NodeRef::Internal(x) => x.len(),
+            NodeRef::Leaf(x) => x.load().len(),
+            NodeRef::Internal(x) => x.load().len(),
         }
     }
 
     /// Returns the number of direct children of the node.
     pub fn slots(&self) -> usize {
         match self {
-            NodeRef::Leaf(x) => x.len(),
-            NodeRef::Internal(x) => x.slots(),
+            NodeRef::Leaf(x) => x.load().len(),
+            NodeRef::Internal(x) => x.load().slots(),
         }
     }
 
     /// Returns whether the node is completely empty.
     pub fn is_empty(&self) -> bool {
         match self {
-            NodeRef::Leaf(x) => x.is_empty(),
-            NodeRef::Internal(x) => x.is_empty(),
+            NodeRef::Leaf(x) => x.load().is_empty(),
+            NodeRef::Internal(x) => x.load().is_empty(),
         }
     }
 
@@ -743,7 +745,7 @@ where
     pub fn level(&self) -> usize {
         match self {
             NodeRef::Leaf(_) => 0,
-            NodeRef::Internal(x) => x.level(),
+            NodeRef::Internal(x) => x.load().level(),
         }
     }
 
@@ -755,16 +757,16 @@ where
     /// Returns the element at the given position in the node.
     pub fn get(&self, idx: usize) -> Option<&Leaf::Item> {
         match self {
-            NodeRef::Leaf(x) => x.get(idx),
-            NodeRef::Internal(x) => x.get(idx),
+            NodeRef::Leaf(x) => x.load().get(idx),
+            NodeRef::Internal(x) => x.load().get(idx),
         }
     }
 
     /// Returns the number of children that can be inserted into this node.
     pub fn free_slots(&self) -> usize {
         match self {
-            NodeRef::Leaf(x) => x.free_space(),
-            NodeRef::Internal(x) => x.free_slots(),
+            NodeRef::Leaf(x) => x.load().free_space(),
+            NodeRef::Internal(x) => x.load().free_slots(),
         }
     }
 
@@ -773,7 +775,7 @@ where
     /// # Panics
     ///
     /// Panics if `self` is not a leaf node.
-    pub fn leaf(self) -> &'a SharedPointer<Leaf, P> {
+    pub fn leaf(self) -> &'a Internal::LeafEntry {
         if let NodeRef::Leaf(x) = self {
             x
         } else {
@@ -786,7 +788,7 @@ where
     /// # Panics
     ///
     /// Panics if `self` is not an internal node.
-    pub fn internal(self) -> &'a SharedPointer<Internal, P> {
+    pub fn internal(self) -> &'a Internal::InternalEntry {
         if let NodeRef::Internal(x) = self {
             x
         } else {
@@ -798,8 +800,12 @@ where
     #[allow(dead_code)]
     pub fn debug_check_invariants(&self, reported_size: usize, reported_level: usize) {
         match self {
-            NodeRef::Leaf(x) => x.debug_check_invariants(reported_size, reported_level),
-            NodeRef::Internal(x) => x.debug_check_invariants(reported_size, reported_level),
+            NodeRef::Leaf(x) => x
+                .load()
+                .debug_check_invariants(reported_size, reported_level),
+            NodeRef::Internal(x) => x
+                .load()
+                .debug_check_invariants(reported_size, reported_level),
         }
     }
 }
@@ -816,8 +822,8 @@ where
     #[allow(dead_code)]
     pub(crate) fn equal_iter_debug<'b>(&self, iter: &mut std::slice::Iter<'b, Leaf::Item>) -> bool {
         match self {
-            NodeRef::Internal(ref internal) => internal.equal_iter_debug(iter),
-            NodeRef::Leaf(ref leaf) => leaf.equal_iter_debug(iter),
+            NodeRef::Internal(ref internal) => internal.load().equal_iter_debug(iter),
+            NodeRef::Leaf(ref leaf) => leaf.load().equal_iter_debug(iter),
         }
     }
 }
