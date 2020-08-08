@@ -14,25 +14,6 @@ use std::mem;
 use std::ops::{Bound, Range, RangeBounds};
 use std::rc::Rc;
 
-// #[derive(Debug, Clone)]
-// pub(crate) struct RefMutRcByPtr<'a, A>(pub(crate) Rc<&'a mut A>);
-
-// impl<'a, A> RefMutRcByPtr<'a, A> {}
-
-// impl<'a, A> std::hash::Hash for RefMutRcByPtr<'a, A> {
-//     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-//         std::ptr::hash(*self.0, state);
-//     }
-// }
-
-// impl<'a, A> Eq for RefMutRcByPtr<'a, A> {}
-
-// impl<'a, A> PartialEq for RefMutRcByPtr<'a, A> {
-//     fn eq(&self, other: &Self) -> bool {
-//         Rc::ptr_eq(&self.0, &other.0)
-//     }
-// }
-
 /// A focus for a particular node in the spine.
 ///
 /// This tracks the path down to a particular leaf in the tree.
@@ -138,7 +119,7 @@ where
 
 /// A focus for the entire the tree. Like a `PartialFocus`, but this also takes the position in the
 /// spine into account.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Focus<'a, Internal, Leaf, BorrowedInternal>
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
@@ -150,6 +131,23 @@ where
     spine_node_focus: PartialFocus<Internal, Leaf>,
     focus_range: Range<usize>,
     range: Range<usize>,
+}
+
+impl<'a, Internal, Leaf, BorrowedInternal> Clone for Focus<'a, Internal, Leaf, BorrowedInternal>
+where
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait,
+{
+    fn clone(&self) -> Self {
+        Self {
+            tree: self.tree,
+            spine_position: self.spine_position.clone(),
+            spine_node_focus: self.spine_node_focus.clone(),
+            focus_range: self.focus_range.clone(),
+            range: self.range.clone(),
+        }
+    }
 }
 
 impl<'a, Internal, Leaf, BorrowedInternal> Focus<'a, Internal, Leaf, BorrowedInternal>
@@ -411,15 +409,7 @@ where
     // This indicates the index of the root in the node list and the range of that is covered by it
     root: Option<(usize, Range<usize>)>,
     // The listing of internal nodes below the borrowed root node along with their associated ranges
-    path:
-        Vec<
-            (
-                *mut <<Internal as InternalTrait<Leaf>>::Borrowed as BorrowedInternalTrait<
-                    Leaf,
-                >>::InternalChild,
-                Range<usize>,
-            ),
-        >,
+    path: Vec<(*mut Internal, Range<usize>)>,
     // The leaf of the focus part, might not exist if the borrowed root is a leaf node
     leaf: Option<*mut Leaf>,
     // The range that is covered by the lowest part of the focus
@@ -916,88 +906,6 @@ where
     }
 }
 
-/*
-trait Container<A: Clone + Debug>: DerefMut<Target = A> {
-    fn into_inner(inner: Self) -> A;
-
-    fn swap(left: &mut Self, right: &mut Self);
-}
-
-trait FocusLike<A: Clone + Debug> {
-    type Item: Container<A>;
-
-    fn get(&self) -> Self::Item;
-
-    fn split_at<F: Fn(&mut Self, &mut Self)>(&mut self, f: F);
-}
-
-struct DualFocusMut<'a, 'b, A: Clone + Debug, B: Clone + Debug> {
-    first: &'b mut FocusMut<'a, A>,
-    second: &'b mut FocusMut<'a, B>,
-}
-
-impl<'a, 'b, A: Clone + Debug, B: Clone + Debug> FocusLike<(A, B)> for DualFocusMut<'a, 'b, A, B> {
-    type Item = Dual<'a, A, B>;
-
-    // fn get(&mut self)
-}
-
-struct Single<A: Clone + Debug> {
-    item: A,
-}
-
-impl<A: Clone + Debug> Deref for Single<A> {
-    type Target = A;
-
-    fn deref(&self) -> &A {
-        &mut self.item
-    }
-}
-
-impl<A: Clone + Debug> DerefMut for Single<A> {
-    fn deref_mut(&mut self) -> &mut A {
-        &mut self.item
-    }
-}
-
-impl<A: Clone + Debug> Container<A> for Single<A> {
-    fn into_inner(inner: Self) -> A {
-        inner.item
-    }
-
-    fn swap(left: &mut Self, right: &mut Self) {
-        mem::swap(left, right)
-    }
-}
-
-struct Dual<'a, A: Clone + Debug, B: Clone + Debug> {
-    item: (&'a mut A, &'a mut B),
-}
-
-impl<'a, A: Clone + Debug, B: Clone + Debug> Deref for Dual<'a, A, B> {
-    type Target = (A, B);
-
-    fn deref(&self) -> &(A, B) {
-        &self.item
-    }
-}
-
-impl<A: Clone + Debug, B: Clone + Debug> DerefMut for Dual<A, B> {
-    fn deref_mut(&mut self) -> &mut (A, B) {
-        &mut self.item
-    }
-}
-
-impl<A: Clone + Debug, B: Clone + Debug> Container<(A, B)> for Dual<A, B> {
-    fn into_inner(inner: Self) -> (A, B) {
-        inner.item
-    }
-
-    fn swap(left: &mut Self, right: &mut Self) {
-        mem::swap(left, right)
-    }
-}
-*/
 #[cfg(test)]
 mod test {
     use crate::Vector;

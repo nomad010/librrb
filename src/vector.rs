@@ -249,11 +249,9 @@
 //! [Vector::singleton]: ./struct.InternalVector.html#method.singleton
 
 use crate::focus::{Focus, FocusMut};
-use crate::node_impls::basic::{BorrowedInternal, Internal, Leaf};
 use crate::node_traits::{BorrowedInternalTrait, Entry, InternalTrait, LeafTrait, NodeRc};
 use crate::sort::{do_dual_sort, do_single_sort};
 use crate::{Side, RRB_WIDTH};
-use archery::{ArcK, RcK};
 use rand_core::SeedableRng;
 use std::borrow::Borrow;
 use std::cmp;
@@ -280,10 +278,10 @@ use std::rc::Rc;
 /// ```
 #[macro_export]
 macro_rules! vector {
-    () => { $crate::vector::Vector::new() };
+    () => { $crate::Vector::new() };
 
     ( $($x:expr),* ) => {{
-        let mut l = $crate::vector::Vector::new();
+        let mut l = $crate::Vector::new();
         $(
             l.push_back($x);
         )*
@@ -291,7 +289,7 @@ macro_rules! vector {
     }};
 
     ( $($x:expr ,)* ) => {{
-        let mut l = $crate::vector::Vector::new();
+        let mut l = $crate::Vector::new();
         $(
             l.push_back($x);
         )*
@@ -315,10 +313,10 @@ macro_rules! vector {
 /// ```
 #[macro_export]
 macro_rules! vector_ts {
-    () => { $crate::vector::ThreadSafeVector::new() };
+    () => { $crate::ThreadSafeVector::new() };
 
     ( $($x:expr),* ) => {{
-        let mut l = $crate::vector::ThreadSafeVector::new();
+        let mut l = $crate::ThreadSafeVector::new();
         $(
             l.push_back($x);
         )*
@@ -326,7 +324,7 @@ macro_rules! vector_ts {
     }};
 
     ( $($x:expr ,)* ) => {{
-        let mut l = $crate::vector::ThreadSafeVector::new();
+        let mut l = $crate::ThreadSafeVector::new();
         $(
             l.push_back($x);
         )*
@@ -2601,13 +2599,6 @@ where
     }
 }
 
-/// derp
-pub type Vector<A> =
-    InternalVector<Internal<A, RcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, RcK, Leaf<A>>>;
-/// derp
-pub type ThreadSafeVector<A> =
-    InternalVector<Internal<A, ArcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, ArcK, Leaf<A>>>;
-
 /// An iterator for a Vector.
 #[derive(Clone, Debug)]
 pub struct Iter<'a, Internal, Leaf, BorrowedInternal>
@@ -2805,7 +2796,7 @@ where
 #[allow(clippy::cognitive_complexity)]
 #[cfg(test)]
 mod test {
-    use super::*;
+    use crate::*;
     use proptest::prelude::*;
     use proptest::proptest;
     use proptest_derive::Arbitrary;
@@ -2813,7 +2804,7 @@ mod test {
     const MAX_EXTEND_SIZE: usize = 1000;
 
     #[derive(Arbitrary)]
-    enum Action<A: Clone + Debug + Arbitrary + 'static> {
+    enum Action<A: Clone + std::fmt::Debug + Arbitrary + 'static> {
         PushFront(A),
         PushBack(A),
         #[proptest(
@@ -2836,7 +2827,7 @@ mod test {
         ConcatBack(Vec<A>),
     }
 
-    impl<A: Clone + Debug + Arbitrary + 'static> std::fmt::Debug for Action<A> {
+    impl<A: Clone + std::fmt::Debug + Arbitrary + 'static> std::fmt::Debug for Action<A> {
         fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
             match self {
                 Action::PushFront(item) => {
@@ -2887,11 +2878,11 @@ mod test {
     }
 
     #[derive(Arbitrary)]
-    struct ActionList<A: Clone + Debug + Arbitrary + 'static> {
+    struct ActionList<A: Clone + std::fmt::Debug + Arbitrary + 'static> {
         actions: Vec<Action<A>>,
     }
 
-    impl<A: Clone + Debug + Arbitrary + 'static> std::fmt::Debug for ActionList<A> {
+    impl<A: Clone + std::fmt::Debug + Arbitrary + 'static> std::fmt::Debug for ActionList<A> {
         fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
             fmt.write_str("let mut vector = Vector::new();\n")?;
             for action in &self.actions {
