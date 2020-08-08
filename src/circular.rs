@@ -77,9 +77,9 @@ impl<'a, A: Debug> BorrowBufferMut<A> {
         }
     }
 
-    pub fn front_mut(&mut self) -> Option<&mut A> {
-        self.get_mut(0)
-    }
+    // pub fn front_mut(&mut self) -> Option<&mut A> {
+    //     self.get_mut(0)
+    // }
 
     pub fn split_at(&mut self, index: usize) -> Self {
         let first_end = self.range.start + index;
@@ -287,16 +287,16 @@ impl<A: Debug> CircularBuffer<A> {
         }
     }
 
-    /// Gets a reference to the front of the buffer.
-    ///
-    /// Returns None if the buffer is empty.
-    pub fn front(&self) -> Option<&A> {
-        if !self.is_empty() {
-            self.get(0)
-        } else {
-            None
-        }
-    }
+    // /// Gets a reference to the front of the buffer.
+    // ///
+    // /// Returns None if the buffer is empty.
+    // pub fn front(&self) -> Option<&A> {
+    //     if !self.is_empty() {
+    //         self.get(0)
+    //     } else {
+    //         None
+    //     }
+    // }
 
     /// Gets a reference to the end of the buffer.
     ///
@@ -309,39 +309,41 @@ impl<A: Debug> CircularBuffer<A> {
         }
     }
 
-    /// Gets a mutable reference to the front of the buffer.
-    ///
-    /// Returns None if the buffer is empty.
-    pub fn front_mut(&mut self) -> Option<&mut A> {
-        if !self.is_empty() {
-            self.get_mut(0)
-        } else {
-            None
-        }
-    }
+    // /// Gets a mutable reference to the front of the buffer.
+    // ///
+    // /// Returns None if the buffer is empty.
+    // pub fn front_mut(&mut self) -> Option<&mut A> {
+    //     if !self.is_empty() {
+    //         self.get_mut(0)
+    //     } else {
+    //         None
+    //     }
+    // }
 
-    /// Gets a mutable reference to the end of the buffer.
-    ///
-    /// Returns None if the buffer is empty.
-    pub fn back_mut(&mut self) -> Option<&mut A> {
-        if !self.is_empty() {
-            self.get_mut(self.len() - 1)
-        } else {
-            None
-        }
-    }
+    // /// Gets a mutable reference to the end of the buffer.
+    // ///
+    // /// Returns None if the buffer is empty.
+    // pub fn back_mut(&mut self) -> Option<&mut A> {
+    //     if !self.is_empty() {
+    //         self.get_mut(self.len() - 1)
+    //     } else {
+    //         None
+    //     }
+    // }
 
+    #[cfg(test)]
     pub fn end(&self, side: Side) -> Option<&A> {
         match side {
-            Side::Front => self.front(),
-            Side::Back => self.back(),
+            Side::Front => self.get(0),
+            Side::Back => self.get(self.len().saturating_sub(1)),
         }
     }
 
+    #[cfg(test)]
     pub fn end_mut(&mut self, side: Side) -> Option<&mut A> {
         match side {
-            Side::Front => self.front_mut(),
-            Side::Back => self.back_mut(),
+            Side::Front => self.get_mut(0),
+            Side::Back => self.get_mut(self.len().saturating_sub(1)),
         }
     }
 
@@ -730,13 +732,13 @@ mod test {
         assert!(!empty.is_full() || RRB_WIDTH == 0);
 
         // Back
-        assert_eq!(empty.back(), None);
+        assert_eq!(empty.end(Side::Back), None);
         assert_eq!(empty.try_pop_back(), None);
-        assert_eq!(empty.back_mut(), None);
+        assert_eq!(empty.end_mut(Side::Back), None);
 
         // Front
-        assert_eq!(empty.front(), None);
-        assert_eq!(empty.front_mut(), None);
+        assert_eq!(empty.end(Side::Front), None);
+        assert_eq!(empty.end_mut(Side::Front), None);
         assert_eq!(empty.try_pop_front(), None);
 
         // Iter
@@ -758,17 +760,17 @@ mod test {
         assert!(!single.is_full() || RRB_WIDTH == 1);
 
         // Back
-        assert_eq!(single.back(), Some(&item));
-        assert_eq!(single.back_mut(), Some(&mut item));
+        assert_eq!(single.end(Side::Back), Some(&item));
+        assert_eq!(single.end_mut(Side::Back), Some(&mut item));
         let mut back = single.clone();
         assert_eq!(back.try_pop_back(), Some(item));
         assert_eq!(back.try_pop_back(), None);
-        assert_eq!(back.back(), None);
-        assert_eq!(back.back_mut(), None);
+        assert_eq!(back.end(Side::Back), None);
+        assert_eq!(back.end_mut(Side::Back), None);
 
         // Front
-        assert_eq!(single.front(), Some(&item));
-        assert_eq!(single.front_mut(), Some(&mut item));
+        assert_eq!(single.end(Side::Front), Some(&item));
+        assert_eq!(single.end_mut(Side::Front), Some(&mut item));
         let mut front = single.clone();
         assert_eq!(front.try_pop_front(), Some(item));
         assert_eq!(front.try_pop_front(), None);
@@ -799,8 +801,8 @@ mod test {
         assert!(!buffer.is_full() || RRB_WIDTH == 10);
 
         // Back
-        assert_eq!(buffer.back(), Some(&0));
-        assert_eq!(buffer.back_mut(), Some(&mut 0));
+        assert_eq!(buffer.end(Side::Back), Some(&0));
+        assert_eq!(buffer.end_mut(Side::Back), Some(&mut 0));
         let mut back = buffer.clone();
         assert_eq!(back.try_pop_back(), Some(0));
         assert_eq!(back.try_pop_back(), Some(1));
@@ -813,12 +815,12 @@ mod test {
         assert_eq!(back.try_pop_back(), Some(8));
         assert_eq!(back.try_pop_back(), Some(9));
         assert_eq!(back.try_pop_back(), None);
-        assert_eq!(back.back(), None);
-        assert_eq!(back.back_mut(), None);
+        assert_eq!(back.end(Side::Back), None);
+        assert_eq!(back.end_mut(Side::Back), None);
 
         // Front
-        assert_eq!(buffer.front(), Some(&9));
-        assert_eq!(buffer.front_mut(), Some(&mut 9));
+        assert_eq!(buffer.end(Side::Front), Some(&9));
+        assert_eq!(buffer.end_mut(Side::Front), Some(&mut 9));
         let mut front = buffer.clone();
         assert_eq!(front.try_pop_front(), Some(9));
         assert_eq!(front.try_pop_front(), Some(8));
@@ -837,8 +839,8 @@ mod test {
     fn drop() {
         let mut s = "derp".to_owned();
         let mut buffer = CircularBuffer::with_item(&mut s);
-        buffer.front_mut().unwrap().push('l');
-        assert_eq!(buffer.front().unwrap(), &"derpl");
+        buffer.end_mut(Side::Front).unwrap().push('l');
+        assert_eq!(buffer.end(Side::Front).unwrap(), &"derpl");
     }
 
     #[test]
@@ -846,7 +848,7 @@ mod test {
         let mut s = "derp".to_owned();
         {
             let mut buffer = CircularBuffer::with_item(&mut s);
-            buffer.front_mut().unwrap().push('l');
+            buffer.end_mut(Side::Front).unwrap().push('l');
         }
         assert_eq!(s, "derpl");
     }
@@ -856,7 +858,7 @@ mod test {
     fn drop_generics_dangle() {
         let mut s = "derp".to_owned();
         let mut buffer = CircularBuffer::with_item(&mut s);
-        buffer.front_mut().unwrap().push('l');
+        buffer.end_mut(Side::Front).unwrap().push('l');
         assert_eq!(s, "derpl");
     }
 

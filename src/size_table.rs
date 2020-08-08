@@ -9,9 +9,9 @@ use std::ops::Range;
 /// A naive implementation of an size table for nodes in the RRB tree. This implementation keeps
 /// track of the size of each of child as well as the level of the node in the tree.
 #[derive(Clone, Debug)]
-pub(crate) struct SizeTable {
-    pub(crate) level: usize,
-    pub(crate) buffer: CircularBuffer<usize>,
+pub struct SizeTable {
+    level: usize,
+    buffer: CircularBuffer<usize>,
 }
 
 impl SizeTable {
@@ -76,6 +76,7 @@ impl SizeTable {
     }
 
     /// Adds a number of elements to the child at the given index.
+    #[cfg(test)]
     pub fn increment_child_size(&mut self, idx: usize, increment: usize) {
         for item in self.buffer.iter_mut().skip(idx) {
             *item += increment;
@@ -83,6 +84,7 @@ impl SizeTable {
     }
 
     /// Removes a number of elements to the child at the given index.
+    #[cfg(test)]
     pub fn decrement_child_size(&mut self, idx: usize, decrement: usize) {
         for item in self.buffer.iter_mut().skip(idx) {
             *item -= decrement;
@@ -90,8 +92,9 @@ impl SizeTable {
     }
 
     /// Adds a number of elements to the child at a given side of the node.
+    #[cfg(test)]
     pub fn increment_side_size(&mut self, side: Side, increment: usize) {
-        if self.is_empty() {
+        if self.len() == 0 {
             self.push_child(side, increment);
         } else {
             let idx = match side {
@@ -103,6 +106,7 @@ impl SizeTable {
     }
 
     /// Removes a number of elements to the child at a given side of the node.
+    #[cfg(test)]
     pub fn decrement_side_size(&mut self, side: Side, decrement: usize) {
         let idx = match side {
             Side::Back => self.len() - 1,
@@ -155,11 +159,6 @@ impl SizeTable {
     pub fn len(&self) -> usize {
         self.buffer.len()
     }
-
-    /// Returns true if this node is empty.
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
 }
 
 #[allow(clippy::cognitive_complexity)]
@@ -169,12 +168,11 @@ mod test {
     use crate::RRB_WIDTH;
 
     #[test]
-    pub fn empty() {
+    fn empty() {
         let level = 1;
         let empty = SizeTable::new(level);
 
         // Len
-        assert!(empty.is_empty());
         assert_eq!(empty.len(), 0);
 
         // Level
@@ -182,7 +180,7 @@ mod test {
     }
     #[allow(clippy::cognitive_complexity)]
     #[test]
-    pub fn linear() {
+    fn linear() {
         let level = 1;
         let length = RRB_WIDTH;
         assert!(length <= RRB_WIDTH);
@@ -192,7 +190,7 @@ mod test {
         }
 
         // Len
-        assert!(!linear.is_empty());
+        assert!(linear.len() != 0);
         assert_eq!(linear.len(), length);
 
         // Iterate over the table from ensuring that the cumulative values and individual values are correct
@@ -324,7 +322,7 @@ mod test {
         }
 
         // Len
-        assert!(!constant.is_empty());
+        assert!(constant.len() != 0);
         assert_eq!(constant.len(), length);
 
         // Iterate over the table from ensuring that the cumulative values and individual values are correct

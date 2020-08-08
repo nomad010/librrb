@@ -1274,7 +1274,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         debug_assert_eq!(reported_level, self.level());
         match &self.children {
             ChildList::Internals(internals) => {
-                debug_assert_eq!(internals.len(), self.sizes.buffer.len());
+                debug_assert_eq!(internals.len(), self.sizes.len());
                 let mut sum = 0;
                 for (idx, internal) in internals.iter().enumerate() {
                     let child_size = self.sizes.get_child_size(idx).unwrap();
@@ -1284,7 +1284,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
                 debug_assert_eq!(sum, reported_size);
             }
             ChildList::Leaves(leaves) => {
-                debug_assert_eq!(leaves.len(), self.sizes.buffer.len());
+                debug_assert_eq!(leaves.len(), self.sizes.len());
                 let mut sum = 0;
                 for (idx, leaf) in leaves.iter().enumerate() {
                     let child_size = self.sizes.get_child_size(idx).unwrap();
