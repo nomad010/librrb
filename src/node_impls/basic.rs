@@ -739,6 +739,9 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     // type Item = A;
     type Borrowed = BorrowedInternal<A, P, Leaf>;
 
+    type LeafEntry = SharedPointer<Leaf, P>;
+    type InternalEntry = SharedPointer<Self, P>;
+
     fn empty_internal(level: usize) -> Self {
         debug_assert_ne!(level, 0); // Should be a Leaf
         if level == 1 {

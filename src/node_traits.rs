@@ -3,6 +3,32 @@ use archery::{SharedPointer, SharedPointerKind};
 use std::fmt::Debug;
 use std::ops::Range;
 
+pub trait Entry: Clone {
+    type Item: Clone + std::fmt::Debug;
+
+    fn new(item: Self::Item) -> Self;
+
+    fn load(&self) -> &Self::Item;
+
+    fn load_mut(&mut self) -> &mut Self::Item;
+}
+
+impl<I: Clone + std::fmt::Debug, P: SharedPointerKind> Entry for SharedPointer<I, P> {
+    type Item = I;
+
+    fn new(item: Self::Item) -> Self {
+        SharedPointer::new(item)
+    }
+
+    fn load(&self) -> &Self::Item {
+        &self
+    }
+
+    fn load_mut(&mut self) -> &mut Self::Item {
+        SharedPointer::make_mut(self)
+    }
+}
+
 pub trait BorrowedLeafTrait {
     type Item;
 
@@ -180,6 +206,9 @@ pub trait BorrowedInternalTrait<P: SharedPointerKind, Leaf: LeafTrait> {
 
 pub trait InternalTrait<P: SharedPointerKind, Leaf: LeafTrait>: Clone + std::fmt::Debug {
     type Borrowed: BorrowedInternalTrait<P, Leaf> + std::fmt::Debug;
+
+    type LeafEntry: Entry<Item = Leaf>;
+    type InternalEntry: Entry<Item = Self>;
 
     /// Constructs a new empty internal node that is at the given level in the tree.
     fn empty_internal(level: usize) -> Self;

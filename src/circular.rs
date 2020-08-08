@@ -273,10 +273,7 @@ impl<A: Debug> CircularBuffer<A> {
     ///
     /// Panics if the buffer is empty.
     pub fn pop(&mut self, side: Side) -> A {
-        match side {
-            Side::Back => self.pop_back(),
-            Side::Front => self.pop_front(),
-        }
+        self.try_pop(side).expect("Circular buffer is empty")
     }
 
     /// Gets a reference to an element in the buffer.
