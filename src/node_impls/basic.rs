@@ -1026,12 +1026,6 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
             let mut result = self.new_empty();
             self.share_children_with(&mut result, Side::Front, idx);
             std::mem::swap(self, &mut result);
-            // let mut other = self.new_empty();
-            // for _ in 0..idx {
-            //     let node = self.pop_child(Side::Front);
-            //     other.push_child(Side::Back, node);
-            // }
-            // std::mem::replace(self, other)
             result
         } else {
             panic!("Trying to split at a position out of bounds of the tree");
@@ -1044,35 +1038,8 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         }
         let original_position = position;
         let original_len = self.len();
-
-        // println!(
-        //     "splitting from {} {} {}",
-        //     position,
-        //     self.level(),
-        //     self.len()
-        // );
-        // match self.children {
-        //     ChildList::Internals(ref children) => {
-        //         for node in children {
-        //             println!("child len {}", node.len());
-        //         }
-        //     }
-        //     ChildList::Leaves(ref children) => {
-        //         for node in children {
-        //             println!("child len {}", node.len());
-        //         }
-        //     }
-        // }
         let (child_position, position) = self.sizes.position_info_for(position).unwrap();
-        // println!("splitting to {} {}", child_position, position);
         let mut result = self.split_at_child(child_position);
-        // println!(
-        //     "self {} {} result {} {}",
-        //     self.len(),
-        //     self.slots(),
-        //     result.len(),
-        //     result.slots()
-        // );
         let mut next_child = result.pop_child(Side::Front);
 
         if position == 0 {
@@ -1081,173 +1048,13 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
             self.push_child(Side::Back, next_child);
         } else {
             let subresult = next_child.split_at_position(position);
-            // println!(
-            //     "WTF {} {} {} {} {}",
-            //     position,
-            //     result.len(),
-            //     self.len(),
-            //     next_child.len(),
-            //     subresult.len()
-            // );
             self.push_child(Side::Back, next_child);
             result.push_child(Side::Front, subresult);
         }
 
-        // println!(
-        //     "self {} {} result {} {}",
-        //     self.len(),
-        //     self.slots(),
-        //     result.len(),
-        //     result.slots()
-        // );
         self.debug_check_invariants(original_position, self.level());
         result.debug_check_invariants(original_len - original_position, result.level());
-        // match self.children {
-        //     ChildList::Internals(ref mut children) => {
-        //         let sub_result = NodeRc::Internal(SharedPointer::new(
-        //             SharedPointer::make_mut(children.back_mut().unwrap())
-        //                 .split_at_position(position),
-        //         ));
-        //         result.push_child(Side::Front, sub_result);
-        //     }
-        //     ChildList::Leaves(ref mut children) => {
-        //         let sub_result = NodeRc::Leaf(SharedPointer::new(
-        //             SharedPointer::make_mut(children.back_mut().unwrap()).split(position),
-        //         ));
-        //         result.push_child(Side::Front, sub_result);
-        //     }
-        // }
-        // println!("splitting equals {} {}", self.len(), result.len());
         result
-
-        // let mut result = self.split_at_child(child_position);
-        // let mut result_parent = &mut result;
-        // let mut source_node = self.pop_child(Side::Back);
-        // let mut source_parent = self;
-
-        // loop {
-        //     match source_node {
-        //         NodeRc::Internal(ref mut internal) => {
-        //             let (child_position, subposition) =
-        //                 internal.sizes.position_info_for(position).unwrap();
-        //             position = subposition;
-        //             let result_node =
-        //                 SharedPointer::make_mut(internal).split_at_child(child_position);
-        //             result_parent.push_child(
-        //                 Side::Front,
-        //                 NodeRc::Internal(SharedPointer::new(result_node)),
-        //             );
-        //             let new_source_node = SharedPointer::make_mut(internal).pop_child(Side::Back);
-        //             source_parent.push_child(Side::Back, source_node);
-        //             source_parent = SharedPointer::make_mut(
-        //                 source_parent.children.internals_mut().back_mut().unwrap(),
-        //             );
-        //             source_node = new_source_node;
-        //         }
-        //         NodeRc::Leaf(ref mut leaf) => {
-        //             let result_leaf = leaf.split(position);
-        //             result_parent
-        //                 .push_child(Side::Front, NodeRc::Leaf(SharedPointer::new(result_leaf)));
-        //             source_parent.push_child(Side::Back, source_node);
-        //             return result;
-        //         }
-        //     }
-        // }
-
-        // if let Some((node_position, mut node_index)) = self.find_node_info_for_index(index) {
-        //     // We need to make this node the first/last in the tree
-        //     // This means that this node will become the part of the spine for the given side
-        //     match node_position {
-        //         None => {
-        //             // The root is where the spine starts.
-        //             // This means all of the requested side's spine must be discarded
-        //             while let Some(node) = self.spine_mut(side).pop() {
-        //                 self.len -= node.len();
-        //             }
-        //         }
-        //         Some((spine_side, spine_position)) if side != spine_side => {
-        //             // The new end comes from the opposite spine
-        //             // This means the root AND the requested spine must be discarded
-        //             // The node we are pointing to becomes the new root and things above it in the
-        //             // opposite spine are discarded. Since higher points come first we can do this
-        //             // efficiently without reversing the spine
-        //             while spine_position + 1 != self.spine_ref(side.negate()).len() {
-        //                 self.len -= self.spine_mut(side.negate()).pop().unwrap().len();
-        //             }
-        //             self.len -= self.root.len();
-        //             let new_root = self.spine_mut(side.negate()).pop().unwrap();
-        //             self.root = new_root;
-        //             while let Some(node) = self.spine_mut(side).pop() {
-        //                 self.len -= node.len();
-        //             }
-        //         }
-        //         Some((spine_side, spine_position)) if side == spine_side => {
-        //             // The new end comes from the same spine.
-        //             // Only the elements below the node in the spine need to be discarded
-        //             // The root and left spine remain untouched
-        //             // To the spine discarding efficiently we reverse, pop and reverse again
-        //             self.spine_mut(side).reverse();
-        //             for _ in 0..spine_position {
-        //                 self.len -= self.spine_mut(side).pop().unwrap().len();
-        //             }
-        //             self.spine_mut(side).reverse();
-        //         }
-        //         _ => unreachable!(),
-        //     }
-        //     // We need to complete the spine here, we do this by cutting a side off of
-        //     // nodes going down the spine
-        //     // We need to do this in reverse order again to make this more efficient
-        //     let spine = match side {
-        //         Side::Front => &mut self.left_spine,
-        //         Side::Back => &mut self.right_spine,
-        //     };
-        //     spine.reverse();
-        //     while let NodeRc::Internal(ref mut internal) =
-        //         spine.last_mut().unwrap_or(&mut self.root)
-        //     {
-        //         assert!(node_index < internal.len());
-        //         let num_slots = internal.slots();
-        //         let (child_position, new_index) = internal.position_info_for(node_index).unwrap();
-        //         let internal_mut = SharedPointer::make_mut(internal);
-        //         // let children = &mut internal_mut.children;
-        //         let sizes = SharedPointer::make_mut(&mut internal_mut.sizes);
-        //         let range = match side {
-        //             Side::Back => child_position + 1..num_slots,
-        //             Side::Front => 0..child_position,
-        //         };
-        //         for _ in range {
-        //             match children {
-        //                 ChildList::Internals(children) => {
-        //                     children.pop(side);
-        //                 }
-        //                 ChildList::Leaves(children) => {
-        //                     children.pop(side);
-        //                 }
-        //             }
-        //             self.len -= sizes.pop_child(side);
-        //         }
-        //         let next_node = internal_mut.pop_child(side);
-        //         sizes.pop_child(side);
-        //         spine.push(next_node);
-        //         node_index = new_index;
-        //     }
-
-        //     // The only thing to be fixed here is the leaf spine node
-        //     let leaf =
-        //         SharedPointer::make_mut(spine.last_mut().unwrap_or(&mut self.root).leaf_mut());
-        //     let range = match side {
-        //         Side::Back => node_index + 1..leaf.len(),
-        //         Side::Front => 0..node_index,
-        //     };
-        //     assert!(node_index < leaf.len());
-        //     for _ in range {
-        //         leaf.pop(side);
-        //         self.len -= 1;
-        //     }
-
-        //     // Now we are done, we can reverse the spine here to get it back to normal
-        //     spine.reverse();
-        // }
     }
 
     fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, Leaf::Item>) -> bool

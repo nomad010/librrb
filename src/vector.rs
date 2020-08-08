@@ -1118,97 +1118,6 @@ where
             right.pack_children();
             right.share_children_with(left, Side::Front, right.slots());
 
-            // packer(
-            //     left_node,
-            //     self.right_spine
-            //         .last_mut()
-            //         .unwrap_or(&mut self.root)
-            //         .internal_mut(),
-            //     Side::Back,
-            // );
-            // packer(
-            //     right_node,
-            //     other
-            //         .left_spine
-            //         .last_mut()
-            //         .unwrap_or(&mut other.root)
-            //         .internal_mut(),
-            //     Side::Front,
-            // );
-
-            // if !left.ch
-            // while left.get
-            // loop {
-            //     // if left.
-            // }
-            // while !right.is_empty() && left.
-            /*
-
-            if !left.is_empty() {
-                left.pack_children();
-
-                let left_position = left.slots() - 1;
-                while left
-                    .get_child_at_slot(left_position)
-                    .unwrap()
-                    .0
-                    .free_slots()
-                    != 0
-                    && !right.is_empty()
-                {
-                    match left.children {
-                        ChildList::Internals(ref mut children) => {
-                            let destination_node =
-                                SharedPointer::make_mut(children.get_mut(left_position).unwrap());
-                            let source_node = SharedPointer::make_mut(
-                                right.children.internals_mut().front_mut().unwrap(),
-                            );
-                            let shared = source_node.share_children_with(
-                                destination_node,
-                                Side::Front,
-                                RRB_WIDTH,
-                            );
-                            SharedPointer::make_mut(&mut left.sizes)
-                                .increment_side_size(Side::Back, shared);
-                            SharedPointer::make_mut(&mut right.sizes)
-                                .decrement_side_size(Side::Front, shared);
-                            if source_node.is_empty() {
-                                right.children.internals_mut().pop_front();
-                                SharedPointer::make_mut(&mut right.sizes).pop_child(Side::Front);
-                            }
-                            assert_eq!(right.sizes.len(), right.children.internals_mut().len());
-                        }
-                        ChildList::Leaves(ref mut children) => {
-                            let destination_node =
-                                SharedPointer::make_mut(children.get_mut(left_position).unwrap());
-                            let source_node = SharedPointer::make_mut(
-                                right.children.leaves_mut().front_mut().unwrap(),
-                            );
-                            let shared = source_node.share_children_with(
-                                destination_node,
-                                Side::Front,
-                                RRB_WIDTH,
-                            );
-                            SharedPointer::make_mut(&mut left.sizes)
-                                .increment_side_size(Side::Back, shared);
-                            SharedPointer::make_mut(&mut right.sizes)
-                                .decrement_side_size(Side::Front, shared);
-                            if source_node.is_empty() {
-                                right.children.leaves_mut().pop_front();
-                                SharedPointer::make_mut(&mut right.sizes).pop_child(Side::Front);
-                            }
-                            assert_eq!(right.sizes.len(), right.children.leaves_mut().len());
-                        }
-                    }
-                }
-            }
-
-            if !right.is_empty() {
-                right.pack_children();
-                right.share_children_with(left, Side::Front, RRB_WIDTH);
-            }
-            */
-
             packer(
                 left_node,
                 self.right_spine
@@ -1312,17 +1221,6 @@ where
         // node, but we add back the spine by replacing it with path to this leaf
         // 3) If the leaf only has the root as an ancestor it proceeds as 2) with the path becoming
         // the entire right spine.
-        // if len == 0 {
-        //     self.left_spine.clear();
-        //     self.right_spine.clear();
-        //     self.root = NodeRc::Leaf(SharedPointer::new(Leaf::empty()));
-        //     self.len = 0;
-        //     return;
-        // }
-        // let index = len;
-        // unimplemented!();
-        // // self.make_index_side(index - 1, Side::Back);
-        // self.fixup_spine_tops();
         self.split_off(len);
     }
 
@@ -1347,20 +1245,7 @@ where
         // this leaf
         // 3) If the leaf only has the root as an ancestor it proceeds as 2) with the path becoming
         // the entire left spine.
-        // if start >= self.len {
-        //     self.left_spine.clear();
-        //     self.right_spine.clear();
-        //     self.root = NodeRc::Leaf(SharedPointer::new(Leaf::empty()));
-        //     self.len = 0;
-        //     return;
-        // }
-        // let index = start;
-        // unimplemented!();
-        // // self.make_index_side(index, Side::Front);
-        // self.fixup_spine_tops();
-        // println!("before {}", self.len());
         let result = self.split_off(start);
-        // println!("after {}", result.len());
         *self = result;
     }
 
@@ -1410,104 +1295,6 @@ where
             Some((None, index - forward_end))
         }
     }
-
-    /// Slices the tree so that the element is first at the requested side of the tree.
-    // fn make_index_side(&mut self, index: usize, side: Side) {
-    // if let Some((node_position, mut node_index)) = self.find_node_info_for_index(index) {
-    //     // We need to make this node the first/last in the tree
-    //     // This means that this node will become the part of the spine for the given side
-    //     match node_position {
-    //         None => {
-    //             // The root is where the spine starts.
-    //             // This means all of the requested side's spine must be discarded
-    //             while let Some(node) = self.spine_mut(side).pop() {
-    //                 self.len -= node.len();
-    //             }
-    //         }
-    //         Some((spine_side, spine_position)) if side != spine_side => {
-    //             // The new end comes from the opposite spine
-    //             // This means the root AND the requested spine must be discarded
-    //             // The node we are pointing to becomes the new root and things above it in the
-    //             // opposite spine are discarded. Since higher points come first we can do this
-    //             // efficiently without reversing the spine
-    //             while spine_position + 1 != self.spine_ref(side.negate()).len() {
-    //                 self.len -= self.spine_mut(side.negate()).pop().unwrap().len();
-    //             }
-    //             self.len -= self.root.len();
-    //             let new_root = self.spine_mut(side.negate()).pop().unwrap();
-    //             self.root = new_root;
-    //             while let Some(node) = self.spine_mut(side).pop() {
-    //                 self.len -= node.len();
-    //             }
-    //         }
-    //         Some((spine_side, spine_position)) if side == spine_side => {
-    //             // The new end comes from the same spine.
-    //             // Only the elements below the node in the spine need to be discarded
-    //             // The root and left spine remain untouched
-    //             // To the spine discarding efficiently we reverse, pop and reverse again
-    //             self.spine_mut(side).reverse();
-    //             for _ in 0..spine_position {
-    //                 self.len -= self.spine_mut(side).pop().unwrap().len();
-    //             }
-    //             self.spine_mut(side).reverse();
-    //         }
-    //         _ => unreachable!(),
-    //     }
-    //     // We need to complete the spine here, we do this by cutting a side off of
-    //     // nodes going down the spine
-    //     // We need to do this in reverse order again to make this more efficient
-    //     let spine = match side {
-    //         Side::Front => &mut self.left_spine,
-    //         Side::Back => &mut self.right_spine,
-    //     };
-    //     spine.reverse();
-    //     while let NodeRc::Internal(ref mut internal) =
-    //         spine.last_mut().unwrap_or(&mut self.root)
-    //     {
-    //         assert!(node_index < internal.len());
-    //         let num_slots = internal.slots();
-    //         let (child_position, new_index) = internal.position_info_for(node_index).unwrap();
-    //         let internal_mut = SharedPointer::make_mut(internal);
-    //         // let children = &mut internal_mut.children;
-    //         let sizes = SharedPointer::make_mut(&mut internal_mut.sizes);
-    //         let range = match side {
-    //             Side::Back => child_position + 1..num_slots,
-    //             Side::Front => 0..child_position,
-    //         };
-    //         for _ in range {
-    //             match children {
-    //                 ChildList::Internals(children) => {
-    //                     children.pop(side);
-    //                 }
-    //                 ChildList::Leaves(children) => {
-    //                     children.pop(side);
-    //                 }
-    //             }
-    //             self.len -= sizes.pop_child(side);
-    //         }
-    //         let next_node = internal_mut.pop_child(side);
-    //         sizes.pop_child(side);
-    //         spine.push(next_node);
-    //         node_index = new_index;
-    //     }
-
-    //     // The only thing to be fixed here is the leaf spine node
-    //     let leaf =
-    //         SharedPointer::make_mut(spine.last_mut().unwrap_or(&mut self.root).leaf_mut());
-    //     let range = match side {
-    //         Side::Back => node_index + 1..leaf.len(),
-    //         Side::Front => 0..node_index,
-    //     };
-    //     assert!(node_index < leaf.len());
-    //     for _ in range {
-    //         leaf.pop(side);
-    //         self.len -= 1;
-    //     }
-
-    //     // Now we are done, we can reverse the spine here to get it back to normal
-    //     spine.reverse();
-    // }
-    // }
 
     /// Splits the vector at the given index into two vectors. `self` is replaced with every element
     /// before the given index and a new vector containing everything after and including the index.

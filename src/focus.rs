@@ -397,28 +397,7 @@ where
     }
 }
 
-// derp
-// #[derive(Debug)]
-// pub struct PartialFocusMut<A, P, Internal, Leaf>
-// where
-//     A: Clone + Debug,
-//     P: SharedPointerKind,
-//     Internal: InternalTrait<P, Leaf, Item = A>,
-//     Leaf: LeafTrait<Item = A>,
-// {
-//     pub(crate) node: BorrowedNode<A, P, Internal, Leaf>,
-
-//     root: Option<(usize, Range<usize>)>,
-//     // The listing of internal nodes below the borrowed root node along with their associated ranges
-//     path: Vec<(*mut Internal, Range<usize>)>,
-//     // The leaf of the focus part, might not exist if the borrowed root is a leaf node
-//     leaf: Option<*mut Leaf>,
-//     // The range that is covered by the lowest part of the focus
-//     leaf_range: Range<usize>,
-// }
-
 /// A focus of the elements of a vector. The focus allows mutation of the elements in the vector.
-// #[derive(Debug)]
 pub struct FocusMut<'a, Internal, Leaf, BorrowedInternal>
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
@@ -580,19 +559,6 @@ where
                     );
                     subindex = new_subindex;
                     let child = new_internal.pop_child(Side::Front).unwrap();
-                    // let (child_idx, new_subindex) = internal.position_info_for(subindex).unwrap();
-                    // subindex = new_subindex;
-                    // let mut new_internal = internal.split_at_child(child_idx);
-                    // Know how to do this, we borrow the child node.
-                    // let child = match new_internal.children {
-                    //     BorrowedChildList::Internals(ref mut children) => BorrowedNode::Internal(
-                    //         SharedPointer::make_mut(children.front_mut().unwrap()).borrow_node(),
-                    //     ),
-                    //     BorrowedChildList::Leaves(ref mut children) => BorrowedNode::Leaf(
-                    //         SharedPointer::make_mut(children.front_mut().unwrap()).borrow_node(),
-                    //     ),
-                    // };
-                    // new_internal.children.range_mut().start += 1;
                     if !internal.is_empty() {
                         self.nodes.push(BorrowedNode::Internal(internal));
                     }
@@ -832,28 +798,6 @@ where
                                 return;
                             }
                         }
-                        // internal.
-                        // Root has children
-                        // let (child_idx, new_idx) =
-                        //     internal.position_info_for(idx - range.start).unwrap();
-                        // let range_start = idx - new_idx;
-                        // match internal.children {
-                        //     BorrowedChildList::Internals(ref mut children) => {
-                        //         let child =
-                        //             SharedPointer::make_mut(children.get_mut(child_idx).unwrap());
-                        //         self.path
-                        //             .push((child, range_start..range_start + child.len()));
-                        //     }
-                        //     BorrowedChildList::Leaves(ref mut children) => {
-                        //         let leaf =
-                        //             SharedPointer::make_mut(children.get_mut(child_idx).unwrap());
-                        //         let leaf_len = leaf.len();
-                        //         let leaf: *mut Leaf<A> = leaf;
-                        //         self.leaf = Some(leaf);
-                        //         self.leaf_range = range_start..range_start + leaf_len;
-                        //         return;
-                        //     }
-                        // }
                     }
                     BorrowedNode::Leaf(_) => {
                         // Root is a leaf so the only thing we need to do here is just set the leaf
@@ -893,24 +837,6 @@ where
                     break;
                 }
             }
-            // match parent.children {
-            //     ChildList::Internals(ref mut children) => {
-            //         let new_root = SharedPointer::make_mut(children.get_mut(child_idx).unwrap());
-            //         skipped_items.start += this_skipped_items;
-            //         skipped_items.end = skipped_items.start + new_root.len();
-            //         self.path.push((new_root, skipped_items.clone()));
-            //     }
-            //     ChildList::Leaves(ref mut children) => {
-            //         let leaf = SharedPointer::make_mut(children.get_mut(child_idx).unwrap());
-            //         let leaf_len = leaf.len();
-            //         let leaf: *mut Leaf = leaf;
-            //         skipped_items.start += this_skipped_items;
-            //         skipped_items.end = skipped_items.start + leaf_len;
-            //         self.leaf = Some(leaf);
-            //         self.leaf_range = skipped_items;
-            //         break;
-            //     }
-            // }
         }
     }
 
