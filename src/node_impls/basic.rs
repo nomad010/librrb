@@ -5,19 +5,43 @@ use crate::{Side, RRB_WIDTH};
 use archery::{SharedPointer, SharedPointerKind};
 use std::ops::Range;
 
-impl<I: Clone + std::fmt::Debug, P: SharedPointerKind> Entry for SharedPointer<I, P> {
+#[derive(Debug)]
+pub struct SharedPointerEntry<
+    I: Clone + std::fmt::Debug,
+    P: SharedPointerKind,
+    C: Clone + std::fmt::Debug + Default,
+>(SharedPointer<I, P>, std::marker::PhantomData<C>);
+
+impl<I, P, C> Clone for SharedPointerEntry<I, P, C>
+where
+    I: Clone + std::fmt::Debug,
+    P: SharedPointerKind,
+    C: Clone + std::fmt::Debug + Default,
+{
+    fn clone(&self) -> Self {
+        SharedPointerEntry(self.0.clone(), std::marker::PhantomData)
+    }
+}
+
+impl<I, P, C> Entry for SharedPointerEntry<I, P, C>
+where
+    I: Clone + std::fmt::Debug,
+    P: SharedPointerKind,
+    C: Clone + std::fmt::Debug + Default,
+{
     type Item = I;
+    type Context = C;
 
     fn new(item: Self::Item) -> Self {
-        SharedPointer::new(item)
+        SharedPointerEntry(SharedPointer::new(item), std::marker::PhantomData)
     }
 
-    fn load(&self) -> &Self::Item {
-        &self
+    fn load(&self, _context: &Self::Context) -> &Self::Item {
+        &self.0
     }
 
-    fn load_mut(&mut self) -> &mut Self::Item {
-        SharedPointer::make_mut(self)
+    fn load_mut(&mut self, _context: &Self::Context) -> &mut Self::Item {
+        SharedPointer::make_mut(&mut self.0)
     }
 }
 
@@ -28,6 +52,7 @@ pub struct BorrowedLeaf<A: Clone + std::fmt::Debug> {
 
 impl<A: Clone + std::fmt::Debug> BorrowedLeafTrait for BorrowedLeaf<A> {
     type Item = A;
+    type Context = ();
 
     fn split_at(&mut self, idx: usize) -> Self {
         BorrowedLeaf {
@@ -59,6 +84,7 @@ pub struct Leaf<A: Clone + std::fmt::Debug> {
 
 impl<A: Clone + std::fmt::Debug> LeafTrait for Leaf<A> {
     type Item = A;
+    type Context = ();
     type Borrowed = BorrowedLeaf<A>;
 
     fn empty() -> Self {
@@ -67,7 +93,7 @@ impl<A: Clone + std::fmt::Debug> LeafTrait for Leaf<A> {
         }
     }
 
-    fn with_item(item: Self::Item) -> Self {
+    fn with_item(item: Self::Item, _context: &Self::Context) -> Self {
         Leaf {
             buffer: CircularBuffer::with_item(item),
         }
@@ -85,24 +111,24 @@ impl<A: Clone + std::fmt::Debug> LeafTrait for Leaf<A> {
         self.buffer.get(position)
     }
 
-    fn get_mut(&mut self, position: usize) -> Option<&mut Self::Item> {
+    fn get_mut(&mut self, position: usize, _context: &Self::Context) -> Option<&mut Self::Item> {
         self.buffer.get_mut(position)
     }
 
-    fn push(&mut self, side: Side, item: Self::Item) {
+    fn push(&mut self, side: Side, item: Self::Item, _context: &Self::Context) {
         self.buffer.push(side, item)
     }
 
-    fn pop(&mut self, side: Side) -> Self::Item {
+    fn pop(&mut self, side: Side, _context: &Self::Context) -> Self::Item {
         self.buffer.pop(side)
     }
 
-    fn split(&mut self, idx: usize) -> Self {
+    fn split(&mut self, idx: usize, context: &Self::Context) -> Self {
         if idx <= self.len() {
             let mut other = Self::empty();
             for _ in 0..idx {
-                let node = self.pop(Side::Front);
-                other.push(Side::Back, node);
+                let node = self.pop(Side::Front, context);
+                other.push(Side::Back, node, context);
             }
             std::mem::replace(self, other)
         } else {
@@ -115,6 +141,7 @@ impl<A: Clone + std::fmt::Debug> LeafTrait for Leaf<A> {
         destination: &mut Self,
         share_side: Side,
         len: usize,
+        _context: &Self::Context,
     ) -> usize {
         self.buffer
             .decant_into(&mut destination.buffer, share_side, len)
@@ -126,7 +153,11 @@ impl<A: Clone + std::fmt::Debug> LeafTrait for Leaf<A> {
         }
     }
 
-    fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, Self::Item>) -> bool
+    fn equal_iter_debug<'a>(
+        &self,
+        iter: &mut std::slice::Iter<'a, Self::Item>,
+        _context: &Self::Context,
+    ) -> bool
     where
         Self::Item: PartialEq,
     {
@@ -361,13 +392,13 @@ impl<'a, A: Clone + std::fmt::Debug, P: SharedPointerKind> BorrowedChildList<A, 
 pub struct BorrowedInternal<
     A: Clone + std::fmt::Debug,
     P: SharedPointerKind,
-    Leaf: LeafTrait<Item = A>,
+    Leaf: LeafTrait<Item = A, Context = ()>,
 > {
     pub(crate) sizes: SharedPointer<SizeTable, P>,
     pub(crate) children: BorrowedChildList<A, P, Leaf>,
 }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>>
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
     BorrowedInternal<A, P, Leaf>
 {
     fn left_size(&self) -> usize {
@@ -396,15 +427,15 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     }
 }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>> std::fmt::Debug
-    for BorrowedInternal<A, P, Leaf>
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
+    std::fmt::Debug for BorrowedInternal<A, P, Leaf>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BorrowedInternal").finish()
     }
 }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>>
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
     BorrowedInternalTrait<Leaf> for BorrowedInternal<A, P, Leaf>
 {
     type InternalChild = Internal<A, P, Leaf>;
@@ -463,8 +494,12 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         self.get_child_mut_at_slot(index)
     }
 
-    fn pop_child(&mut self, side: Side) -> Option<BorrowedNode<Self::InternalChild, Leaf>> {
-        let child = self.get_child_mut_at_side(side)?.0.borrow_node();
+    fn pop_child(
+        &mut self,
+        side: Side,
+        context: &(),
+    ) -> Option<BorrowedNode<Self::InternalChild, Leaf>> {
+        let child = self.get_child_mut_at_side(side)?.0.borrow_node(context);
         if side == Side::Front {
             self.children.range_mut().start += 1;
         } else {
@@ -507,21 +542,25 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
 pub(crate) enum BorrowedChildList<
     A: Clone + std::fmt::Debug,
     P: SharedPointerKind,
-    Leaf: LeafTrait<Item = A>,
+    Leaf: LeafTrait<Item = A, Context = ()>,
 > {
-    Internals(BorrowBufferMut<SharedPointer<Internal<A, P, Leaf>, P>>),
-    Leaves(BorrowBufferMut<SharedPointer<Leaf, P>>),
+    Internals(BorrowBufferMut<SharedPointerEntry<Internal<A, P, Leaf>, P, ()>>),
+    Leaves(BorrowBufferMut<SharedPointerEntry<Leaf, P, ()>>),
 }
 
-impl<'a, A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>>
-    BorrowedChildList<A, P, Leaf>
+impl<
+        'a,
+        A: Clone + std::fmt::Debug,
+        P: SharedPointerKind,
+        Leaf: LeafTrait<Item = A, Context = ()>,
+    > BorrowedChildList<A, P, Leaf>
 {
     /// Consumes `self` and returns the list as a list of leaf nodes.
     ///
     /// # Panics
     ///
     /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves(self) -> BorrowBufferMut<SharedPointer<Leaf, P>> {
+    pub fn leaves(self) -> BorrowBufferMut<SharedPointerEntry<Leaf, P, ()>> {
         if let BorrowedChildList::Leaves(x) = self {
             x
         } else {
@@ -534,7 +573,7 @@ impl<'a, A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item 
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals(self) -> BorrowBufferMut<SharedPointer<Internal<A, P, Leaf>, P>> {
+    pub fn internals(self) -> BorrowBufferMut<SharedPointerEntry<Internal<A, P, Leaf>, P, ()>> {
         if let BorrowedChildList::Internals(x) = self {
             x
         } else {
@@ -600,14 +639,14 @@ impl<'a, A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item 
 pub(crate) enum ChildList<
     A: Clone + std::fmt::Debug,
     P: SharedPointerKind,
-    Leaf: LeafTrait<Item = A>,
+    Leaf: LeafTrait<Item = A, Context = ()>,
 > {
-    Leaves(CircularBuffer<SharedPointer<Leaf, P>>),
-    Internals(CircularBuffer<SharedPointer<Internal<A, P, Leaf>, P>>),
+    Leaves(CircularBuffer<SharedPointerEntry<Leaf, P, ()>>),
+    Internals(CircularBuffer<SharedPointerEntry<Internal<A, P, Leaf>, P, ()>>),
 }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>> Clone
-    for ChildList<A, P, Leaf>
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
+    Clone for ChildList<A, P, Leaf>
 {
     fn clone(&self) -> Self {
         match self {
@@ -617,7 +656,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     }
 }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>>
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
     ChildList<A, P, Leaf>
 {
     /// Constructs a new empty list of nodes.
@@ -633,7 +672,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     /// # Panics
     ///
     /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves_ref(&self) -> &CircularBuffer<SharedPointer<Leaf, P>> {
+    pub fn leaves_ref(&self) -> &CircularBuffer<SharedPointerEntry<Leaf, P, ()>> {
         if let ChildList::Leaves(x) = self {
             x
         } else {
@@ -646,7 +685,9 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals_ref(&self) -> &CircularBuffer<SharedPointer<Internal<A, P, Leaf>, P>> {
+    pub fn internals_ref(
+        &self,
+    ) -> &CircularBuffer<SharedPointerEntry<Internal<A, P, Leaf>, P, ()>> {
         if let ChildList::Internals(x) = self {
             x
         } else {
@@ -659,7 +700,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     /// # Panics
     ///
     /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves_mut(&mut self) -> &mut CircularBuffer<SharedPointer<Leaf, P>> {
+    pub fn leaves_mut(&mut self) -> &mut CircularBuffer<SharedPointerEntry<Leaf, P, ()>> {
         if let ChildList::Leaves(x) = self {
             x
         } else {
@@ -672,7 +713,9 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals_mut(&mut self) -> &mut CircularBuffer<SharedPointer<Internal<A, P, Leaf>, P>> {
+    pub fn internals_mut(
+        &mut self,
+    ) -> &mut CircularBuffer<SharedPointerEntry<Internal<A, P, Leaf>, P, ()>> {
         if let ChildList::Internals(x) = self {
             x
         } else {
@@ -694,19 +737,28 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
     /// Panics if `self` is not a list of internal nodes.
     pub fn get(&self, child_idx: usize, idx: usize) -> Option<&A> {
         match self {
-            ChildList::Leaves(children) => children.get(child_idx).unwrap().get(idx),
-            ChildList::Internals(children) => children.get(child_idx).unwrap().get(idx),
+            ChildList::Leaves(children) => children.get(child_idx).unwrap().load(&()).get(idx),
+            ChildList::Internals(children) => children.get(child_idx).unwrap().load(&()).get(idx),
         }
     }
 
-    pub fn get_mut(&mut self, child_idx: usize, idx: usize) -> Option<&mut A> {
+    pub fn get_mut(
+        &mut self,
+        child_idx: usize,
+        idx: usize,
+        context: &Leaf::Context,
+    ) -> Option<&mut A> {
         match self {
-            ChildList::Leaves(children) => {
-                SharedPointer::make_mut(children.get_mut(child_idx).unwrap()).get_mut(idx)
-            }
-            ChildList::Internals(children) => {
-                SharedPointer::make_mut(children.get_mut(child_idx).unwrap()).get_mut(idx)
-            }
+            ChildList::Leaves(children) => children
+                .get_mut(child_idx)
+                .unwrap()
+                .load_mut(&())
+                .get_mut(idx, context),
+            ChildList::Internals(children) => children
+                .get_mut(child_idx)
+                .unwrap()
+                .load_mut(&())
+                .get_mut(idx, context),
         }
     }
 
@@ -725,13 +777,17 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
 }
 
 #[derive(Debug)]
-pub struct Internal<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>> {
+pub struct Internal<
+    A: Clone + std::fmt::Debug,
+    P: SharedPointerKind,
+    Leaf: LeafTrait<Item = A, Context = ()>,
+> {
     sizes: SharedPointer<SizeTable, P>,
     children: ChildList<A, P, Leaf>,
 }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>> Clone
-    for Internal<A, P, Leaf>
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
+    Clone for Internal<A, P, Leaf>
 {
     fn clone(&self) -> Self {
         Internal {
@@ -749,14 +805,15 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
 //     }
 // }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>>
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
     InternalTrait<Leaf> for Internal<A, P, Leaf>
 {
     // type Item = A;
     type Borrowed = BorrowedInternal<A, P, Leaf>;
+    type Context = ();
 
-    type LeafEntry = SharedPointer<Leaf, P>;
-    type InternalEntry = SharedPointer<Self, P>;
+    type LeafEntry = SharedPointerEntry<Leaf, P, ()>;
+    type InternalEntry = SharedPointerEntry<Self, P, ()>;
 
     fn empty_internal(level: usize) -> Self {
         debug_assert_ne!(level, 0); // Should be a Leaf
@@ -785,6 +842,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         destination: &mut Self,
         share_side: Side,
         len: usize,
+        _context: &Self::Context,
     ) -> usize {
         debug_assert_eq!(self.level(), destination.level());
         let shared = match self.children {
@@ -810,7 +868,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         shared
     }
 
-    fn pack_children(&mut self) {
+    fn pack_children(&mut self, context: &Self::Context) {
         if self.is_empty() {
             return;
         }
@@ -830,27 +888,28 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
                         continue;
                     } else {
                         let (write, read) = children.pair_mut(write_position, read_position);
-                        SharedPointer::make_mut(read).share_children_with(
-                            SharedPointer::make_mut(write),
+                        read.load_mut(context).share_children_with(
+                            write.load_mut(context),
                             Side::Front,
                             RRB_WIDTH,
+                            context,
                         );
 
-                        if write.is_full() {
+                        if write.load_mut(context).is_full() {
                             write_position += 1;
                         }
-                        if read.is_empty() {
+                        if read.load_mut(context).is_empty() {
                             read_position += 1;
                         }
                     }
                 }
-                while children.back().unwrap().is_empty() {
+                while children.back().unwrap().load(context).is_empty() {
                     children.pop_back();
                 }
                 let sizes = SharedPointer::make_mut(&mut self.sizes);
                 *sizes = SizeTable::new(sizes.level());
                 for child in children {
-                    sizes.push_child(Side::Back, child.len());
+                    sizes.push_child(Side::Back, child.load(context).len());
                 }
             }
             ChildList::Leaves(ref mut children) => {
@@ -860,28 +919,29 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
                         continue;
                     } else {
                         let (write, read) = children.pair_mut(write_position, read_position);
-                        SharedPointer::make_mut(read).share_children_with(
-                            SharedPointer::make_mut(write),
+                        read.load_mut(context).share_children_with(
+                            write.load_mut(context),
                             Side::Front,
                             RRB_WIDTH,
+                            context,
                         );
 
-                        if write.is_full() {
+                        if write.load_mut(context).is_full() {
                             write_position += 1;
                         }
-                        if read.is_empty() {
+                        if read.load_mut(context).is_empty() {
                             read_position += 1;
                         }
                     }
                 }
 
-                while children.back().unwrap().is_empty() {
+                while children.back().unwrap().load(context).is_empty() {
                     children.pop_back();
                 }
                 let sizes = SharedPointer::make_mut(&mut self.sizes);
                 *sizes = SizeTable::new(sizes.level());
                 for child in children {
-                    sizes.push_child(Side::Back, child.len());
+                    sizes.push_child(Side::Back, child.load(context).len());
                 }
             }
         }
@@ -901,15 +961,15 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         }
     }
 
-    fn get_mut(&mut self, idx: usize) -> Option<&mut Leaf::Item> {
+    fn get_mut(&mut self, idx: usize, context: &Self::Context) -> Option<&mut Leaf::Item> {
         if let Some((array_idx, new_idx)) = self.sizes.position_info_for(idx) {
-            self.children.get_mut(array_idx, new_idx)
+            self.children.get_mut(array_idx, new_idx, context)
         } else {
             None
         }
     }
 
-    fn pop_child(&mut self, side: Side) -> NodeRc<Self, Leaf> {
+    fn pop_child(&mut self, side: Side, _context: &Self::Context) -> NodeRc<Self, Leaf> {
         SharedPointer::make_mut(&mut self.sizes).pop_child(side);
         match self.children {
             ChildList::Internals(ref mut children) => NodeRc::Internal(children.pop(side)),
@@ -917,34 +977,13 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         }
     }
 
-    fn push_child(&mut self, side: Side, node: NodeRc<Self, Leaf>) {
-        SharedPointer::make_mut(&mut self.sizes).push_child(side, node.len());
+    fn push_child(&mut self, side: Side, node: NodeRc<Self, Leaf>, context: &Self::Context) {
+        SharedPointer::make_mut(&mut self.sizes).push_child(side, node.len(context));
         match self.children {
             ChildList::Internals(ref mut children) => children.push(side, node.internal()),
             ChildList::Leaves(ref mut children) => children.push(side, node.leaf()),
         }
     }
-
-    // fn push_grandchild(&mut self, side: Side, node: NodeRc<Self::Item, P, Self, Leaf>) {
-    //     let len = node.len();
-    //     let node = self
-    //         .children
-    //         .internals_mut()
-    //         .end_mut(side)
-    //         .unwrap()
-    //         .push_child(side, node);
-    //     self.sizes.increment_side_size(side, len);
-    // }
-
-    // fn pop_grandchild(&mut self, side: Side) -> NodeRc<Self::Item, P, Self, Leaf> {
-    //     let node = NodeRc::Internal(self.children.internals_mut().pop(side));
-    //     if self.children.internals_ref().is_empty() {
-    //         self.sizes.pop_child(side);
-    //     } else {
-    //         self.sizes.decrement_side_size(side, node.len());
-    //     }
-    //     node
-    // }
 
     fn borrow_node(&mut self) -> Self::Borrowed {
         BorrowedInternal {
@@ -1021,10 +1060,10 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         }
     }
 
-    fn split_at_child(&mut self, idx: usize) -> Self {
+    fn split_at_child(&mut self, idx: usize, context: &Self::Context) -> Self {
         if idx <= self.slots() {
             let mut result = self.new_empty();
-            self.share_children_with(&mut result, Side::Front, idx);
+            self.share_children_with(&mut result, Side::Front, idx, context);
             std::mem::swap(self, &mut result);
             result
         } else {
@@ -1032,32 +1071,36 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         }
     }
 
-    fn split_at_position(&mut self, position: usize) -> Self {
+    fn split_at_position(&mut self, position: usize, context: &Self::Context) -> Self {
         if position > self.len() {
             panic!("Trying to split at a position out of bounds of the tree");
         }
         let original_position = position;
         let original_len = self.len();
         let (child_position, position) = self.sizes.position_info_for(position).unwrap();
-        let mut result = self.split_at_child(child_position);
-        let mut next_child = result.pop_child(Side::Front);
+        let mut result = self.split_at_child(child_position, context);
+        let mut next_child = result.pop_child(Side::Front, context);
 
         if position == 0 {
-            result.push_child(Side::Front, next_child);
-        } else if position == next_child.len() {
-            self.push_child(Side::Back, next_child);
+            result.push_child(Side::Front, next_child, context);
+        } else if position == next_child.len(context) {
+            self.push_child(Side::Back, next_child, context);
         } else {
-            let subresult = next_child.split_at_position(position);
-            self.push_child(Side::Back, next_child);
-            result.push_child(Side::Front, subresult);
+            let subresult = next_child.split_at_position(position, context);
+            self.push_child(Side::Back, next_child, context);
+            result.push_child(Side::Front, subresult, context);
         }
 
-        self.debug_check_invariants(original_position, self.level());
-        result.debug_check_invariants(original_len - original_position, result.level());
+        self.debug_check_invariants(original_position, self.level(), context);
+        result.debug_check_invariants(original_len - original_position, result.level(), context);
         result
     }
 
-    fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, Leaf::Item>) -> bool
+    fn equal_iter_debug<'a>(
+        &self,
+        iter: &mut std::slice::Iter<'a, Leaf::Item>,
+        context: &Self::Context,
+    ) -> bool
     where
         Leaf::Item: PartialEq,
     {
@@ -1065,19 +1108,24 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
         match &self.children {
             ChildList::Internals(internals) => {
                 for internal in internals {
-                    result &= internal.equal_iter_debug(iter);
+                    result &= internal.load(context).equal_iter_debug(iter, context);
                 }
             }
             ChildList::Leaves(leaves) => {
                 for leaf in leaves {
-                    result &= leaf.equal_iter_debug(iter);
+                    result &= leaf.load(context).equal_iter_debug(iter, context);
                 }
             }
         }
         result
     }
 
-    fn debug_check_invariants(&self, reported_size: usize, reported_level: usize) {
+    fn debug_check_invariants(
+        &self,
+        reported_size: usize,
+        reported_level: usize,
+        context: &Self::Context,
+    ) {
         debug_assert_eq!(reported_level, self.level());
         match &self.children {
             ChildList::Internals(internals) => {
@@ -1085,7 +1133,11 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
                 let mut sum = 0;
                 for (idx, internal) in internals.iter().enumerate() {
                     let child_size = self.sizes.get_child_size(idx).unwrap();
-                    internal.debug_check_invariants(child_size, reported_level - 1);
+                    internal.load(context).debug_check_invariants(
+                        child_size,
+                        reported_level - 1,
+                        context,
+                    );
                     sum += child_size;
                 }
                 debug_assert_eq!(sum, reported_size);
@@ -1095,7 +1147,11 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A>
                 let mut sum = 0;
                 for (idx, leaf) in leaves.iter().enumerate() {
                     let child_size = self.sizes.get_child_size(idx).unwrap();
-                    leaf.debug_check_invariants(child_size, reported_level - 1);
+                    leaf.load(context).debug_check_invariants(
+                        child_size,
+                        reported_level - 1,
+                        context,
+                    );
                     sum += child_size;
                 }
                 debug_assert_eq!(sum, reported_size);

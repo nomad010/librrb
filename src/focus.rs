@@ -21,7 +21,7 @@ use std::rc::Rc;
 struct PartialFocus<Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait,
+    Leaf: LeafTrait<Context = Internal::Context>,
 {
     path: Vec<(Internal::InternalEntry, Range<usize>)>,
     leaf: Internal::LeafEntry,
@@ -31,16 +31,17 @@ where
 impl<'a, Internal, Leaf> PartialFocus<Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait,
+    Leaf: LeafTrait<Context = Internal::Context>,
 {
     /// A helper method to compute the remainder of a path down a tree to a particular index.
     fn tree_path(
         nodes: &mut Vec<(Internal::InternalEntry, Range<usize>)>,
         mut idx: usize,
+        context: &Internal::Context,
     ) -> (Range<usize>, Internal::LeafEntry) {
         while let Some((previous_root, range)) = nodes.last() {
             let (next_node, next_range) = if let Some((subchild, subchild_range)) =
-                previous_root.load().get_child_ref_for_position(idx)
+                previous_root.load(context).get_child_ref_for_position(idx)
             {
                 let subrange_len = subchild_range.end - subchild_range.start;
                 let absolute_subrange_start = range.start + subchild_range.start;
@@ -70,11 +71,12 @@ where
     }
 
     /// Constructs the focus from a tree node. This will focus on the first element in the node.
-    fn from_tree(tree: &'a NodeRc<Internal, Leaf>) -> Self {
+    fn from_tree(tree: &'a NodeRc<Internal, Leaf>, context: &Internal::Context) -> Self {
         match tree {
             NodeRc::Internal(internal) => {
-                let mut path = vec![(internal.clone(), 0..tree.len())];
-                let (leaf_range, leaf) = PartialFocus::<Internal, Leaf>::tree_path(&mut path, 0);
+                let mut path = vec![(internal.clone(), 0..tree.len(context))];
+                let (leaf_range, leaf) =
+                    PartialFocus::<Internal, Leaf>::tree_path(&mut path, 0, context);
                 PartialFocus {
                     path,
                     leaf,
@@ -84,20 +86,20 @@ where
             NodeRc::Leaf(leaf) => PartialFocus {
                 path: Vec::new(),
                 leaf: leaf.clone(),
-                leaf_range: 0..leaf.load().len(),
+                leaf_range: 0..leaf.load(context).len(),
             },
         }
     }
 
     /// Moves the focus to a new index in the tree.
-    pub fn move_focus(&mut self, idx: usize) {
+    pub fn move_focus(&mut self, idx: usize, context: &Internal::Context) {
         if !self.leaf_range.contains(&idx) {
             while !self.path.last().unwrap().1.contains(&idx) {
                 self.path.pop();
             }
             let new_idx = idx - self.path.last().unwrap().1.start;
             let (leaf_range, leaf) =
-                PartialFocus::<Internal, Leaf>::tree_path(&mut self.path, new_idx);
+                PartialFocus::<Internal, Leaf>::tree_path(&mut self.path, new_idx, context);
             self.leaf_range = leaf_range;
             self.leaf = leaf;
         }
@@ -105,14 +107,14 @@ where
 
     /// Gets an element from the tree. If the element does not exist this will return `None`. This
     /// will move the focus along if necessary.
-    fn get(&mut self, idx: usize) -> Option<&Leaf::Item> {
+    fn get(&mut self, idx: usize, context: &Internal::Context) -> Option<&Leaf::Item> {
         if self.path.is_empty() {
-            self.leaf.load().get(idx)
-        } else if idx >= self.path[0].0.load().len() {
+            self.leaf.load(context).get(idx)
+        } else if idx >= self.path[0].0.load(context).len() {
             None
         } else {
-            self.move_focus(idx);
-            self.leaf.load().get(idx - self.leaf_range.start)
+            self.move_focus(idx, context);
+            self.leaf.load(context).get(idx - self.leaf_range.start)
         }
     }
 }
@@ -124,7 +126,7 @@ pub struct Focus<'a, Internal, Leaf, BorrowedInternal>
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait,
+    Leaf: LeafTrait<Context = Internal::Context>,
 {
     tree: &'a InternalVector<Internal, Leaf, BorrowedInternal>,
     spine_position: Option<(Side, usize)>,
@@ -137,7 +139,7 @@ impl<'a, Internal, Leaf, BorrowedInternal> Clone for Focus<'a, Internal, Leaf, B
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait,
+    Leaf: LeafTrait<Context = Internal::Context>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -154,7 +156,7 @@ impl<'a, Internal, Leaf, BorrowedInternal> Focus<'a, Internal, Leaf, BorrowedInt
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait,
+    Leaf: LeafTrait<Context = Internal::Context>,
 {
     /// Constructs a new focus for a Vector.
     ///
@@ -200,7 +202,7 @@ where
         let mut focus_node = &tree.root;
         for (node_position, node) in tree_iter {
             let range_start = range_end;
-            range_end = range_start + node.len();
+            range_end = range_start + node.len(&tree.context);
 
             if range.start < range_end && range.end > range_start {
                 focus_range = range_start..range_end;
@@ -211,7 +213,7 @@ where
         Focus {
             tree,
             spine_position,
-            spine_node_focus: PartialFocus::from_tree(focus_node),
+            spine_node_focus: PartialFocus::from_tree(focus_node, &tree.context),
             focus_range,
             range,
         }
@@ -231,13 +233,14 @@ where
             };
             let mut range_end = self.focus_range.start;
             for (position, node) in self.tree.spine_iter().rev().skip(skip_amount) {
-                let range_start = range_end - node.len();
+                let range_start = range_end - node.len(&self.tree.context);
                 let range = range_start..range_end;
                 if range.contains(&idx) {
                     self.spine_position = position;
                     self.focus_range = range;
-                    self.spine_node_focus = PartialFocus::from_tree(node);
-                    self.spine_node_focus.move_focus(idx - range_start);
+                    self.spine_node_focus = PartialFocus::from_tree(node, &self.tree.context);
+                    self.spine_node_focus
+                        .move_focus(idx - range_start, &self.tree.context);
                     break;
                 }
                 range_end = range_start;
@@ -252,13 +255,14 @@ where
             };
             let mut range_start = self.focus_range.end;
             for (position, node) in self.tree.spine_iter().skip(skip_amount) {
-                let range_end = range_start + node.len();
+                let range_end = range_start + node.len(&self.tree.context);
                 let range = range_start..range_end;
                 if range.contains(&idx) {
                     self.spine_position = position;
                     self.focus_range = range;
-                    self.spine_node_focus = PartialFocus::from_tree(node);
-                    self.spine_node_focus.move_focus(idx - range_start);
+                    self.spine_node_focus = PartialFocus::from_tree(node, &self.tree.context);
+                    self.spine_node_focus
+                        .move_focus(idx - range_start, &self.tree.context);
                     break;
                 }
                 range_start = range_end;
@@ -288,7 +292,8 @@ where
             if !self.focus_range.contains(&new_idx) {
                 self.refocus(new_idx);
             }
-            self.spine_node_focus.get(new_idx - self.focus_range.start)
+            self.spine_node_focus
+                .get(new_idx - self.focus_range.start, &self.tree.context)
         } else {
             None
         }
@@ -400,9 +405,9 @@ pub struct FocusMut<'a, Internal, Leaf, BorrowedInternal>
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait,
+    Leaf: LeafTrait<Context = Internal::Context>,
 {
-    origins: Vec<Rc<&'a mut InternalVector<Internal, Leaf, BorrowedInternal>>>,
+    origin: Rc<&'a mut InternalVector<Internal, Leaf, BorrowedInternal>>,
     pub(crate) nodes: Vec<BorrowedNode<Internal, Leaf>>,
     len: usize,
     // Focus part
@@ -420,11 +425,11 @@ impl<'a, Internal, Leaf, BorrowedInternal> FocusMut<'a, Internal, Leaf, Borrowed
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait,
+    Leaf: LeafTrait<Context = Internal::Context>,
 {
     fn empty(&mut self) -> Self {
         FocusMut {
-            origins: self.origins.clone(),
+            origin: self.origin.clone(),
             nodes: vec![],
             len: 0,
             root: None,
@@ -434,8 +439,8 @@ where
         }
     }
 
-    pub(crate) fn from_vectors(
-        origins: Vec<Rc<&'a mut InternalVector<Internal, Leaf, BorrowedInternal>>>,
+    pub(crate) fn from_vector(
+        origin: Rc<&'a mut InternalVector<Internal, Leaf, BorrowedInternal>>,
         nodes: Vec<BorrowedNode<Internal, Leaf>>,
     ) -> Self {
         let mut len = 0;
@@ -443,7 +448,7 @@ where
             len += node.len();
         }
         FocusMut {
-            origins,
+            origin,
             nodes,
             len,
             root: None,
@@ -548,7 +553,9 @@ where
                         new_internal.len()
                     );
                     subindex = new_subindex;
-                    let child = new_internal.pop_child(Side::Front).unwrap();
+                    let child = new_internal
+                        .pop_child(Side::Front, &self.origin.context)
+                        .unwrap();
                     if !internal.is_empty() {
                         self.nodes.push(BorrowedNode::Internal(internal));
                     }
@@ -576,7 +583,7 @@ where
         self.leaf = None;
         self.leaf_range = 0..0;
 
-        let result = FocusMut::from_vectors(self.origins.clone(), right_nodes);
+        let result = FocusMut::from_vector(self.origin.clone(), right_nodes);
         assert_eq!(self.len + result.len, original_len);
         debug_assert!(self.assert_invariants());
         debug_assert!(result.assert_invariants());
@@ -653,36 +660,36 @@ where
         self.len += other.len;
     }
 
-    /// Derp
-    pub fn append(&mut self, other: Self) {
-        // The focus part remains the same, but update other bits.
-        self.origins.extend(other.origins);
-        self.nodes.extend(other.nodes);
-        self.len += other.len;
-    }
+    // /// Derp
+    // pub fn append(&mut self, other: Self) {
+    //     // The focus part remains the same, but update other bits.
+    //     self.origins.extend(other.origins);
+    //     self.nodes.extend(other.nodes);
+    //     self.len += other.len;
+    // }
 
-    /// Derp
-    pub fn prepend(&mut self, mut other: Self) {
-        // The focus part must be updated to point to the new place before the other bits
-        if let Some((ref mut root_id, ref mut root_range)) = self.root {
-            *root_id += other.nodes.len();
-            root_range.end += other.len;
-            root_range.start += other.len;
-            for (_, path_range) in self.path.iter_mut() {
-                path_range.end += other.len;
-                path_range.start += other.len;
-            }
-            self.leaf_range.end += other.len();
-            self.leaf_range.start += other.len();
-        }
-        self.origins.reverse();
-        other.origins.reverse();
-        self.origins.extend(other.origins);
-        self.origins.reverse();
-        mem::swap(&mut self.nodes, &mut other.nodes);
-        self.nodes.extend(other.nodes);
-        self.len += other.len;
-    }
+    // /// Derp
+    // pub fn prepend(&mut self, mut other: Self) {
+    //     // The focus part must be updated to point to the new place before the other bits
+    //     if let Some((ref mut root_id, ref mut root_range)) = self.root {
+    //         *root_id += other.nodes.len();
+    //         root_range.end += other.len;
+    //         root_range.start += other.len;
+    //         for (_, path_range) in self.path.iter_mut() {
+    //             path_range.end += other.len;
+    //             path_range.start += other.len;
+    //         }
+    //         self.leaf_range.end += other.len();
+    //         self.leaf_range.start += other.len();
+    //     }
+    //     self.origins.reverse();
+    //     other.origins.reverse();
+    //     self.origins.extend(other.origins);
+    //     self.origins.reverse();
+    //     mem::swap(&mut self.nodes, &mut other.nodes);
+    //     self.nodes.extend(other.nodes);
+    //     self.len += other.len;
+    // }
 
     /// Narrows the focus so it only represents the given subrange of the focus.
     ///
@@ -723,7 +730,6 @@ where
     }
 
     fn move_focus(&mut self, mut idx: usize) {
-        // unimplemented!()
         if self.leaf_range.contains(&idx) {
             // Nothing needs to move here
             return;
@@ -778,11 +784,13 @@ where
 
                         match subchild {
                             NodeMut::Internal(subchild) => {
-                                self.path
-                                    .push((subchild.load_mut(), absolute_subchild_range));
+                                self.path.push((
+                                    subchild.load_mut(&self.origin.context),
+                                    absolute_subchild_range,
+                                ));
                             }
                             NodeMut::Leaf(subchild) => {
-                                let leaf: *mut Leaf = subchild.load_mut();
+                                let leaf: *mut Leaf = subchild.load_mut(&self.origin.context);
                                 self.leaf = Some(leaf);
                                 self.leaf_range = absolute_subchild_range;
                                 return;
@@ -816,13 +824,13 @@ where
             // idx = new_idx;
             match child_node {
                 NodeMut::Internal(internal) => {
-                    let new_root = internal.load_mut();
+                    let new_root = internal.load_mut(&self.origin.context);
                     self.path.push((new_root, child_subrange));
                 }
                 NodeMut::Leaf(leaf) => {
                     // skipped_items.start += this_skipped_items;
                     // skipped_items.end = skipped_items.start + leaf_len;
-                    self.leaf = Some(leaf.load_mut());
+                    self.leaf = Some(leaf.load_mut(&self.origin.context));
                     self.leaf_range = child_subrange;
                     break;
                 }
@@ -850,7 +858,7 @@ where
         if self.leaf_range.contains(&idx) {
             if let Some(leaf) = self.leaf {
                 let leaf = unsafe { &mut *leaf };
-                leaf.get_mut(idx - self.leaf_range.start)
+                leaf.get_mut(idx - self.leaf_range.start, &self.origin.context)
             } else {
                 let root_index = self.root.as_ref().unwrap().0;
                 self.nodes[root_index]

@@ -14,7 +14,7 @@ pub(crate) fn do_single_sort<R, F, Internal, Leaf, BorrowedInternal>(
     F: Fn(&Leaf::Item, &Leaf::Item) -> cmp::Ordering,
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait,
+    Leaf: LeafTrait<Context = Internal::Context>,
 {
     if focus.len() <= 1 {
         return;
@@ -199,10 +199,10 @@ pub(crate) fn do_dual_sort<
     F: Fn(&Leaf1::Item, &Leaf1::Item) -> cmp::Ordering,
     Internal1: InternalTrait<Leaf1, Borrowed = BorrowedInternal1>,
     BorrowedInternal1: BorrowedInternalTrait<Leaf1, InternalChild = Internal1> + Debug,
-    Leaf1: LeafTrait,
+    Leaf1: LeafTrait<Context = Internal1::Context>,
     Internal2: InternalTrait<Leaf2, Borrowed = BorrowedInternal2>,
     BorrowedInternal2: BorrowedInternalTrait<Leaf2, InternalChild = Internal2> + Debug,
-    Leaf2: LeafTrait,
+    Leaf2: LeafTrait<Context = Internal2::Context>,
 {
     if focus.len() <= 1 {
         return;
