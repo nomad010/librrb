@@ -1,9 +1,11 @@
 use crate::Side;
 use std::fmt::Debug;
-use std::ops::Range;
+use std::ops::{Deref, DerefMut, Range};
 
 pub trait Entry: Clone + std::fmt::Debug {
     type Item: Clone + std::fmt::Debug;
+    // type LoadGuardType: Deref<Target = Self::Item>;
+    // type LoadMutGuardType: DerefMut<Target = Self::Item>;
     type Context: Clone + std::fmt::Debug + Default;
 
     fn new(item: Self::Item) -> Self;

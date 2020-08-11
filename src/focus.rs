@@ -48,18 +48,9 @@ where
                 let absolute_subrange =
                     absolute_subrange_start..absolute_subrange_start + subrange_len;
                 if let NodeRef::Internal(internal) = subchild {
-                    // println!(
-                    //     "Absolute subrange {:?} from {:?} derp {} {} to {}",
-                    //     absolute_subrange,
-                    //     nodes.iter().map(|x| x.1.clone()).collect::<Vec<_>>(),
-                    //     idx,
-                    //     previous_root.level(),
-                    //     internal.len()
-                    // );
                     idx -= subchild_range.start;
                     (internal.clone(), absolute_subrange)
                 } else {
-                    // println!("Done {:?}", absolute_subrange);
                     return (absolute_subrange, subchild.leaf().clone());
                 }
             } else {
@@ -521,20 +512,10 @@ where
             return result;
         }
         // index is now 1..self.len()
-        println!(
-            "index = {} {:#?}",
-            index,
-            self.nodes.iter().map(|x| x.len()).collect::<Vec<_>>()
-        );
         let (self_child_position, mut subindex) = self.find_node_info_for_index(index).unwrap();
         self.len = index;
-        println!("After find node info {} {}", self_child_position, subindex);
+
         let mut right_nodes = self.nodes.split_off(self_child_position);
-        println!(
-            "right nodes = {} {:#?}",
-            subindex,
-            right_nodes.iter().map(|x| x.len()).collect::<Vec<_>>()
-        );
         right_nodes.reverse();
 
         loop {
@@ -545,13 +526,6 @@ where
             match node {
                 BorrowedNode::Internal(mut internal) => {
                     let (new_subindex, mut new_internal) = internal.split_at_position(subindex);
-                    println!(
-                        "New subindex {} {} {:?} {}",
-                        subindex,
-                        new_subindex,
-                        new_internal.range(),
-                        new_internal.len()
-                    );
                     subindex = new_subindex;
                     let child = new_internal
                         .pop_child(Side::Front, &self.origin.context)
@@ -614,7 +588,6 @@ where
     /// Panics if the given index is greater than the focus' length.
     ///
     pub fn split_at_fn<F: FnMut(&mut Self, &mut Self)>(&mut self, index: usize, mut f: F) {
-        println!("Splitting at {} of {}", index, self.len());
         let mut result = self.split_at(index);
         f(self, &mut result);
         self.combine(result);
@@ -769,13 +742,6 @@ where
                 let root = &mut self.nodes[*root];
                 match root {
                     BorrowedNode::Internal(internal) => {
-                        println!(
-                            "{} - {} = {} out of {}",
-                            idx,
-                            range.start,
-                            idx - range.start,
-                            internal.len()
-                        );
                         let (subchild, subchild_range) = internal
                             .get_child_mut_for_position(idx - range.start)
                             .unwrap();

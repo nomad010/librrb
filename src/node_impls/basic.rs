@@ -30,6 +30,8 @@ where
     C: Clone + std::fmt::Debug + Default,
 {
     type Item = I;
+    // type LoadGuardType = for<'a> &'a I;
+    // type LoadMutGuardType = for<'a> &'a I;
     type Context = C;
 
     fn new(item: Self::Item) -> Self {
@@ -525,15 +527,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A,
 
     fn split_at_position(&mut self, position: usize) -> (usize, Self) {
         let index = self.position_info_for(position).unwrap();
-        println!(
-            "rawr split says {:?} for {} {} {:?}",
-            index,
-            self.len(),
-            self.slots(),
-            self.range()
-        );
         let result = self.split_at_child(index.0);
-        println!("nogtma {}", result.len());
         (index.1, result)
     }
 }
@@ -582,11 +576,6 @@ impl<
     }
 
     fn split_at(&mut self, index: usize) -> Self {
-        println!(
-            "Splitting RAwr borrowchildlist at {} out of {:?}",
-            index,
-            self.range()
-        );
         match self {
             BorrowedChildList::Internals(ref mut children) => {
                 let new_children = children.split_at(index);

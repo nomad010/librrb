@@ -417,7 +417,6 @@ mod test {
             assert!(vec.iter().eq(vector.iter()));
             vec.sort();
             vector.sort();
-            // println!("Gar {:?}", vector.iter().cloned().collect::<Vec<_>>());
             assert!(vec.iter().eq(vector.iter()));
         }
     }

@@ -646,19 +646,11 @@ where
         // children of the tops of the spine.
         // If we break invariant 2), we call balance spine tops to correct it.
         debug_assert_eq!(self.left_spine.len(), self.right_spine.len());
-        // println!("LUL {:#?}", self);
         // Try and pop the node into the level above
         let spine = match side {
             Side::Back => &mut self.right_spine,
             Side::Front => &mut self.left_spine,
         };
-        // println!(
-        //     "LUL {:?} {} {} {}",
-        //     side,
-        //     spine.len(),
-        //     self.root.slots(),
-        //     self.root.slots() != 0 || spine.last().unwrap().slots() != 0
-        // );
         debug_assert_eq!(spine.first().unwrap().slots(&self.context), 0);
         debug_assert!(
             self.root.slots(&self.context) != 0 || spine.last().unwrap().slots(&self.context) != 0
@@ -699,14 +691,7 @@ where
         // 2) Must differ in slots by at most one node
 
         // The invariant must be checked in a loop as slicing may break the invariant multiple times
-        // println!(
-        //     "LUL {} {} {}",
-        //     self.root.slots(),
-        //     self.root.level(),
-        //     self.root.is_leaf()
-        // );
         while self.root.slots(&self.context) == 0 && !self.root.is_leaf(&self.context) {
-            // println!("gar");
             let left_spine_top = self.left_spine.last_mut().unwrap();
             let right_spine_top = self.right_spine.last_mut().unwrap();
             let left_spine_children = left_spine_top.slots(&self.context);
@@ -1011,16 +996,12 @@ where
             return;
         }
 
-        println!("lens {} {}", self.len(), other.len());
-
         let new_len = self.len + other.len();
-        // println!("Roflpi {:#?}", other);
 
         // Make the spines the same length
         while self.right_spine.len() < other.left_spine.len() {
             // The root moves to either the left or right spine and the root becomes empty
             // We replace the left with root here and right with an empty node
-            // println!("Adding to self");
             let new_root = NodeRc::Internal(Internal::InternalEntry::new(
                 Internal::empty_internal(self.root.level(&self.context) + 1),
             ));
@@ -1039,7 +1020,6 @@ where
         while other.left_spine.len() < self.right_spine.len() {
             // The root moves to either the left or right spine and the root becomes empty
             // We replace the right with root here and left with an empty node
-            // println!("Adding to other");
             let new_root = NodeRc::Internal(Internal::InternalEntry::new(
                 Internal::empty_internal(other.root.level(&self.context) + 1),
             ));
@@ -1055,20 +1035,9 @@ where
             other.right_spine.push(new_right);
         }
 
-        // println!("heights {} {}", self.height(), other.height());
-
         // debug_assert_eq!(self.right_spine.len(), self.right_spine.len());
         debug_assert_eq!(other.left_spine.len(), other.right_spine.len());
         debug_assert_eq!(self.right_spine.len(), other.left_spine.len());
-
-        // let packer =
-        //     |new_node: NodeRc<Internal, Leaf>, parent_node: &mut Internal::InternalEntry, side| {
-        //         if !new_node.is_empty() {
-        //             let parent = parent_node.load_mut();
-        //             // println!("gar {} vs {}", parent.level(), new_node.level());
-        //             parent.push_child(side, new_node, &self.context);
-        //         }
-        //     };
 
         // More efficient to work from front to back here, but we need to remove elements
         // We reverse to make this more efficient
@@ -1082,26 +1051,10 @@ where
                 .internal_mut()
                 .load_mut(&self.context);
             if !left_child.is_empty(&self.context) {
-                // println!("gar {} vs {}", parent.level(), new_node.level());
                 parent_node.push_child(Side::Back, left_child, &self.context);
             }
-            // packer(left_child, parent_node, Side::Back);
         }
         if let Some(right_child) = other.left_spine.pop() {
-            // println!(
-            //     "Gar {} {} {}",
-            //     other.left_spine.len(),
-            //     other.root.level(),
-            //     right_child.level()
-            // );
-            // for spine_node in other.left_spine.iter() {
-            //     println!(
-            //         "Roflderp gar {} vs {}",
-            //         spine_node.level(),
-            //         right_child.level()
-            //     );
-            // }
-
             let parent_node = other
                 .left_spine
                 .last_mut()
@@ -1109,28 +1062,9 @@ where
                 .internal_mut()
                 .load_mut(&self.context);
             if !right_child.is_empty(&self.context) {
-                // println!("gar {} vs {}", parent.level(), new_node.level());
                 parent_node.push_child(Side::Front, right_child, &self.context);
             }
-            // packer(right_child, parent_node, Side::Front);
         }
-        // let sls: usize = self.left_spine.iter().map(|x| x.len()).sum();
-        // let srs: usize = self.right_spine.iter().map(|x| x.len()).sum();
-        // let ols: usize = other.left_spine.iter().map(|x| x.len()).sum();
-        // let ors: usize = other.right_spine.iter().map(|x| x.len()).sum();
-        // println!(
-        //     "AAAAAG DERO GABLE GAR {} {} {} = {}, {} {} {} = {}, {}",
-        //     sls,
-        //     self.root.len(),
-        //     srs,
-        //     sls + self.root.len() + srs,
-        //     ols,
-        //     other.root.len(),
-        //     ors,
-        //     ols + other.root.len() + ors,
-        //     sls + self.root.len() + srs + ols + other.root.len() + ors,
-        // );
-        // Error in this loop
         while !self.right_spine.is_empty() {
             let mut left_node = self.right_spine.pop().unwrap();
             let mut right_node = other.left_spine.pop().unwrap();
@@ -1139,44 +1073,14 @@ where
             let right = right_node.internal_mut().load_mut(&self.context);
 
             left.pack_children(&self.context);
-            println!(
-                "OOH {} {} {:?} {} --- {} {} {:?} {} LEL {} {}",
-                left.len(),
-                left.slots(),
-                self.right_spine
-                    .iter()
-                    .map(|x| x.level(&self.context))
-                    .collect::<Vec<_>>(),
-                self.root.level(&self.context),
-                right.len(),
-                right.slots(),
-                other
-                    .left_spine
-                    .iter()
-                    .map(|x| x.level(&self.context))
-                    .collect::<Vec<_>>(),
-                other.root.level(&self.context),
-                left.level(),
-                right.level()
-            );
             let mut left_right_most = left.pop_child(Side::Back, &self.context);
             while !left_right_most.is_full(&self.context) && !right.is_empty() {
                 let mut right_left_most = right.pop_child(Side::Front, &self.context);
-                println!(
-                    "roflpi {} {}",
-                    left_right_most.len(&self.context),
-                    right_left_most.len(&self.context)
-                );
                 right_left_most.share_children_with(
                     &mut left_right_most,
                     Side::Front,
                     right_left_most.slots(&self.context),
                     &self.context,
-                );
-                println!(
-                    "roflpi2 {} {}",
-                    left_right_most.len(&self.context),
-                    right_left_most.len(&self.context)
                 );
                 if !right_left_most.is_empty(&self.context) {
                     right.push_child(Side::Front, right_left_most, &self.context);
@@ -1187,7 +1091,6 @@ where
             right.share_children_with(left, Side::Front, right.slots(), &self.context);
 
             if !left_node.is_empty(&self.context) {
-                // println!("gar {} vs {}", parent.level(), new_node.level());
                 self.right_spine
                     .last_mut()
                     .unwrap_or(&mut self.root)
@@ -1195,14 +1098,6 @@ where
                     .load_mut(&self.context)
                     .push_child(Side::Back, left_node, &self.context);
             }
-            // packer(
-            //     left_node,
-            //     self.right_spine
-            //         .last_mut()
-            //         .unwrap_or(&mut self.root)
-            //         .internal_mut(),
-            //     Side::Back,
-            // );
             if !right.is_empty() {
                 other
                     .left_spine
@@ -1211,30 +1106,9 @@ where
                     .internal_mut()
                     .load_mut(&self.context)
                     .push_child(Side::Front, right_node, &self.context);
-                // packer(
-                //     right_node,
-                //     other
-                //         .left_spine
-                //         .last_mut()
-                //         .unwrap_or(&mut other.root)
-                //         .internal_mut(),
-                //     Side::Front,
-                // );
             }
-            // println!(
-            //     "OOH {} {} {:?} {} --- {} {} {:?} {}",
-            //     left.len(),
-            //     left.slots(),
-            //     self.right_spine.iter().map(|x| x.len()).collect::<Vec<_>>(),
-            //     self.root.len(),
-            //     right.len(),
-            //     right.slots(),
-            //     other.left_spine.iter().map(|x| x.len()).collect::<Vec<_>>(),
-            //     other.root.len()
-            // );
         }
 
-        // Bug is between DERO println and here
         debug_assert!(self.right_spine.is_empty());
         debug_assert!(other.left_spine.is_empty());
         self.right_spine = other.right_spine;
@@ -1258,15 +1132,6 @@ where
         }
         self.len = new_len;
         self.fixup_spine_tops();
-        // let ls: usize = self.left_spine.iter().map(|x| x.len()).sum();
-        // let rs: usize = self.right_spine.iter().map(|x| x.len()).sum();
-        // println!(
-        //     "GAR GABLE GAR {} {} {} = {}",
-        //     ls,
-        //     self.root.len(),
-        //     rs,
-        //     ls + self.root.len() + rs
-        // );
     }
 
     /// Prepends the given vector onto the front of this vector.
@@ -1404,25 +1269,11 @@ where
             // We know now that the split position lies within the vector allowing us to make some
             // simplifications.
             let original_len = self.len();
-            // println!("Slicing at {} out of {}", at, self.len);
-            // println!("Roflskates {:#?}", self);
             let (position, subposition) = self.find_node_info_for_index(at).unwrap();
             let mut result = InternalVector::new();
-            // println!(
-            //     "Split off position {} {:?}, {} {}",
-            //     at, position, subposition, original_len
-            // );
-            // println!(
-            //     "derp should be here {} {} {} {}",
-            //     self.left_spine.iter().map(|x| x.len()).sum::<usize>(),
-            //     self.root.len(),
-            //     self.right_spine.iter().map(|x| x.len()).sum::<usize>(),
-            //     self.height()
-            // );
             match position {
                 Some((Side::Front, node_position)) => {
                     // The left spine is has the node getting split
-                    // println!("LEL {}", self.left_spine.len());
                     result.left_spine = self.left_spine.split_off(node_position + 1);
                     let mut split_node = self.left_spine.pop().unwrap();
                     result
@@ -1434,47 +1285,22 @@ where
                 }
                 None => {
                     // The root node is getting split
-                    // println!("RAER {}", self.root.len());
                     mem::swap(&mut self.right_spine, &mut result.right_spine);
                     result.root = self.root.split_at_position(subposition, &self.context);
-                    // println!("preroflskates {:#?}", result);
                 }
                 Some((Side::Back, node_position)) => {
                     // The right spine is getting split
-                    // println!("preroflskates {:#?}", self);
-
-                    // Derp I think this is reversed completely
                     result.right_spine = self.right_spine.split_off(node_position + 1);
                     let mut split_node = self.right_spine.pop().unwrap();
-                    // println!("preroflskates {:#?}", split_node.len());
                     mem::swap(&mut result.right_spine, &mut self.right_spine);
                     let split_right = split_node.split_at_position(subposition, &self.context);
-                    // println!("roflskates {:#?}", self);
-
-                    // Problem is here I think and potentially with the split off above.
                     self.right_spine.insert(0, split_node);
                     result.right_spine.push(split_right);
-
-                    // println!(
-                    //     "now derp should be here {} {}",
-                    //     self.right_spine.iter().map(|x| x.len()).sum::<usize>(),
-                    //     result.right_spine.iter().map(|x| x.len()).sum::<usize>(),
-                    // );
                 }
             }
 
-            // println!(
-            //     "should be here {} {}",
-            //     self.root.slots(),
-            //     self.root.len()
-            //         + self.right_spine.iter().map(|x| x.len()).sum::<usize>()
-            //         + self.left_spine.iter().map(|x| x.len()).sum::<usize>()
-            // );
-
             result.len = original_len - at;
             self.len = at;
-            // println!("Lol {} vs {}", self.root.slots(), result.root.slots());
-            // println!("roflskates {:#?}", self);
 
             self.right_spine.reverse();
             while self
@@ -1483,7 +1309,6 @@ where
                 .map(|x| x.is_empty(&self.context))
                 .unwrap_or(false)
             {
-                // println!("lul");
                 self.right_spine.pop().unwrap();
             }
             self.right_spine.reverse();
@@ -1501,21 +1326,13 @@ where
                 }
                 .unwrap();
                 self.root = node;
-                // println!("lol a {} {}", self.root.level(), self.left_spine.len());
             }
 
-            // println!("roflskates2 {:#?}", self);
             if self.fill_spine(Side::Back) {
                 self.fixup_spine_tops();
                 self.empty_leaf(Side::Back);
             }
-            // if self.fill_spine(Side::Front) {
-            //     self.fixup_spine_tops();
-            //     self.empty_leaf(Side::Front);
-            // }
             self.fixup_spine_tops();
-
-            // println!("here");
 
             result.left_spine.reverse();
             while result
@@ -1524,7 +1341,6 @@ where
                 .map(|x| x.is_empty(&self.context))
                 .unwrap_or(false)
             {
-                // println!("lul");
                 result.left_spine.pop().unwrap();
             }
             result.left_spine.reverse();
@@ -1542,31 +1358,13 @@ where
                 }
                 .unwrap();
                 result.root = node;
-                // println!("lol a {} {}", result.root.level(), result.left_spine.len());
             }
 
             if result.fill_spine(Side::Front) {
                 result.fixup_spine_tops();
-                // println!("leldongs");
                 result.empty_leaf(Side::Front);
             }
-            // if result.fill_spine(Side::Back) {
-            //     result.fixup_spine_tops();
-            //     result.empty_leaf(Side::Back);
-            // }
             result.fixup_spine_tops();
-
-            // for part in self.left_spine.iter() {
-            //     println!("LS Gargablegar {}", part.level());
-            // }
-            // println!("RO Gargablegar {}", self.root.level());
-            // for part in self.right_spine.iter() {
-            //     println!("RS Gargablegar {}", part.level());
-            // }
-
-            // self.assert_invariants();
-            // result.assert_invariants();
-
             result
         }
     }
@@ -1576,20 +1374,16 @@ where
             Side::Front => &mut self.left_spine,
             Side::Back => &mut self.right_spine,
         };
-        // println!("Gablegar {}", spine.len());
         spine.reverse();
         let result = loop {
             match spine.last_mut().unwrap_or(&mut self.root) {
                 NodeRc::Internal(internal) => {
-                    //
-                    // println!("Gargablegar {} {}", internal.slots(), internal.level(),);
                     let child = internal
                         .load_mut(&self.context)
                         .pop_child(side, &self.context);
                     spine.push(child);
                 }
                 NodeRc::Leaf(leaf) => {
-                    // println!("Derp {}", leaf.len());
                     break leaf.load(&self.context).is_empty();
                 }
             }
@@ -1612,8 +1406,6 @@ where
     pub fn insert(&mut self, index: usize, element: Leaf::Item) {
         // TODO: This is not really the most efficient way to do this, specialize this function.
         let last_part = self.split_off(index);
-        // println!("RAWWWWWWWWWWWWWWWR result {:#?}", last_part);
-        // println!("RAWWWWWWWWWWWWWWWR self {:#?}", self);
         self.push_back(element);
         self.append(last_part);
     }
@@ -1730,7 +1522,6 @@ where
         // First, we'll find the first less point in the range.
         if equals_start != start {
             loop {
-                // println!("rawr start {} {} {}", start, equals_start, end);
                 if start + 1 == equals_start {
                     let comparison = f(focus.index(start).borrow());
                     if comparison == cmp::Ordering::Equal {
@@ -1751,7 +1542,6 @@ where
 
         // Second, we'll find the first greater point in the range.
         loop {
-            // println!("rawr end {} {} {}", start, equals_end_inclusive, end);
             if equals_end_inclusive + 1 == end {
                 break;
             } else {
@@ -2455,11 +2245,6 @@ where
             .iter()
             .map(|x| x.len(&self.context))
             .sum::<usize>();
-
-        // println!(
-        //     "derpledoo {} {} {}",
-        //     left_spine_len, root_len, right_spine_len
-        // );
         assert_eq!(self.len, left_spine_len + root_len + right_spine_len);
         true
     }
@@ -3187,7 +2972,6 @@ mod test {
         let mut v = Vector::new();
         const N: usize = 1_000;
         for i in 0..N {
-            // println!("{} inserted {}", i, v.height());
             v.insert(v.len() / 2, i);
             v.assert_invariants();
 
@@ -3199,7 +2983,6 @@ mod test {
             vector.extend(second_half);
 
             assert_eq!(v.iter().copied().collect::<Vec<usize>>(), vector);
-            // println!("\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
         }
         let first_half = (1..N).step_by(2);
         let second_half = (0..N).step_by(2).rev();
@@ -3212,46 +2995,6 @@ mod test {
 
         println!("{} {}", v.len(), v.height());
     }
-
-    // #[test]
-    // pub fn inserts_2() {
-    //     let mut v = Vector::new();
-    //     v.push_front(N);
-    //     const N: usize = 1_000;
-    //     for i in 0..N {
-    //         v.insert(v.len() - 1, i);
-    //         // println!("{} inserted\nDerplcakes {:#?}", i, v);
-    //         v.assert_invariants();
-
-    //         let mut vector = Vec::new();
-    //         vector.extend(0..=i);
-    //         vector.push(N);
-
-    //         assert_eq!(v.iter().copied().collect::<Vec<usize>>(), vector);
-    //         // println!("\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
-    //     }
-
-    //     let mut vector = Vec::new();
-    //     vector.extend(0..=N);
-
-    //     assert_eq!(v.iter().copied().collect::<Vec<usize>>(), vector);
-
-    //     println!("{} {}", v.len(), v.height());
-    // }
-
-    // #[test]
-    // pub fn inserts_3() {
-    //     let mut v = Vector::new();
-    //     v.push_front(N);
-    //     const N: usize = 100_000;
-    //     for i in 0..N {
-    //         v.insert(v.len()/2 - 1 - v.len() * 3 / 10, i);
-    //         // println!("{} inserted\nDerplcakes {:#?}", i, v);
-    //         v.assert_invariants();
-
-    //         // println!("\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
-    //     }
-    // }
 
     #[test]
     fn test_equal_range() {

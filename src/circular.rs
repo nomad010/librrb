@@ -360,9 +360,8 @@ impl<A: Debug> CircularBuffer<A> {
     /// Creates a mutable iterator over the elements in the buffer.
     pub fn iter_mut(&mut self) -> IterMut<A> {
         IterMut {
-            consumed: 0,
+            len: self.len,
             front: self.front,
-            back: (self.front + self.len) % RRB_WIDTH,
             buffer: self,
         }
     }
@@ -581,9 +580,8 @@ impl<'a, A: 'a + Debug> FusedIterator for Iter<'a, A> {}
 
 /// A mutable iterator over a buffer that is obtained by the `CircularBuffer::iter_mut()` method.
 pub struct IterMut<'a, A: 'a + Debug> {
-    consumed: usize,
     front: usize,
-    back: usize,
+    len: usize,
     buffer: &'a mut CircularBuffer<A>,
 }
 
@@ -591,10 +589,10 @@ impl<'a, A: 'a + Debug> Iterator for IterMut<'a, A> {
     type Item = &'a mut A;
 
     fn next(&mut self) -> Option<&'a mut A> {
-        if self.consumed == self.buffer.len() {
+        if self.len == 0 {
             None
         } else {
-            self.consumed += 1;
+            self.len -= 1;
             let result = unsafe { &mut *self.buffer.data[self.front].as_mut_ptr() };
             self.front = (self.front + 1) % RRB_WIDTH;
             Some(result)
@@ -602,19 +600,18 @@ impl<'a, A: 'a + Debug> Iterator for IterMut<'a, A> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = self.buffer.len() - self.consumed;
-        (len, Some(len))
+        (self.len, Some(self.len))
     }
 }
 
 impl<'a, A: 'a + Debug> DoubleEndedIterator for IterMut<'a, A> {
     fn next_back(&mut self) -> Option<&'a mut A> {
-        if self.consumed == self.buffer.len() {
+        if self.len == 0 {
             None
         } else {
-            self.consumed += 1;
-            self.back = (self.back + RRB_WIDTH - 1) % RRB_WIDTH;
-            let result = unsafe { &mut *self.buffer.data[self.back].as_mut_ptr() };
+            self.len -= 1;
+            let index = (self.front + self.len + RRB_WIDTH) % RRB_WIDTH;
+            let result = unsafe { &mut *self.buffer.data[index].as_mut_ptr() };
             Some(result)
         }
     }
@@ -780,10 +777,12 @@ mod test {
             single.iter().collect::<Vec<_>>(),
             vector.iter().collect::<Vec<_>>()
         );
-        assert_eq!(
-            single.iter_mut().collect::<Vec<_>>(),
-            vector.iter_mut().collect::<Vec<_>>()
-        );
+        for v in single.iter_mut() {
+            assert_eq!(v, &mut item);
+        }
+        let sv = single.iter_mut().collect::<Vec<_>>();
+        let vv = vector.iter_mut().collect::<Vec<_>>();
+        assert_eq!(sv, vv);
         assert_eq!(single.into_iter().collect::<Vec<_>>(), vector);
     }
 
