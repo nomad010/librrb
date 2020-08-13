@@ -541,7 +541,7 @@ where
             }
 
             let full_node = mem::replace(node, node.new_empty(&self.context));
-            let parent_node = spine
+            let mut parent_node = spine
                 .get_mut(idx + 1)
                 .unwrap_or(&mut self.root)
                 .internal_mut()
@@ -843,7 +843,7 @@ where
     /// ```
     pub fn front(&self) -> Option<&Leaf::Item> {
         let leaf = self.left_spine.first().unwrap_or(&self.root);
-        leaf.leaf_ref().load(&self.context).front()
+        unsafe { Some(&*leaf.leaf_ref().load(&self.context).front()?) }
     }
 
     /// Returns a mutable reference to the item at the front of the sequence. If the tree is empty
@@ -860,9 +860,14 @@ where
     /// ```
     pub fn front_mut(&mut self) -> Option<&mut Leaf::Item> {
         let leaf = self.left_spine.first_mut().unwrap_or(&mut self.root);
-        leaf.leaf_mut()
-            .load_mut(&self.context)
-            .front_mut(&self.context)
+        unsafe {
+            Some(
+                &mut *leaf
+                    .leaf_mut()
+                    .load_mut(&self.context)
+                    .front_mut(&self.context)?,
+            )
+        }
     }
 
     /// Returns a reference to the item at the back of the sequence. If the tree is empty this
@@ -879,7 +884,7 @@ where
     /// ```
     pub fn back(&self) -> Option<&Leaf::Item> {
         let leaf = self.right_spine.first().unwrap_or(&self.root);
-        leaf.leaf_ref().load(&self.context).back()
+        unsafe { Some(&*leaf.leaf_ref().load(&self.context).back()?) }
     }
 
     /// Returns a mutable reference to the item at the back of the sequence. If the tree is empty
@@ -896,9 +901,14 @@ where
     /// ```
     pub fn back_mut(&mut self) -> Option<&mut Leaf::Item> {
         let leaf = self.right_spine.first_mut().unwrap_or(&mut self.root);
-        leaf.leaf_mut()
-            .load_mut(&self.context)
-            .back_mut(&self.context)
+        unsafe {
+            Some(
+                &mut *leaf
+                    .leaf_mut()
+                    .load_mut(&self.context)
+                    .back_mut(&self.context)?,
+            )
+        }
     }
 
     /// Derp
@@ -909,7 +919,7 @@ where
                 Some((Side::Back, spine_idx)) => &self.right_spine[spine_idx],
                 None => &self.root,
             };
-            Some(node.get(subindex, &self.context).unwrap())
+            unsafe { Some(&*node.get(subindex, &self.context).unwrap()) }
         } else {
             None
         }
@@ -928,7 +938,7 @@ where
                 Some((Side::Back, spine_idx)) => &mut self.right_spine[spine_idx],
                 None => &mut self.root,
             };
-            Some(node.get_mut(subindex, &self.context).unwrap())
+            unsafe { Some(&mut *node.get_mut(subindex, &self.context).unwrap()) }
         } else {
             None
         }
@@ -1044,7 +1054,7 @@ where
         self.right_spine.reverse();
         other.left_spine.reverse();
         if let Some(left_child) = self.right_spine.pop() {
-            let parent_node = self
+            let mut parent_node = self
                 .right_spine
                 .last_mut()
                 .unwrap_or(&mut self.root)
@@ -1055,7 +1065,7 @@ where
             }
         }
         if let Some(right_child) = other.left_spine.pop() {
-            let parent_node = other
+            let mut parent_node = other
                 .left_spine
                 .last_mut()
                 .unwrap_or(&mut other.root)
@@ -1069,8 +1079,8 @@ where
             let mut left_node = self.right_spine.pop().unwrap();
             let mut right_node = other.left_spine.pop().unwrap();
 
-            let left = left_node.internal_mut().load_mut(&self.context);
-            let right = right_node.internal_mut().load_mut(&self.context);
+            let mut left = left_node.internal_mut().load_mut(&self.context);
+            let mut right = right_node.internal_mut().load_mut(&self.context);
 
             left.pack_children(&self.context);
             let mut left_right_most = left.pop_child(Side::Back, &self.context);
@@ -1088,7 +1098,8 @@ where
             }
             left.push_child(Side::Back, left_right_most, &self.context);
             right.pack_children(&self.context);
-            right.share_children_with(left, Side::Front, right.slots(), &self.context);
+            let slots = right.slots();
+            right.share_children_with(&mut *left, Side::Front, slots, &self.context);
 
             if !left_node.is_empty(&self.context) {
                 self.right_spine
@@ -1855,7 +1866,7 @@ where
     {
         let mut focus = self.focus_mut();
         focus.narrow(range, |focus| {
-            let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
+            let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0xDEADBEECAFE);
             do_single_sort(focus, &mut rng, f);
         });
     }

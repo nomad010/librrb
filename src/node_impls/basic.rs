@@ -3,7 +3,7 @@ use crate::node_traits::*;
 use crate::size_table::SizeTable;
 use crate::{Side, RRB_WIDTH};
 use archery::{SharedPointer, SharedPointerKind};
-use std::ops::Range;
+use std::ops::{Deref, DerefMut, Range};
 
 #[derive(Debug)]
 pub struct SharedPointerEntry<
@@ -23,6 +23,44 @@ where
     }
 }
 
+pub struct DerefPtr<T>(*const T);
+
+impl<T> Deref for DerefPtr<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        unsafe { &*self.0 }
+    }
+}
+
+pub struct DerefMutPtr<T>(*mut T);
+
+impl<T> Deref for DerefMutPtr<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        unsafe { &*self.0 }
+    }
+}
+
+impl<T> DerefMut for DerefMutPtr<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *self.0 }
+    }
+}
+
+impl<T> Drop for DerefPtr<T> {
+    fn drop(&mut self) {
+        println!("Ok dropping derefptr");
+    }
+}
+
+impl<T> Drop for DerefMutPtr<T> {
+    fn drop(&mut self) {
+        println!("Ok dropping derefptrmut");
+    }
+}
+
 impl<I, P, C> Entry for SharedPointerEntry<I, P, C>
 where
     I: Clone + std::fmt::Debug,
@@ -30,20 +68,20 @@ where
     C: Clone + std::fmt::Debug + Default,
 {
     type Item = I;
-    // type LoadGuardType = for<'a> &'a I;
-    // type LoadMutGuardType = for<'a> &'a I;
+    type LoadGuard = DerefPtr<I>;
+    type LoadMutGuard = DerefMutPtr<I>;
     type Context = C;
 
     fn new(item: Self::Item) -> Self {
         SharedPointerEntry(SharedPointer::new(item), std::marker::PhantomData)
     }
 
-    fn load(&self, _context: &Self::Context) -> &Self::Item {
-        &self.0
+    fn load<'a>(&'a self, _context: &Self::Context) -> Self::LoadGuard {
+        DerefPtr(self.0.deref() as *const I)
     }
 
-    fn load_mut(&mut self, _context: &Self::Context) -> &mut Self::Item {
-        SharedPointer::make_mut(&mut self.0)
+    fn load_mut<'a>(&'a mut self, _context: &Self::Context) -> Self::LoadMutGuard {
+        DerefMutPtr(SharedPointer::make_mut(&mut self.0))
     }
 }
 
@@ -70,8 +108,8 @@ impl<A: Clone + std::fmt::Debug> BorrowedLeafTrait for BorrowedLeaf<A> {
         self.buffer.from_same_source(&other.buffer)
     }
 
-    fn get_mut(&mut self, idx: usize) -> Option<&mut Self::Item> {
-        self.buffer.get_mut(idx)
+    fn get_mut(&mut self, idx: usize) -> Option<*mut Self::Item> {
+        self.buffer.get_mut_ptr(idx)
     }
 
     fn combine(&mut self, other: Self) {
@@ -109,12 +147,12 @@ impl<A: Clone + std::fmt::Debug> LeafTrait for Leaf<A> {
         self.buffer.free_space()
     }
 
-    fn get(&self, position: usize) -> Option<&Self::Item> {
-        self.buffer.get(position)
+    fn get(&self, position: usize) -> Option<*const Self::Item> {
+        self.buffer.get_ptr(position)
     }
 
-    fn get_mut(&mut self, position: usize, _context: &Self::Context) -> Option<&mut Self::Item> {
-        self.buffer.get_mut(position)
+    fn get_mut(&mut self, position: usize, _context: &Self::Context) -> Option<*mut Self::Item> {
+        self.buffer.get_mut_ptr(position)
     }
 
     fn push(&mut self, side: Side, item: Self::Item, _context: &Self::Context) {
@@ -724,7 +762,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A,
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn get(&self, child_idx: usize, idx: usize) -> Option<&A> {
+    pub fn get(&self, child_idx: usize, idx: usize) -> Option<*const A> {
         match self {
             ChildList::Leaves(children) => children.get(child_idx).unwrap().load(&()).get(idx),
             ChildList::Internals(children) => children.get(child_idx).unwrap().load(&()).get(idx),
@@ -736,7 +774,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A,
         child_idx: usize,
         idx: usize,
         context: &Leaf::Context,
-    ) -> Option<&mut A> {
+    ) -> Option<*mut A> {
         match self {
             ChildList::Leaves(children) => children
                 .get_mut(child_idx)
@@ -878,7 +916,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A,
                     } else {
                         let (write, read) = children.pair_mut(write_position, read_position);
                         read.load_mut(context).share_children_with(
-                            write.load_mut(context),
+                            &mut *write.load_mut(context),
                             Side::Front,
                             RRB_WIDTH,
                             context,
@@ -909,7 +947,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A,
                     } else {
                         let (write, read) = children.pair_mut(write_position, read_position);
                         read.load_mut(context).share_children_with(
-                            write.load_mut(context),
+                            &mut *write.load_mut(context),
                             Side::Front,
                             RRB_WIDTH,
                             context,
@@ -942,7 +980,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A,
         }
     }
 
-    fn get(&self, idx: usize) -> Option<&Leaf::Item> {
+    fn get(&self, idx: usize) -> Option<*const Leaf::Item> {
         if let Some((array_idx, new_idx)) = self.sizes.position_info_for(idx) {
             self.children.get(array_idx, new_idx)
         } else {
@@ -950,7 +988,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A,
         }
     }
 
-    fn get_mut(&mut self, idx: usize, context: &Self::Context) -> Option<&mut Leaf::Item> {
+    fn get_mut(&mut self, idx: usize, context: &Self::Context) -> Option<*mut Leaf::Item> {
         if let Some((array_idx, new_idx)) = self.sizes.position_info_for(idx) {
             self.children.get_mut(array_idx, new_idx, context)
         } else {

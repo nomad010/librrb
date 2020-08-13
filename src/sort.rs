@@ -32,7 +32,9 @@ pub(crate) fn do_single_sort<R, F, Internal, Leaf, BorrowedInternal>(
         let mut less_count = 0;
         let mut equal_count = 0;
         for index in 0..rest.len() {
-            let comp = comparator(rest.index(index), first.index(0));
+            let rest_val = rest.index(index);
+            let first_val = first.index(0);
+            let comp = comparator(rest_val, first_val);
             match comp {
                 cmp::Ordering::Less => less_count += 1,
                 cmp::Ordering::Equal => equal_count += 1,
@@ -415,8 +417,8 @@ mod test {
                 vector.push_back(*i);
             }
             assert!(vec.iter().eq(vector.iter()));
-            vec.sort();
             vector.sort();
+            vec.sort();
             assert!(vec.iter().eq(vector.iter()));
         }
     }

@@ -100,12 +100,12 @@ where
     /// will move the focus along if necessary.
     fn get(&mut self, idx: usize, context: &Internal::Context) -> Option<&Leaf::Item> {
         if self.path.is_empty() {
-            self.leaf.load(context).get(idx)
+            unsafe { Some(&*self.leaf.load(context).get(idx)?) }
         } else if idx >= self.path[0].0.load(context).len() {
             None
         } else {
             self.move_focus(idx, context);
-            self.leaf.load(context).get(idx - self.leaf_range.start)
+            unsafe { Some(&*self.leaf.load(context).get(idx - self.leaf_range.start)?) }
         }
     }
 }
@@ -405,9 +405,12 @@ where
     // This indicates the index of the root in the node list and the range of that is covered by it
     root: Option<(usize, Range<usize>)>,
     // The listing of internal nodes below the borrowed root node along with their associated ranges
-    path: Vec<(*mut Internal, Range<usize>)>,
+    path: Vec<(
+        <Internal::InternalEntry as Entry>::LoadMutGuard,
+        Range<usize>,
+    )>,
     // The leaf of the focus part, might not exist if the borrowed root is a leaf node
-    leaf: Option<*mut Leaf>,
+    leaf: Option<<Internal::LeafEntry as Entry>::LoadMutGuard>,
     // The range that is covered by the lowest part of the focus
     leaf_range: Range<usize>,
 }
@@ -756,7 +759,8 @@ where
                                 ));
                             }
                             NodeMut::Leaf(subchild) => {
-                                let leaf: *mut Leaf = subchild.load_mut(&self.origin.context);
+                                let leaf: <Internal::LeafEntry as Entry>::LoadMutGuard =
+                                    subchild.load_mut(&self.origin.context);
                                 self.leaf = Some(leaf);
                                 self.leaf_range = absolute_subchild_range;
                                 return;
@@ -780,7 +784,7 @@ where
             .start;
         loop {
             let (parent, parent_subrange) = self.path.last_mut().unwrap();
-            let parent = unsafe { &mut **parent };
+            let parent = &mut **parent;
             let (child_node, child_subrange) = parent.get_child_mut_for_position(idx).unwrap();
             idx -= child_subrange.start;
             let child_subrange = (parent_subrange.start + child_subrange.start)
@@ -822,16 +826,25 @@ where
     pub fn get(&mut self, idx: usize) -> Option<&mut Leaf::Item> {
         self.move_focus(idx);
         if self.leaf_range.contains(&idx) {
-            if let Some(leaf) = self.leaf {
-                let leaf = unsafe { &mut *leaf };
-                leaf.get_mut(idx - self.leaf_range.start, &self.origin.context)
+            // println!("In branch A {} with idx for in {:?}", idx, self.leaf_range);
+            let position = idx - self.leaf_range.start;
+            if let Some(ref mut leaf) = self.leaf {
+                let ptr = leaf.get_mut(position, &self.origin.context)?;
+                // println!("In branch B with idx {:?}", unsafe { &mut *ptr });
+                unsafe { Some(&mut *ptr) }
             } else {
+                // println!(
+                //     "In branch C with idx, {:?} {:?}",
+                //     self.root.as_ref(),
+                //     self.nodes.get(1)
+                // );
                 let root_index = self.root.as_ref().unwrap().0;
-                self.nodes[root_index]
-                    .leaf_mut()
-                    .get_mut(idx - self.leaf_range.start)
+                let ptr = self.nodes[root_index].leaf_mut().get_mut(position)?;
+                // println!("doodah focus {:p}", ptr);
+                unsafe { Some(&mut *ptr) }
             }
         } else {
+            // println!("In branch D");
             None
         }
     }

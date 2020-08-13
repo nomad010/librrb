@@ -4,15 +4,15 @@ use std::ops::{Deref, DerefMut, Range};
 
 pub trait Entry: Clone + std::fmt::Debug {
     type Item: Clone + std::fmt::Debug;
-    // type LoadGuardType: Deref<Target = Self::Item>;
-    // type LoadMutGuardType: DerefMut<Target = Self::Item>;
+    type LoadGuard: Deref<Target = Self::Item>;
+    type LoadMutGuard: DerefMut<Target = Self::Item>;
     type Context: Clone + std::fmt::Debug + Default;
 
     fn new(item: Self::Item) -> Self;
 
-    fn load(&self, context: &Self::Context) -> &Self::Item;
+    fn load(&self, context: &Self::Context) -> Self::LoadGuard;
 
-    fn load_mut(&mut self, context: &Self::Context) -> &mut Self::Item;
+    fn load_mut(&mut self, context: &Self::Context) -> Self::LoadMutGuard;
 }
 
 pub trait BorrowedLeafTrait {
@@ -31,7 +31,7 @@ pub trait BorrowedLeafTrait {
 
     fn combine(&mut self, other: Self);
 
-    fn get_mut(&mut self, idx: usize) -> Option<&mut Self::Item>;
+    fn get_mut(&mut self, idx: usize) -> Option<*mut Self::Item>;
 
     /// Checks the invariants that this node may hold if any.
     #[allow(dead_code)]
@@ -69,28 +69,28 @@ pub trait LeafTrait: Clone + std::fmt::Debug {
     }
 
     /// Gets a reference to the item at requested position if it exists.
-    fn get(&self, position: usize) -> Option<&Self::Item>;
+    fn get(&self, position: usize) -> Option<*const Self::Item>;
 
     /// Gets a reference to the item at the front of the leaf.
-    fn front(&self) -> Option<&Self::Item> {
+    fn front(&self) -> Option<*const Self::Item> {
         self.get(0)
     }
 
     /// Gets a reference to the item at the back of the leaf.
-    fn back(&self) -> Option<&Self::Item> {
+    fn back(&self) -> Option<*const Self::Item> {
         self.get(self.len().saturating_sub(1))
     }
 
     /// Gets a mutable reference to the item at requested position if it exists.
-    fn get_mut(&mut self, position: usize, context: &Self::Context) -> Option<&mut Self::Item>;
+    fn get_mut(&mut self, position: usize, context: &Self::Context) -> Option<*mut Self::Item>;
 
     /// Gets a mutable reference to the item at the front of the leaf.
-    fn front_mut(&mut self, context: &Self::Context) -> Option<&mut Self::Item> {
+    fn front_mut(&mut self, context: &Self::Context) -> Option<*mut Self::Item> {
         self.get_mut(0, context)
     }
 
     /// Gets a reference to the item at the back of the leaf.
-    fn back_mut(&mut self, context: &Self::Context) -> Option<&mut Self::Item> {
+    fn back_mut(&mut self, context: &Self::Context) -> Option<*mut Self::Item> {
         self.get_mut(self.len().saturating_sub(1), context)
     }
 
@@ -240,10 +240,10 @@ pub trait InternalTrait<Leaf: LeafTrait<Context = <Self as InternalTrait<Leaf>>:
     fn pack_children(&mut self, context: &Self::Context);
 
     /// Returns a reference to the element at the given index in the tree.
-    fn get(&self, idx: usize) -> Option<&Leaf::Item>;
+    fn get(&self, idx: usize) -> Option<*const Leaf::Item>;
 
     /// Returns a mutable reference to the element at the given index in the tree.
-    fn get_mut(&mut self, idx: usize, context: &Self::Context) -> Option<&mut Leaf::Item>;
+    fn get_mut(&mut self, idx: usize, context: &Self::Context) -> Option<*mut Leaf::Item>;
 
     /// Removes and returns the node at the given side of this node.
     /// # Panics
@@ -394,18 +394,18 @@ where
     ) -> usize {
         match self {
             NodeRc::Internal(ref mut origin_internal) => {
-                let destination_internal = destination.internal_mut().load_mut(context);
+                let mut destination_internal = destination.internal_mut().load_mut(context);
                 origin_internal.load_mut(context).share_children_with(
-                    destination_internal,
+                    &mut *destination_internal,
                     share_side,
                     len,
                     context,
                 )
             }
             NodeRc::Leaf(ref mut origin_leaf) => {
-                let destination_leaf = destination.leaf_mut().load_mut(context);
+                let mut destination_leaf = destination.leaf_mut().load_mut(context);
                 origin_leaf.load_mut(context).share_children_with(
-                    destination_leaf,
+                    &mut *destination_leaf,
                     share_side,
                     len,
                     context,
@@ -460,7 +460,7 @@ where
     }
 
     /// Returns the element at the given position in the node.
-    pub fn get(&self, idx: usize, context: &Internal::Context) -> Option<&Leaf::Item> {
+    pub fn get(&self, idx: usize, context: &Internal::Context) -> Option<*const Leaf::Item> {
         match self {
             NodeRc::Leaf(x) => x.load(context).get(idx),
             NodeRc::Internal(x) => x.load(context).get(idx),
@@ -468,7 +468,7 @@ where
     }
 
     /// Returns the element at the given position in the node.
-    pub fn get_mut(&mut self, idx: usize, context: &Internal::Context) -> Option<&mut Leaf::Item> {
+    pub fn get_mut(&mut self, idx: usize, context: &Internal::Context) -> Option<*mut Leaf::Item> {
         match self {
             NodeRc::Leaf(ref mut x) => x.load_mut(context).get_mut(idx, context),
             NodeRc::Internal(ref mut x) => x.load_mut(context).get_mut(idx, context),
@@ -782,7 +782,7 @@ where
     }
 
     /// Returns the element at the given position in the node.
-    pub fn get(&self, idx: usize, context: &Internal::Context) -> Option<&Leaf::Item> {
+    pub fn get(&self, idx: usize, context: &Internal::Context) -> Option<*const Leaf::Item> {
         match self {
             NodeRef::Leaf(x) => x.load(context).get(idx),
             NodeRef::Internal(x) => x.load(context).get(idx),
@@ -925,7 +925,7 @@ where
         &self,
         idx: usize,
         context: &Internal::Context,
-    ) -> Option<&<Leaf as LeafTrait>::Item> {
+    ) -> Option<*const <Leaf as LeafTrait>::Item> {
         match self {
             NodeMut::Leaf(x) => x.load(context).get(idx),
             NodeMut::Internal(x) => x.load(context).get(idx),

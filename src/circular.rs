@@ -51,13 +51,30 @@ impl<'a, A: Debug> BorrowBufferMut<A> {
         (self.front + idx) % RRB_WIDTH
     }
 
-    pub fn get(&self, idx: usize) -> Option<&A> {
+    pub(crate) fn get_ptr(&self, idx: usize) -> Option<*const A> {
         let idx = idx + self.range.start;
         if self.range.contains(&idx) {
             let index = self.index_for(idx);
             unsafe {
                 let data = std::slice::from_raw_parts(self.data, RRB_WIDTH);
-                Some(&*data[index].as_ptr())
+                Some(data[index].as_ptr())
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn get(&self, idx: usize) -> Option<&A> {
+        unsafe { Some(&*self.get_ptr(idx)?) }
+    }
+
+    pub(crate) fn get_mut_ptr(&mut self, idx: usize) -> Option<*mut A> {
+        let idx = idx + self.range.start;
+        if self.range.contains(&idx) {
+            let index = self.index_for(idx);
+            unsafe {
+                let maybe_uninit_ptr = self.data.add(index);
+                Some((*maybe_uninit_ptr).as_mut_ptr())
             }
         } else {
             None
@@ -65,16 +82,7 @@ impl<'a, A: Debug> BorrowBufferMut<A> {
     }
 
     pub fn get_mut(&mut self, idx: usize) -> Option<&mut A> {
-        let idx = idx + self.range.start;
-        if self.range.contains(&idx) {
-            let index = self.index_for(idx);
-            unsafe {
-                let data = std::slice::from_raw_parts_mut(self.data, RRB_WIDTH);
-                Some(&mut *data[index].as_mut_ptr())
-            }
-        } else {
-            None
-        }
+        unsafe { Some(&mut *self.get_mut_ptr(idx)?) }
     }
 
     // pub fn front_mut(&mut self) -> Option<&mut A> {
@@ -263,13 +271,26 @@ impl<A: Debug> CircularBuffer<A> {
         self.try_pop(side).expect("Circular buffer is empty")
     }
 
+    pub fn get_ptr(&self, idx: usize) -> Option<*const A> {
+        if idx < self.len() {
+            let index = self.index_for(idx);
+            Some(self.data[index].as_ptr())
+        } else {
+            None
+        }
+    }
+
     /// Gets a reference to an element in the buffer.
     ///
     /// Returns None if the index does not exist.
     pub fn get(&self, idx: usize) -> Option<&A> {
+        unsafe { Some(&*self.get_ptr(idx)?) }
+    }
+
+    pub fn get_mut_ptr(&mut self, idx: usize) -> Option<*mut A> {
         if idx < self.len() {
             let index = self.index_for(idx);
-            unsafe { Some(&*self.data[index].as_ptr()) }
+            Some(self.data[index].as_mut_ptr())
         } else {
             None
         }
@@ -279,12 +300,7 @@ impl<A: Debug> CircularBuffer<A> {
     ///
     /// Returns None if the index does not exist.
     pub fn get_mut(&mut self, idx: usize) -> Option<&mut A> {
-        if idx < self.len() {
-            let index = self.index_for(idx);
-            unsafe { Some(&mut *self.data[index].as_mut_ptr()) }
-        } else {
-            None
-        }
+        unsafe { Some(&mut *self.get_mut_ptr(idx)?) }
     }
 
     // /// Gets a reference to the front of the buffer.
