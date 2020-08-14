@@ -18,6 +18,7 @@ pub trait Entry: Clone + std::fmt::Debug {
 pub trait BorrowedLeafTrait {
     type Context: Clone + std::fmt::Debug + Default;
     type Item;
+    type ItemMutGuard: DerefMut<Target = Self::Item>;
 
     fn split_at(&mut self, idx: usize) -> Self;
 
@@ -30,6 +31,8 @@ pub trait BorrowedLeafTrait {
     fn from_same_source(&self, other: &Self) -> bool;
 
     fn combine(&mut self, other: Self);
+
+    fn get_mut_guarded(&mut self, idx: usize) -> Option<Self::ItemMutGuard>;
 
     fn get_mut(&mut self, idx: usize) -> Option<*mut Self::Item>;
 
@@ -45,6 +48,7 @@ pub trait LeafTrait: Clone + std::fmt::Debug {
     type Item: Clone + std::fmt::Debug;
     type Context: Clone + std::fmt::Debug + Default;
     type Borrowed: BorrowedLeafTrait<Item = Self::Item, Context = Self::Context> + std::fmt::Debug;
+    type ItemMutGuard: DerefMut<Target = Self::Item>;
 
     /// Constructs a new empty leaf.
     fn empty() -> Self;
@@ -80,6 +84,13 @@ pub trait LeafTrait: Clone + std::fmt::Debug {
     fn back(&self) -> Option<*const Self::Item> {
         self.get(self.len().saturating_sub(1))
     }
+
+    /// Gets a mutable reference to the item at requested position if it exists.
+    fn get_mut_guarded(
+        &mut self,
+        position: usize,
+        context: &Self::Context,
+    ) -> Option<Self::ItemMutGuard>;
 
     /// Gets a mutable reference to the item at requested position if it exists.
     fn get_mut(&mut self, position: usize, context: &Self::Context) -> Option<*mut Self::Item>;
@@ -148,6 +159,7 @@ pub trait BorrowedInternalTrait<
 >
 {
     type InternalChild: InternalTrait<Leaf>;
+    type ItemMutGuard: DerefMut<Target = Self::InternalChild>;
 
     fn len(&self) -> usize;
 
@@ -218,6 +230,8 @@ pub trait InternalTrait<Leaf: LeafTrait<Context = <Self as InternalTrait<Leaf>>:
     type LeafEntry: Entry<Item = Leaf, Context = Self::Context>;
     type InternalEntry: Entry<Item = Self, Context = Self::Context>;
 
+    type ItemMutGuard: DerefMut<Target = Leaf::Item>;
+
     /// Constructs a new empty internal node that is at the given level in the tree.
     fn empty_internal(level: usize) -> Self;
 
@@ -241,6 +255,13 @@ pub trait InternalTrait<Leaf: LeafTrait<Context = <Self as InternalTrait<Leaf>>:
 
     /// Returns a reference to the element at the given index in the tree.
     fn get(&self, idx: usize) -> Option<*const Leaf::Item>;
+
+    /// Returns a mutable reference to the element at the given index in the tree.
+    fn get_mut_guarded(
+        &mut self,
+        idx: usize,
+        context: &Self::Context,
+    ) -> Option<Self::ItemMutGuard>;
 
     /// Returns a mutable reference to the element at the given index in the tree.
     fn get_mut(&mut self, idx: usize, context: &Self::Context) -> Option<*mut Leaf::Item>;
