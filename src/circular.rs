@@ -8,6 +8,7 @@ use std::iter::FusedIterator;
 use std::mem;
 use std::ops::Range;
 
+#[derive(Clone)]
 pub(crate) struct BorrowBufferMut<A: Debug> {
     pub(crate) range: Range<usize>,
     data: *mut mem::MaybeUninit<A>,

@@ -39,7 +39,7 @@ Vector
 [] remove function improvements
   We can detect cases where concatenation of the left and right sides of the tree would not make any progress.
 
-[] Split_at improvements
+✔ Split_at improvements @done(20-08-14 22:55)
 
 Focus
 ✘ Investigate ZipFocus concept which allows you use a tuple vectors and treat them as a vector of tuples. @cancelled(20-04-30 01:08)

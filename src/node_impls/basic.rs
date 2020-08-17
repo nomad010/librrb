@@ -85,7 +85,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct BorrowedLeaf<A: Clone + std::fmt::Debug> {
     buffer: BorrowBufferMut<A>,
 }
@@ -237,6 +237,17 @@ pub struct BorrowedInternal<
 }
 
 impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
+    Clone for BorrowedInternal<A, P, Leaf>
+{
+    fn clone(&self) -> Self {
+        BorrowedInternal {
+            sizes: SharedPointer::clone(&self.sizes),
+            children: self.children.clone(),
+        }
+    }
+}
+
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
     BorrowedInternal<A, P, Leaf>
 {
     fn left_size(&self) -> usize {
@@ -377,6 +388,21 @@ pub(crate) enum BorrowedChildList<
 > {
     Internals(BorrowBufferMut<SharedPointerEntry<Internal<A, P, Leaf>, P, ()>>),
     Leaves(BorrowBufferMut<SharedPointerEntry<Leaf, P, ()>>),
+}
+
+impl<
+        'a,
+        A: Clone + std::fmt::Debug,
+        P: SharedPointerKind,
+        Leaf: LeafTrait<Item = A, Context = ()>,
+    > Clone for BorrowedChildList<A, P, Leaf>
+{
+    fn clone(&self) -> Self {
+        match self {
+            BorrowedChildList::Internals(children) => BorrowedChildList::Internals(children.clone()),
+            BorrowedChildList::Leaves(children) => BorrowedChildList::Leaves(children.clone()),
+        }
+    }
 }
 
 impl<

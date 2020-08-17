@@ -260,7 +260,6 @@ use std::hash::{Hash, Hasher};
 use std::iter::{self, FromIterator, FusedIterator};
 use std::mem;
 use std::ops::{Bound, Range, RangeBounds};
-use std::rc::Rc;
 
 /// Construct a vector.
 ///
@@ -1425,25 +1424,18 @@ where
     pub fn reverse_range<R: RangeBounds<usize>>(&mut self, range: R) {
         let range = self.arbitrary_range_to_range(range);
         let mut focus = self.focus_mut();
+        let (mut focus, _) = focus.split_at(range.end);
+        let (_, mut focus) = focus.split_at(range.start);
 
-        focus.narrow(range, |focus| {
-            let half_len = focus.len() / 2;
-            focus.split_at_fn(half_len, |left, right| {
-                let right_len = right.len();
-                for i in 0..half_len {
-                    let left = left.index(i);
-                    let right = right.index(right_len - 1 - i);
-                    mem::swap(left, right);
-                }
-            })
-            // let mut split_focus = focus.split_at(half_len);
-        })
-        // focus.get(0);
-        // {
-        //     let split = focus.split_at(range.end);
-        // }
-        // focus.get(0);
-        // focus.narrow(range);
+        let half_len = focus.len() / 2;
+        let (mut left, mut right) = focus.split_at(half_len);
+
+        let right_len = right.len();
+        for i in 0..half_len {
+            let left = left.index(i);
+            let right = right.index(right_len - 1 - i);
+            mem::swap(left, right);
+        }
     }
 
     /// Derp
@@ -1864,11 +1856,22 @@ where
         F: Fn(&Leaf::Item, &Leaf::Item) -> cmp::Ordering,
         R: RangeBounds<usize>,
     {
+        let range_start = match range.start_bound() {
+            Bound::Unbounded => 0,
+            Bound::Included(x) => *x,
+            Bound::Excluded(x) => x + 1,
+        };
+        let range_end = match range.end_bound() {
+            Bound::Unbounded => self.len(),
+            Bound::Included(x) => x + 1,
+            Bound::Excluded(x) => *x,
+        };
         let mut focus = self.focus_mut();
-        focus.narrow(range, |focus| {
-            let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0xDEADBEECAFE);
-            do_single_sort(focus, &mut rng, f);
-        });
+        let (mut focus, _) = focus.split_at(range_end);
+        let (_, mut focus) = focus.split_at(range_start);
+        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0xDEADBEECAFE);
+        do_single_sort(&mut focus, &mut rng, f);
+        // });
     }
 
     /// Sorts a range of the sequence by the given comparator. Any swap that occurs will be made in
@@ -1900,14 +1903,26 @@ where
         BorrowedInternal2: BorrowedInternalTrait<Leaf2, InternalChild = Internal2> + Debug,
         Leaf2: LeafTrait<Context = Internal2::Context>,
     {
+        let range_start = match range.start_bound() {
+            Bound::Unbounded => 0,
+            Bound::Included(x) => *x,
+            Bound::Excluded(x) => x + 1,
+        };
+        let range_end = match range.end_bound() {
+            Bound::Unbounded => self.len(),
+            Bound::Included(x) => x + 1,
+            Bound::Excluded(x) => *x,
+        };
         let mut focus = self.focus_mut();
-        focus.narrow(range.clone(), |focus| {
-            let mut dual = secondary.focus_mut();
-            dual.narrow(range.clone(), |dual| {
-                let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
-                do_dual_sort(focus, dual, &mut rng, &f);
-            });
-        });
+        let (mut focus, _) = focus.split_at(range_end);
+        let (_, mut focus) = focus.split_at(range_start);
+        let mut dual = secondary.focus_mut();
+        let (mut dual, _) = dual.split_at(range_end);
+        let (_, mut dual) = dual.split_at(range_start);
+        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
+        do_dual_sort(&mut focus, &mut dual, &mut rng, &f);
+        // });
+        // });
     }
 
     /// Sorts a range of the sequence by the given comparator.
@@ -1928,12 +1943,23 @@ where
         f: &F,
         range: R,
     ) {
+        let range_start = match range.start_bound() {
+            Bound::Unbounded => 0,
+            Bound::Included(x) => *x,
+            Bound::Excluded(x) => x + 1,
+        };
+        let range_end = match range.end_bound() {
+            Bound::Unbounded => self.len(),
+            Bound::Included(x) => x + 1,
+            Bound::Excluded(x) => *x,
+        };
         let mut focus = self.focus_mut();
-        focus.narrow(range, |focus| {
-            let comp = |x: &Leaf::Item, y: &Leaf::Item| f(x).cmp(&f(y));
-            let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
-            do_single_sort(focus, &mut rng, &comp);
-        });
+        let (mut focus, _) = focus.split_at(range_end);
+        let (_, mut focus) = focus.split_at(range_start);
+        let comp = |x: &Leaf::Item, y: &Leaf::Item| f(x).cmp(&f(y));
+        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
+        do_single_sort(&mut focus, &mut rng, &comp);
+        // });
     }
 
     /// Sorts a range of the sequence by the given comparator. Any swap that occurs will be made in
@@ -1966,15 +1992,27 @@ where
         BorrowedInternal2: BorrowedInternalTrait<Leaf2, InternalChild = Internal2> + Debug,
         Leaf2: LeafTrait<Context = Internal2::Context>,
     {
+        let range_start = match range.start_bound() {
+            Bound::Unbounded => 0,
+            Bound::Included(x) => *x,
+            Bound::Excluded(x) => x + 1,
+        };
+        let range_end = match range.end_bound() {
+            Bound::Unbounded => self.len(),
+            Bound::Included(x) => x + 1,
+            Bound::Excluded(x) => *x,
+        };
         let comp = |x: &Leaf::Item, y: &Leaf::Item| f(x).cmp(&f(y));
         let mut focus = self.focus_mut();
-        focus.narrow(range.clone(), |focus| {
-            let mut dual = secondary.focus_mut();
-            dual.narrow(range.clone(), |dual| {
-                let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
-                do_dual_sort(focus, dual, &mut rng, &comp);
-            });
-        });
+        let (mut focus, _) = focus.split_at(range_end);
+        let (_, mut focus) = focus.split_at(range_start);
+        let mut dual = secondary.focus_mut();
+        let (mut dual, _) = dual.split_at(range_end);
+        let (_, mut dual) = dual.split_at(range_start);
+        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(0);
+        do_dual_sort(&mut focus, &mut dual, &mut rng, &comp);
+        // });
+        // });
     }
 
     /// Sorts the entire sequence by the given comparator.
@@ -2105,26 +2143,7 @@ where
                 nodes.push(node.borrow_node(&self.context));
             }
         }
-        FocusMut::from_vector(Rc::new(self), nodes)
-    }
-
-    /// Returns a mutable focus over the vector. A focus tracks the last leaf and positions which
-    /// was read. The path down this tree is saved in the focus and is used to accelerate lookups in
-    /// nearby locations.
-    pub fn focus_mut_fn<F>(&mut self, f: &F)
-    where
-        F: Fn(&mut FocusMut<Internal, Leaf, BorrowedInternal>),
-    {
-        let mut nodes = Vec::new();
-        for node in self.left_spine.iter_mut() {
-            nodes.push(node.borrow_node(&self.context));
-        }
-        nodes.push(self.root.borrow_node(&self.context));
-        for node in self.right_spine.iter_mut().rev() {
-            nodes.push(node.borrow_node(&self.context));
-        }
-        let mut focus = FocusMut::from_vector(Rc::new(self), nodes);
-        f(&mut focus);
+        FocusMut::from_vector(self, nodes)
     }
 
     /// Returns an iterator over the vector.
@@ -2586,6 +2605,7 @@ where
     front: usize,
     back: usize,
     focus: FocusMut<'a, Internal, Leaf, BorrowedInternal>,
+    // dummy: std::marker::PhantomData<&'a ()>,
 }
 
 impl<'a, Internal, Leaf, BorrowedInternal> Iterator
@@ -2600,7 +2620,7 @@ where
 
     fn next(&mut self) -> Option<&'a mut Leaf::Item> {
         if self.front != self.back {
-            let focus: &'a mut FocusMut<Internal, Leaf, BorrowedInternal> =
+            let focus: &'a mut FocusMut<'a, Internal, Leaf, BorrowedInternal> =
                 unsafe { &mut *(&mut self.focus as *mut _) };
             let result = focus.get(self.front).unwrap();
             self.front += 1;

@@ -6,13 +6,10 @@ use crate::node_traits::{
     BorrowedInternalTrait, BorrowedLeafTrait, BorrowedNode, Entry, InternalTrait, LeafTrait,
     NodeMut, NodeRc, NodeRef,
 };
-
 use crate::vector::InternalVector;
 use crate::Side;
 use std::fmt::Debug;
-use std::mem;
 use std::ops::{Bound, Range, RangeBounds};
-use std::rc::Rc;
 
 /// A focus for a particular node in the spine.
 ///
@@ -391,28 +388,20 @@ where
     }
 }
 
-/// A focus of the elements of a vector. The focus allows mutation of the elements in the vector.
-pub struct FocusMut<'a, Internal, Leaf, BorrowedInternal>
+pub enum FocusMut<'a, Internal, Leaf, BorrowedInternal>
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait<Context = Internal::Context>,
 {
-    origin: Rc<&'a mut InternalVector<Internal, Leaf, BorrowedInternal>>,
-    pub(crate) nodes: Vec<BorrowedNode<Internal, Leaf>>,
-    len: usize,
-    // Focus part
-    // This indicates the index of the root in the node list and the range of that is covered by it
-    root: Option<(usize, Range<usize>)>,
-    // The listing of internal nodes below the borrowed root node along with their associated ranges
-    path: Vec<(
-        <Internal::InternalEntry as Entry>::LoadMutGuard,
-        Range<usize>,
-    )>,
-    // The leaf of the focus part, might not exist if the borrowed root is a leaf node
-    leaf: Option<<Internal::LeafEntry as Entry>::LoadMutGuard>,
-    // The range that is covered by the lowest part of the focus
-    leaf_range: Range<usize>,
+    Rooted {
+        origin: &'a mut InternalVector<Internal, Leaf, BorrowedInternal>,
+        focus: InnerFocusMut<Internal, Leaf, BorrowedInternal>,
+    },
+    Nonrooted {
+        parent: &'a FocusMut<'a, Internal, Leaf, BorrowedInternal>,
+        focus: InnerFocusMut<Internal, Leaf, BorrowedInternal>,
+    },
 }
 
 impl<'a, Internal, Leaf, BorrowedInternal> FocusMut<'a, Internal, Leaf, BorrowedInternal>
@@ -421,34 +410,13 @@ where
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait<Context = Internal::Context>,
 {
-    fn empty(&mut self) -> Self {
-        FocusMut {
-            origin: self.origin.clone(),
-            nodes: vec![],
-            len: 0,
-            root: None,
-            path: Vec::new(),
-            leaf: None,
-            leaf_range: 0..0,
-        }
-    }
-
     pub(crate) fn from_vector(
-        origin: Rc<&'a mut InternalVector<Internal, Leaf, BorrowedInternal>>,
+        origin: &'a mut InternalVector<Internal, Leaf, BorrowedInternal>,
         nodes: Vec<BorrowedNode<Internal, Leaf>>,
     ) -> Self {
-        let mut len = 0;
-        for node in nodes.iter() {
-            len += node.len();
-        }
-        FocusMut {
+        FocusMut::Rooted {
             origin,
-            nodes,
-            len,
-            root: None,
-            path: Vec::new(),
-            leaf: None,
-            leaf_range: 0..0,
+            focus: InnerFocusMut::from_vector(nodes),
         }
     }
 
@@ -461,13 +429,14 @@ where
     /// # use librrb::Vector;
     /// let mut v = vector![1, 2, 3];
     /// let mut focus_1 = v.focus_mut();
-    /// focus_1.split_at_fn(1, |focus_1, focus_2| {
-    ///     assert_eq!(focus_1.len(), 1);
-    ///     assert_eq!(focus_2.len(), 2);
-    /// });
+    /// let (focus_1, focus_2) = focus_1.split_at(1);
+    /// assert_eq!(focus_1.len(), 1);
+    /// assert_eq!(focus_2.len(), 2);
     /// ```
     pub fn len(&self) -> usize {
-        self.len
+        match self {
+            FocusMut::Rooted { focus, .. } | FocusMut::Nonrooted { focus, .. } => focus.len(),
+        }
     }
 
     /// Tests whether the focus represents no elements.
@@ -479,10 +448,9 @@ where
     /// # use librrb::Vector;
     /// let mut v = vector![1, 2, 3];
     /// let mut focus_1 = v.focus_mut();
-    /// focus_1.split_at_fn(0, |focus_1, focus_2| {
-    ///     assert!(focus_1.is_empty());
-    ///     assert!(!focus_2.is_empty());
-    /// });
+    /// let (focus_1, focus_2) = focus_1.split_at(0);
+    /// assert!(focus_1.is_empty());
+    /// assert!(!focus_2.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -492,86 +460,6 @@ where
     /// everything up to (excluding) the index. The return result is a focus that represents
     /// everything after (including) the index.
     ///
-    /// # Panics
-    ///
-    /// Panics if the given index is greater than the focus' length.
-    ///
-    fn split_at(&mut self, index: usize) -> Self {
-        // We split the vector in two at the position, we need to find the two positions that denote
-        // the last of this vector and the first of the next vector.
-        let original_len = self.len;
-        if index == 0 {
-            // This vector becomes empty and the returned one is self.
-            let empty = self.empty();
-            let result = mem::replace(self, empty);
-            debug_assert!(self.assert_invariants());
-            debug_assert!(result.assert_invariants());
-            return result;
-        } else if index == self.len {
-            // This vector is unchanged and the returned one is empty.
-            let result = self.empty();
-            debug_assert!(self.assert_invariants());
-            debug_assert!(result.assert_invariants());
-            return result;
-        }
-        // index is now 1..self.len()
-        let (self_child_position, mut subindex) = self.find_node_info_for_index(index).unwrap();
-        self.len = index;
-
-        let mut right_nodes = self.nodes.split_off(self_child_position);
-        right_nodes.reverse();
-
-        loop {
-            if subindex == 0 {
-                break;
-            }
-            let node = right_nodes.pop().unwrap();
-            match node {
-                BorrowedNode::Internal(mut internal) => {
-                    let (new_subindex, mut new_internal) = internal.split_at_position(subindex);
-                    subindex = new_subindex;
-                    let child = new_internal
-                        .pop_child(Side::Front, &self.origin.context)
-                        .unwrap();
-                    if !internal.is_empty() {
-                        self.nodes.push(BorrowedNode::Internal(internal));
-                    }
-                    if !new_internal.is_empty() {
-                        right_nodes.push(BorrowedNode::Internal(new_internal));
-                    }
-                    right_nodes.push(child);
-                }
-                BorrowedNode::Leaf(mut leaf) => {
-                    let new_leaf = leaf.split_at(subindex);
-                    if !leaf.is_empty() {
-                        self.nodes.push(BorrowedNode::Leaf(leaf));
-                    }
-                    if !new_leaf.is_empty() {
-                        right_nodes.push(BorrowedNode::Leaf(new_leaf));
-                    }
-                    break;
-                }
-            }
-        }
-        right_nodes.reverse();
-
-        self.root.take();
-        self.path.clear();
-        self.leaf = None;
-        self.leaf_range = 0..0;
-
-        let result = FocusMut::from_vector(self.origin.clone(), right_nodes);
-        assert_eq!(self.len + result.len, original_len);
-        debug_assert!(self.assert_invariants());
-        debug_assert!(result.assert_invariants());
-        result
-    }
-
-    /// Splits the focus into two foci. Then calls the given function with the two foci as
-    /// arguments. This focus is replaced with a focus that represents everything up to
-    /// (excluding) the index. The return result is a focus that represents everything after
-    /// (including) the index. Afterwards, the original focus is reconstituted.
-    ///
     /// # Examples
     ///
     /// ```
@@ -579,61 +467,51 @@ where
     /// # use librrb::Vector;
     /// let mut v = vector![1, 2, 3];
     /// let mut focus_1 = v.focus_mut();
-    /// focus_1.split_at_fn(1, |focus_1, focus_2| {
-    ///     assert_eq!(focus_1.get(0), Some(&mut 1));
-    ///     assert_eq!(focus_1.get(1), None);
-    ///     assert_eq!(focus_2.get(0), Some(&mut 2));
-    ///     assert_eq!(focus_2.get(1), Some(&mut 3));
-    /// });
+    /// let (mut focus_1, mut focus_2) = focus_1.split_at(1);
+    /// assert_eq!(focus_1.get(0), Some(&mut 1));
+    /// assert_eq!(focus_1.get(1), None);
+    /// assert_eq!(focus_2.get(0), Some(&mut 2));
+    /// assert_eq!(focus_2.get(1), Some(&mut 3));
     /// ```
     /// # Panics
     ///
     /// Panics if the given index is greater than the focus' length.
     ///
-    pub fn split_at_fn<F: FnMut(&mut Self, &mut Self)>(&mut self, index: usize, mut f: F) {
-        let mut result = self.split_at(index);
-        f(self, &mut result);
-        self.combine(result);
-    }
-
-    fn combine(&mut self, mut other: Self) {
-        // Recombine both side FocusMuts into back into the original FocusMut
-        if self.is_empty() {
-            *self = other;
-            return;
-        } else if other.is_empty() {
-            return;
-        }
-
-        other.nodes.reverse();
-
-        while !self.nodes.is_empty() && !other.nodes.is_empty() {
-            let mut left_node = self.nodes.pop().unwrap();
-            let right_node = other.nodes.pop().unwrap();
-            let right_level = right_node.level();
-
-            if !left_node.from_same_source(&right_node) {
-                self.nodes.push(left_node);
-                other.nodes.push(right_node);
-                break;
+    pub fn split_at(
+        &mut self,
+        index: usize,
+    ) -> (
+        FocusMut<Internal, Leaf, BorrowedInternal>,
+        FocusMut<Internal, Leaf, BorrowedInternal>,
+    ) {
+        match self {
+            FocusMut::Rooted { focus, origin } => {
+                let (left, right) = focus.split_at(index, &origin.context);
+                (
+                    FocusMut::Nonrooted {
+                        focus: left,
+                        parent: self,
+                    },
+                    FocusMut::Nonrooted {
+                        focus: right,
+                        parent: self,
+                    },
+                )
             }
-
-            left_node.combine(right_node);
-            if let Some(right_parent) = other.nodes.last_mut() {
-                // If we have a borrowed Leaf as the root then we could have exhausted the list.
-                if right_level + 1 == right_parent.level() {
-                    // The parent range must be updated to include the whole borrowed node now.
-                    right_parent.internal_mut().unpop_child(Side::Front);
-                } else {
-                    other.nodes.push(left_node);
-                }
-            } else {
-                other.nodes.push(left_node);
+            FocusMut::Nonrooted { focus, parent } => {
+                let (left, right) = focus.split_at(index, parent.context());
+                (
+                    FocusMut::Nonrooted {
+                        focus: left,
+                        parent: self,
+                    },
+                    FocusMut::Nonrooted {
+                        focus: right,
+                        parent: self,
+                    },
+                )
             }
         }
-        other.nodes.reverse();
-        self.nodes.append(&mut other.nodes);
-        self.len += other.len;
     }
 
     // /// Derp
@@ -667,7 +545,8 @@ where
     //     self.len += other.len;
     // }
 
-    /// Narrows the focus so it only represents the given subrange of the focus.
+    /// Gets a mutable reference to the element at the given index of the focus. The index is
+    /// relative to the start of the focus. If the index does not exist this will return `None`.
     ///
     /// # Examples
     ///
@@ -676,36 +555,304 @@ where
     /// # use librrb::Vector;
     /// let mut v = vector![1, 2, 3];
     /// let mut focus = v.focus_mut();
-    /// focus.narrow(1..3, |focus| {
-    ///     assert_eq!(focus.get(0), Some(&mut 2));
-    ///     assert_eq!(focus.get(1), Some(&mut 3));
-    ///     assert_eq!(focus.get(2), None);
-    /// });
+    /// assert_eq!(focus.get(0), Some(&mut 1));
+    /// assert_eq!(focus.get(1), Some(&mut 2));
+    /// assert_eq!(focus.get(2), Some(&mut 3));
+    /// assert_eq!(focus.get(3), None);
     /// ```
-    pub fn narrow<
-        R: RangeBounds<usize>,
-        F: FnMut(&mut FocusMut<Internal, Leaf, BorrowedInternal>),
-    >(
-        &mut self,
-        range: R,
-        mut f: F,
-    ) {
-        let range_start = match range.start_bound() {
-            Bound::Unbounded => 0,
-            Bound::Included(x) => *x,
-            Bound::Excluded(x) => x + 1,
-        };
-        let range_end = match range.end_bound() {
-            Bound::Unbounded => self.len(),
-            Bound::Included(x) => x + 1,
-            Bound::Excluded(x) => *x,
-        };
-        self.split_at_fn(range_end, |left, _right| {
-            left.split_at_fn(range_start, |_left, right| f(right))
-        });
+    pub fn get(&mut self, idx: usize) -> Option<&mut Leaf::Item> {
+        match self {
+            FocusMut::Rooted { focus, origin } => focus.get(idx, &origin.context),
+            FocusMut::Nonrooted { focus, parent } => focus.get(idx, parent.context()),
+        }
     }
 
-    fn move_focus(&mut self, mut idx: usize) {
+    /// Gets a mutable reference to the element at the given index of the focus. The index is
+    /// relative to the start of the focus. If the index does not exist this will panic.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate librrb;
+    /// # use librrb::Vector;
+    /// let mut v = vector![1, 2, 3];
+    /// let mut focus = v.focus_mut();
+    /// assert_eq!(focus.index(0), &mut 1);
+    /// assert_eq!(focus.index(1), &mut 2);
+    /// assert_eq!(focus.index(2), &mut 3);
+    /// ```
+    pub fn index(&mut self, idx: usize) -> &mut Leaf::Item {
+        self.get(idx).expect("Index out of range.")
+    }
+
+    pub fn assert_invariants(&self) -> bool {
+        true
+    }
+
+    fn context(&self) -> &Internal::Context {
+        match self {
+            FocusMut::Rooted { origin, .. } => &origin.context,
+            FocusMut::Nonrooted { parent, .. } => parent.context(),
+        }
+    }
+}
+
+/// A focus of the elements of a vector. The focus allows mutation of the elements in the vector.
+#[derive(Clone)]
+pub struct InnerFocusMut<Internal, Leaf, BorrowedInternal>
+where
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Context = Internal::Context>,
+{
+    // origin: Rc<&'a mut InternalVector<Internal, Leaf, BorrowedInternal>>,
+    pub(crate) nodes: Vec<BorrowedNode<Internal, Leaf>>,
+    len: usize,
+    // Focus part
+    // This indicates the index of the root in the node list and the range of that is covered by it
+    root: Option<(usize, Range<usize>)>,
+    // The listing of internal nodes below the borrowed root node along with their associated ranges
+    path: Vec<(BorrowedInternal, Range<usize>)>,
+    // The leaf of the focus part, might not exist if the borrowed root is a leaf node
+    leaf: Option<Leaf::Borrowed>,
+    // The range that is covered by the lowest part of the focus
+    leaf_range: Range<usize>,
+}
+
+impl<Internal, Leaf, BorrowedInternal> InnerFocusMut<Internal, Leaf, BorrowedInternal>
+where
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Context = Internal::Context>,
+{
+    fn empty(&mut self) -> Self {
+        InnerFocusMut {
+            // origin: self.origin.clone(),
+            nodes: vec![],
+            len: 0,
+            root: None,
+            path: Vec::new(),
+            leaf: None,
+            leaf_range: 0..0,
+        }
+    }
+
+    pub(crate) fn from_vector(nodes: Vec<BorrowedNode<Internal, Leaf>>) -> Self {
+        let mut len = 0;
+        for node in nodes.iter() {
+            len += node.len();
+        }
+        InnerFocusMut {
+            nodes,
+            len,
+            root: None,
+            path: Vec::new(),
+            leaf: None,
+            leaf_range: 0..0,
+        }
+    }
+
+    /// Gets the length of the focus.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Tests whether the focus represents no elements.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Splits the focus into two foci. This focus is replaced with a focus that represents
+    /// everything up to (excluding) the index. The return result is a focus that represents
+    /// everything after (including) the index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the given index is greater than the focus' length.
+    ///
+    fn split_at(&mut self, index: usize, context: &Internal::Context) -> (Self, Self) {
+        // We split the vector in two at the position, we need to find the two positions that denote
+        // the last of this vector and the first of the next vector.
+        if index == 0 {
+            // This vector becomes empty and the returned one is self.
+            let first_part = self.empty();
+            let second_part = self.clone();
+            debug_assert!(first_part.assert_invariants());
+            debug_assert!(second_part.assert_invariants());
+            return (first_part, second_part);
+        } else if index == self.len {
+            // This vector is unchanged and the returned one is empty.
+            let first_part = self.clone();
+            let second_part = self.empty();
+            debug_assert!(first_part.assert_invariants());
+            debug_assert!(second_part.assert_invariants());
+            return (first_part, second_part);
+        }
+        let original_len = self.len;
+        // index is now 1..self.len()
+        let (self_child_position, mut subindex) = self.find_node_info_for_index(index).unwrap();
+        // self.len = index;
+
+        let mut left_nodes = self.nodes.clone();
+        let mut right_nodes = left_nodes.split_off(self_child_position);
+        right_nodes.reverse();
+
+        loop {
+            if subindex == 0 {
+                break;
+            }
+            let node = right_nodes.pop().unwrap();
+            match node {
+                BorrowedNode::Internal(mut internal) => {
+                    let (new_subindex, mut new_internal) = internal.split_at_position(subindex);
+                    subindex = new_subindex;
+                    let child = new_internal.pop_child(Side::Front, context).unwrap();
+                    if !internal.is_empty() {
+                        left_nodes.push(BorrowedNode::Internal(internal));
+                    }
+                    if !new_internal.is_empty() {
+                        right_nodes.push(BorrowedNode::Internal(new_internal));
+                    }
+                    right_nodes.push(child);
+                }
+                BorrowedNode::Leaf(mut leaf) => {
+                    let new_leaf = leaf.split_at(subindex);
+                    if !leaf.is_empty() {
+                        left_nodes.push(BorrowedNode::Leaf(leaf));
+                    }
+                    if !new_leaf.is_empty() {
+                        right_nodes.push(BorrowedNode::Leaf(new_leaf));
+                    }
+                    break;
+                }
+            }
+        }
+        right_nodes.reverse();
+
+        // self.root.take();
+        // self.path.clear();
+        // self.leaf = None;
+        // self.leaf_range = 0..0;
+
+        let first_part = InnerFocusMut::from_vector(left_nodes);
+        let second_part = InnerFocusMut::from_vector(right_nodes);
+        assert_eq!(first_part.len + second_part.len, original_len);
+        debug_assert!(first_part.assert_invariants());
+        debug_assert!(second_part.assert_invariants());
+        (first_part, second_part)
+    }
+
+    // fn combine(&mut self, mut other: Self) {
+    //     // Recombine both side FocusMuts into back into the original FocusMut
+    //     if self.is_empty() {
+    //         *self = other;
+    //         return;
+    //     } else if other.is_empty() {
+    //         return;
+    //     }
+
+    //     other.nodes.reverse();
+
+    //     while !self.nodes.is_empty() && !other.nodes.is_empty() {
+    //         let mut left_node = self.nodes.pop().unwrap();
+    //         let right_node = other.nodes.pop().unwrap();
+    //         let right_level = right_node.level();
+
+    //         if !left_node.from_same_source(&right_node) {
+    //             self.nodes.push(left_node);
+    //             other.nodes.push(right_node);
+    //             break;
+    //         }
+
+    //         left_node.combine(right_node);
+    //         if let Some(right_parent) = other.nodes.last_mut() {
+    //             // If we have a borrowed Leaf as the root then we could have exhausted the list.
+    //             if right_level + 1 == right_parent.level() {
+    //                 // The parent range must be updated to include the whole borrowed node now.
+    //                 right_parent.internal_mut().unpop_child(Side::Front);
+    //             } else {
+    //                 other.nodes.push(left_node);
+    //             }
+    //         } else {
+    //             other.nodes.push(left_node);
+    //         }
+    //     }
+    //     other.nodes.reverse();
+    //     self.nodes.append(&mut other.nodes);
+    //     self.len += other.len;
+    // }
+
+    // /// Derp
+    // pub fn append(&mut self, other: Self) {
+    //     // The focus part remains the same, but update other bits.
+    //     self.origins.extend(other.origins);
+    //     self.nodes.extend(other.nodes);
+    //     self.len += other.len;
+    // }
+
+    // /// Derp
+    // pub fn prepend(&mut self, mut other: Self) {
+    //     // The focus part must be updated to point to the new place before the other bits
+    //     if let Some((ref mut root_id, ref mut root_range)) = self.root {
+    //         *root_id += other.nodes.len();
+    //         root_range.end += other.len;
+    //         root_range.start += other.len;
+    //         for (_, path_range) in self.path.iter_mut() {
+    //             path_range.end += other.len;
+    //             path_range.start += other.len;
+    //         }
+    //         self.leaf_range.end += other.len();
+    //         self.leaf_range.start += other.len();
+    //     }
+    //     self.origins.reverse();
+    //     other.origins.reverse();
+    //     self.origins.extend(other.origins);
+    //     self.origins.reverse();
+    //     mem::swap(&mut self.nodes, &mut other.nodes);
+    //     self.nodes.extend(other.nodes);
+    //     self.len += other.len;
+    // }
+
+    // /// Narrows the focus so it only represents the given subrange of the focus.
+    // ///
+    // /// # Examples
+    // ///
+    // /// ```
+    // /// # #[macro_use] extern crate librrb;
+    // /// # use librrb::Vector;
+    // /// let mut v = vector![1, 2, 3];
+    // /// let mut focus = v.focus_mut();
+    // /// focus.narrow(1..3, |focus| {
+    // ///     assert_eq!(focus.get(0), Some(&mut 2));
+    // ///     assert_eq!(focus.get(1), Some(&mut 3));
+    // ///     assert_eq!(focus.get(2), None);
+    // /// });
+    // /// ```
+    // pub fn narrow<
+    //     R: RangeBounds<usize>,
+    //     F: FnMut(&mut FocusMut<Internal, Leaf, BorrowedInternal>),
+    // >(
+    //     &mut self,
+    //     range: R,
+    //     mut f: F,
+    //     context: &Internal::Context,
+    // ) {
+    //     let range_start = match range.start_bound() {
+    //         Bound::Unbounded => 0,
+    //         Bound::Included(x) => *x,
+    //         Bound::Excluded(x) => x + 1,
+    //     };
+    //     let range_end = match range.end_bound() {
+    //         Bound::Unbounded => self.len(),
+    //         Bound::Included(x) => x + 1,
+    //         Bound::Excluded(x) => *x,
+    //     };
+    //     self.split_at_fn(range_end, context, |left, _right| {
+    //         left.split_at_fn(range_start, context, |_left, right| f(right))
+    //     });
+    // }
+
+    fn move_focus(&mut self, mut idx: usize, context: &Internal::Context) {
         if self.leaf_range.contains(&idx) {
             // Nothing needs to move here
             return;
@@ -754,14 +901,12 @@ where
                         match subchild {
                             NodeMut::Internal(subchild) => {
                                 self.path.push((
-                                    subchild.load_mut(&self.origin.context),
+                                    subchild.load_mut(context).borrow_node(),
                                     absolute_subchild_range,
                                 ));
                             }
                             NodeMut::Leaf(subchild) => {
-                                let leaf: <Internal::LeafEntry as Entry>::LoadMutGuard =
-                                    subchild.load_mut(&self.origin.context);
-                                self.leaf = Some(leaf);
+                                self.leaf = Some(subchild.load_mut(context).borrow_node());
                                 self.leaf_range = absolute_subchild_range;
                                 return;
                             }
@@ -784,7 +929,7 @@ where
             .start;
         loop {
             let (parent, parent_subrange) = self.path.last_mut().unwrap();
-            let parent = &mut **parent;
+            let parent = &mut *parent;
             let (child_node, child_subrange) = parent.get_child_mut_for_position(idx).unwrap();
             idx -= child_subrange.start;
             let child_subrange = (parent_subrange.start + child_subrange.start)
@@ -794,13 +939,13 @@ where
             // idx = new_idx;
             match child_node {
                 NodeMut::Internal(internal) => {
-                    let new_root = internal.load_mut(&self.origin.context);
-                    self.path.push((new_root, child_subrange));
+                    let mut new_root = internal.load_mut(context);
+                    self.path.push((new_root.borrow_node(), child_subrange));
                 }
                 NodeMut::Leaf(leaf) => {
                     // skipped_items.start += this_skipped_items;
                     // skipped_items.end = skipped_items.start + leaf_len;
-                    self.leaf = Some(leaf.load_mut(&self.origin.context));
+                    self.leaf = Some(leaf.load_mut(context).borrow_node());
                     self.leaf_range = child_subrange;
                     break;
                 }
@@ -823,13 +968,13 @@ where
     /// assert_eq!(focus.get(2), Some(&mut 3));
     /// assert_eq!(focus.get(3), None);
     /// ```
-    pub fn get(&mut self, idx: usize) -> Option<&mut Leaf::Item> {
-        self.move_focus(idx);
+    pub fn get(&mut self, idx: usize, context: &Internal::Context) -> Option<&mut Leaf::Item> {
+        self.move_focus(idx, context);
         if self.leaf_range.contains(&idx) {
             // println!("In branch A {} with idx for in {:?}", idx, self.leaf_range);
             let position = idx - self.leaf_range.start;
             if let Some(ref mut leaf) = self.leaf {
-                let ptr = leaf.get_mut(position, &self.origin.context)?;
+                let ptr = leaf.get_mut(position)?;
                 // println!("In branch B with idx {:?}", unsafe { &mut *ptr });
                 unsafe { Some(&mut *ptr) }
             } else {
@@ -849,23 +994,23 @@ where
         }
     }
 
-    /// Gets a mutable reference to the element at the given index of the focus. The index is
-    /// relative to the start of the focus. If the index does not exist this will panic.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #[macro_use] extern crate librrb;
-    /// # use librrb::Vector;
-    /// let mut v = vector![1, 2, 3];
-    /// let mut focus = v.focus_mut();
-    /// assert_eq!(focus.index(0), &mut 1);
-    /// assert_eq!(focus.index(1), &mut 2);
-    /// assert_eq!(focus.index(2), &mut 3);
-    /// ```
-    pub fn index(&mut self, idx: usize) -> &mut Leaf::Item {
-        self.get(idx).expect("Index out of range.")
-    }
+    // /// Gets a mutable reference to the element at the given index of the focus. The index is
+    // /// relative to the start of the focus. If the index does not exist this will panic.
+    // ///
+    // /// # Examples
+    // ///
+    // /// ```
+    // /// # #[macro_use] extern crate librrb;
+    // /// # use librrb::Vector;
+    // /// let mut v = vector![1, 2, 3];
+    // /// let mut focus = v.focus_mut();
+    // /// assert_eq!(focus.index(0), &mut 1);
+    // /// assert_eq!(focus.index(1), &mut 2);
+    // /// assert_eq!(focus.index(2), &mut 3);
+    // /// ```
+    // pub fn index(&mut self, idx: usize, context: &Internal::Context) -> &mut Leaf::Item {
+    //     self.get(idx).expect("Index out of range.")
+    // }
 
     /// Returns the spine position and subindex corresponding the given index.
     fn find_node_info_for_index(&self, index: usize) -> Option<(usize, usize)> {
@@ -926,21 +1071,20 @@ mod test {
 
         const S: usize = N / 2;
         let mut focus = v.focus_mut();
-        focus.split_at_fn(S, |left, right| {
-            for i in 0..S {
-                let thing = left.get(i);
-                if let Some(thing) = thing {
-                    *thing = 0;
-                }
+        let (mut left, mut right) = focus.split_at(S);
+        for i in 0..S {
+            let thing = left.get(i);
+            if let Some(thing) = thing {
+                *thing = 0;
             }
+        }
 
-            for i in 0..N - S {
-                let thing = right.get(i);
-                if let Some(thing) = thing {
-                    *thing = 1;
-                }
+        for i in 0..N - S {
+            let thing = right.get(i);
+            if let Some(thing) = thing {
+                *thing = 1;
             }
-        });
+        }
         for i in 0..N {
             if i < S {
                 assert_eq!(focus.get(i), Some(&mut 0));

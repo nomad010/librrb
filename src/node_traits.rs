@@ -15,7 +15,7 @@ pub trait Entry: Clone + std::fmt::Debug {
     fn load_mut(&mut self, context: &Self::Context) -> Self::LoadMutGuard;
 }
 
-pub trait BorrowedLeafTrait {
+pub trait BorrowedLeafTrait: Clone {
     type Context: Clone + std::fmt::Debug + Default;
     type Item;
     type ItemMutGuard: DerefMut<Target = Self::Item>;
@@ -156,7 +156,7 @@ pub trait LeafTrait: Clone + std::fmt::Debug {
 
 pub trait BorrowedInternalTrait<
     Leaf: LeafTrait<Context = <Self::InternalChild as InternalTrait<Leaf>>::Context>,
->
+>: Clone
 {
     type InternalChild: InternalTrait<Leaf>;
     type ItemMutGuard: DerefMut<Target = Self::InternalChild>;
@@ -646,7 +646,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum BorrowedNode<Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
