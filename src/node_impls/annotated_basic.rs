@@ -86,17 +86,17 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub struct BorrowedLeaf<A: Clone + std::fmt::Debug> {
+pub struct BorrowedLeaf<A: Clone + std::fmt::Debug + std::ops::Add> {
     buffer: BorrowBufferMut<A>,
 }
 
-impl<A: Clone + std::fmt::Debug> Drop for BorrowedLeaf<A> {
+impl<A: Clone + std::fmt::Debug + std::ops::Add> Drop for BorrowedLeaf<A> {
     fn drop(&mut self) {
         // println!("Dropping leaf")
     }
 }
 
-impl<A: Clone + std::fmt::Debug> BorrowedLeafTrait for BorrowedLeaf<A> {
+impl<A: Clone + std::fmt::Debug + std::ops::Add> BorrowedLeafTrait for BorrowedLeaf<A> {
     type Item = A;
     type Context = ();
     type ItemMutGuard = DerefMutPtr<A>;
@@ -123,11 +123,11 @@ impl<A: Clone + std::fmt::Debug> BorrowedLeafTrait for BorrowedLeaf<A> {
 }
 
 #[derive(Clone, Debug)]
-pub struct Leaf<A: Clone + std::fmt::Debug> {
+pub struct Leaf<A: Clone + std::fmt::Debug + std::ops::Add> {
     buffer: CircularBuffer<A>,
 }
 
-impl<A: Clone + std::fmt::Debug> LeafTrait for Leaf<A> {
+impl<A: Clone + std::fmt::Debug + std::ops::Add> LeafTrait for Leaf<A> {
     type Item = A;
     type Context = ();
     type Borrowed = BorrowedLeaf<A>;
@@ -228,7 +228,7 @@ impl<A: Clone + std::fmt::Debug> LeafTrait for Leaf<A> {
 }
 
 pub struct BorrowedInternal<
-    A: Clone + std::fmt::Debug,
+    A: Clone + std::fmt::Debug + std::ops::Add,
     P: SharedPointerKind,
     Leaf: LeafTrait<Item = A, Context = ()>,
 > {
@@ -236,8 +236,11 @@ pub struct BorrowedInternal<
     pub(crate) children: BorrowedChildList<A, P, Leaf>,
 }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>> Drop
-    for BorrowedInternal<A, P, Leaf>
+impl<
+        A: Clone + std::fmt::Debug + std::ops::Add,
+        P: SharedPointerKind,
+        Leaf: LeafTrait<Item = A, Context = ()>,
+    > Drop for BorrowedInternal<A, P, Leaf>
 {
     fn drop(&mut self) {
         // let f = match &self.children {
@@ -248,8 +251,11 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A,
     }
 }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
-    Clone for BorrowedInternal<A, P, Leaf>
+impl<
+        A: Clone + std::fmt::Debug + std::ops::Add,
+        P: SharedPointerKind,
+        Leaf: LeafTrait<Item = A, Context = ()>,
+    > Clone for BorrowedInternal<A, P, Leaf>
 {
     fn clone(&self) -> Self {
         BorrowedInternal {
@@ -259,8 +265,11 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A,
     }
 }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
-    BorrowedInternal<A, P, Leaf>
+impl<
+        A: Clone + std::fmt::Debug + std::ops::Add,
+        P: SharedPointerKind,
+        Leaf: LeafTrait<Item = A, Context = ()>,
+    > BorrowedInternal<A, P, Leaf>
 {
     fn left_size(&self) -> usize {
         let range = self.children.range();
@@ -288,16 +297,22 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A,
     }
 }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
-    std::fmt::Debug for BorrowedInternal<A, P, Leaf>
+impl<
+        A: Clone + std::fmt::Debug + std::ops::Add,
+        P: SharedPointerKind,
+        Leaf: LeafTrait<Item = A, Context = ()>,
+    > std::fmt::Debug for BorrowedInternal<A, P, Leaf>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BorrowedInternal").finish()
     }
 }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
-    BorrowedInternalTrait<Leaf> for BorrowedInternal<A, P, Leaf>
+impl<
+        A: Clone + std::fmt::Debug + std::ops::Add,
+        P: SharedPointerKind,
+        Leaf: LeafTrait<Item = A, Context = ()>,
+    > BorrowedInternalTrait<Leaf> for BorrowedInternal<A, P, Leaf>
 {
     type InternalChild = Internal<A, P, Leaf>;
     type ItemMutGuard = DerefMutPtr<Self::InternalChild>;
@@ -393,7 +408,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A,
 
 #[derive(Debug)]
 pub(crate) enum BorrowedChildList<
-    A: Clone + std::fmt::Debug,
+    A: Clone + std::fmt::Debug + std::ops::Add,
     P: SharedPointerKind,
     Leaf: LeafTrait<Item = A, Context = ()>,
 > {
@@ -403,7 +418,7 @@ pub(crate) enum BorrowedChildList<
 
 impl<
         'a,
-        A: Clone + std::fmt::Debug,
+        A: Clone + std::fmt::Debug + std::ops::Add,
         P: SharedPointerKind,
         Leaf: LeafTrait<Item = A, Context = ()>,
     > Clone for BorrowedChildList<A, P, Leaf>
@@ -420,7 +435,7 @@ impl<
 
 impl<
         'a,
-        A: Clone + std::fmt::Debug,
+        A: Clone + std::fmt::Debug + std::ops::Add,
         P: SharedPointerKind,
         Leaf: LeafTrait<Item = A, Context = ()>,
     > BorrowedChildList<A, P, Leaf>
@@ -462,7 +477,7 @@ impl<
 /// Represents a homogenous list of nodes.
 #[derive(Debug)]
 pub(crate) enum ChildList<
-    A: Clone + std::fmt::Debug,
+    A: Clone + std::fmt::Debug + std::ops::Add,
     P: SharedPointerKind,
     Leaf: LeafTrait<Item = A, Context = ()>,
 > {
@@ -470,8 +485,11 @@ pub(crate) enum ChildList<
     Internals(CircularBuffer<SharedPointerEntry<Internal<A, P, Leaf>, P, ()>>),
 }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
-    Clone for ChildList<A, P, Leaf>
+impl<
+        A: Clone + std::fmt::Debug + std::ops::Add,
+        P: SharedPointerKind,
+        Leaf: LeafTrait<Item = A, Context = ()>,
+    > Clone for ChildList<A, P, Leaf>
 {
     fn clone(&self) -> Self {
         match self {
@@ -481,8 +499,11 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A,
     }
 }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
-    ChildList<A, P, Leaf>
+impl<
+        A: Clone + std::fmt::Debug + std::ops::Add,
+        P: SharedPointerKind,
+        Leaf: LeafTrait<Item = A, Context = ()>,
+    > ChildList<A, P, Leaf>
 {
     /// Constructs a new empty list of nodes.
     pub fn new_empty(&self) -> Self {
@@ -603,7 +624,7 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A,
 
 #[derive(Debug)]
 pub struct Internal<
-    A: Clone + std::fmt::Debug,
+    A: Clone + std::fmt::Debug + std::ops::Add,
     P: SharedPointerKind,
     Leaf: LeafTrait<Item = A, Context = ()>,
 > {
@@ -611,8 +632,11 @@ pub struct Internal<
     children: ChildList<A, P, Leaf>,
 }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
-    Clone for Internal<A, P, Leaf>
+impl<
+        A: Clone + std::fmt::Debug + std::ops::Add,
+        P: SharedPointerKind,
+        Leaf: LeafTrait<Item = A, Context = ()>,
+    > Clone for Internal<A, P, Leaf>
 {
     fn clone(&self) -> Self {
         Internal {
@@ -630,8 +654,11 @@ impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A,
 //     }
 // }
 
-impl<A: Clone + std::fmt::Debug, P: SharedPointerKind, Leaf: LeafTrait<Item = A, Context = ()>>
-    InternalTrait<Leaf> for Internal<A, P, Leaf>
+impl<
+        A: Clone + std::fmt::Debug + std::ops::Add,
+        P: SharedPointerKind,
+        Leaf: LeafTrait<Item = A, Context = ()>,
+    > InternalTrait<Leaf> for Internal<A, P, Leaf>
 {
     // type Item = A;
     type Borrowed = BorrowedInternal<A, P, Leaf>;

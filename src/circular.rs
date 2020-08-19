@@ -16,6 +16,9 @@ pub(crate) struct BorrowBufferMut<A: Debug> {
     len: usize,
 }
 
+unsafe impl<A: Debug + Send> Send for BorrowBufferMut<A> {}
+unsafe impl<A: Debug + Sync> Sync for BorrowBufferMut<A> {}
+
 impl<A: Debug> Debug for BorrowBufferMut<A> {
     fn fmt(&self, f: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
         f.write_str("[")?;
@@ -30,11 +33,13 @@ impl<A: Debug> Debug for BorrowBufferMut<A> {
 }
 
 impl<'a, A: Debug> BorrowBufferMut<A> {
+    #[allow(dead_code)]
     pub fn from_same_source(&self, other: &Self) -> bool {
         self.data == other.data
     }
 
-    pub fn combine(&mut self, other: Self) {
+    #[allow(dead_code)]
+    fn combine(&mut self, other: Self) {
         assert!(self.from_same_source(&other));
         assert!(other.range.start == self.range.end);
         self.range.end = other.range.end;
@@ -90,17 +95,35 @@ impl<'a, A: Debug> BorrowBufferMut<A> {
     //     self.get_mut(0)
     // }
 
-    pub fn split_at(&mut self, index: usize) -> Self {
+    // pub fn split_at(&mut self, index: usize) -> Self {
+    //     let first_end = self.range.start + index;
+    //     assert!(first_end <= self.range.end);
+    //     let other = BorrowBufferMut {
+    //         data: self.data,
+    //         range: first_end..self.range.end,
+    //         front: self.front,
+    //         len: self.len,
+    //     };
+    //     self.range.end = first_end;
+    //     other
+    // }
+
+    pub fn split_at(&mut self, index: usize) -> (Self, Self) {
         let first_end = self.range.start + index;
         assert!(first_end <= self.range.end);
+        let first = BorrowBufferMut {
+            data: self.data,
+            range: self.range.start..first_end,
+            front: self.front,
+            len: self.len,
+        };
         let other = BorrowBufferMut {
             data: self.data,
             range: first_end..self.range.end,
             front: self.front,
             len: self.len,
         };
-        self.range.end = first_end;
-        other
+        (first, other)
     }
 }
 

@@ -5,6 +5,62 @@ use std::cmp;
 use std::fmt::Debug;
 use std::mem;
 
+// We need GATs for an additional lifetime and I don't want to work around it here.
+// pub(crate) trait SortFocus<'a>: Sized {
+//     type CompareItem;
+
+//     fn len(&self) -> usize;
+
+//     fn split_at<'b, T: SortFocus<'b>, F: Fn(&mut T, &mut T)>(&mut self, idx: usize, f: &F);
+
+//     fn compare<F: Fn(&Self::CompareItem, &Self::CompareItem) -> cmp::Ordering>(
+//         &mut self,
+//         idx: usize,
+//         other: &mut Self,
+//         other_idx: usize,
+//         comparator: &F,
+//     ) -> cmp::Ordering;
+
+//     fn swap(&mut self, idx: usize, other: &mut Self, other_idx: usize);
+// }
+
+// impl<'a, Internal, Leaf, BorrowedInternal> SortFocus<'a>
+//     for FocusMut<'a, Internal, Leaf, BorrowedInternal>
+// where
+//     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+//     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+//     Leaf: LeafTrait<Context = Internal::Context>,
+// {
+//     type CompareItem = Leaf::Item;
+
+//     fn len(&self) -> usize {
+//         self.len()
+//     }
+
+//     fn split_at<'b, T: SortFocus<'b>, F: Fn(&mut T, &mut T)>(&mut self, idx: usize, f: &F) {
+//         let (mut left, mut right) = self.split_at(idx);
+//         f(&mut left, &mut right);
+//     }
+
+//     fn compare<F: Fn(&Self::CompareItem, &Self::CompareItem) -> cmp::Ordering>(
+//         &mut self,
+//         idx: usize,
+//         other: &mut Self,
+//         other_idx: usize,
+//         comparator: &F,
+//     ) -> cmp::Ordering {
+//         let self_item = self.index(idx);
+//         let other_item = other.index(other_idx);
+//         comparator(self_item, other_item)
+//     }
+
+//     fn swap(&mut self, idx: usize, other: &mut Self, other_idx: usize) {
+//         let self_item = self.index(idx);
+//         let other_item = other.index(other_idx);
+//         mem::swap(self_item, other_item);
+//     }
+// }
+
 pub(crate) fn do_single_sort<R, F, Internal, Leaf, BorrowedInternal>(
     focus: &mut FocusMut<Internal, Leaf, BorrowedInternal>,
     rng: &mut R,

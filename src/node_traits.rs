@@ -20,17 +20,13 @@ pub trait BorrowedLeafTrait: Clone {
     type Item;
     type ItemMutGuard: DerefMut<Target = Self::Item>;
 
-    fn split_at(&mut self, idx: usize) -> Self;
+    fn split_at(&mut self, idx: usize) -> (Self, Self);
 
     fn len(&self) -> usize;
 
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-
-    fn from_same_source(&self, other: &Self) -> bool;
-
-    fn combine(&mut self, other: Self);
 
     fn get_mut_guarded(&mut self, idx: usize) -> Option<Self::ItemMutGuard>;
 
@@ -173,13 +169,9 @@ pub trait BorrowedInternalTrait<
 
     fn level(&self) -> usize;
 
-    fn from_same_source(&self, other: &Self) -> bool;
+    fn split_at_child(&mut self, index: usize) -> (Self, Self);
 
-    fn combine(&mut self, other: Self);
-
-    fn split_at_child(&mut self, index: usize) -> Self;
-
-    fn split_at_position(&mut self, position: usize) -> (usize, Self);
+    fn split_at_position(&mut self, position: usize) -> (usize, Self, Self);
 
     /// Returns a mutable reference to the Rc of the child node at the given slot in this node.
     fn get_child_mut_at_slot(
@@ -719,23 +711,6 @@ where
             x
         } else {
             panic!("Failed to unwrap a node as an internal node")
-        }
-    }
-
-    pub fn from_same_source(&self, other: &Self) -> bool {
-        match (self, other) {
-            (BorrowedNode::Internal(node), BorrowedNode::Internal(other)) => {
-                node.from_same_source(other)
-            }
-            (BorrowedNode::Leaf(node), BorrowedNode::Leaf(other)) => node.from_same_source(other),
-            _ => false,
-        }
-    }
-
-    pub fn combine(&mut self, other: Self) {
-        match self {
-            BorrowedNode::Leaf(leaf) => leaf.combine(other.leaf()),
-            BorrowedNode::Internal(internal) => internal.combine(other.internal()),
         }
     }
 

@@ -9,6 +9,7 @@ use crate::node_traits::{
 use crate::vector::InternalVector;
 use crate::Side;
 use std::fmt::Debug;
+use std::mem::ManuallyDrop;
 use std::ops::{Bound, Range, RangeBounds};
 
 /// A focus for a particular node in the spine.
@@ -388,21 +389,74 @@ where
     }
 }
 
+/// derp
 pub enum FocusMut<'a, Internal, Leaf, BorrowedInternal>
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
     Leaf: LeafTrait<Context = Internal::Context>,
 {
+    /// derp
     Rooted {
+        /// derp
         origin: &'a mut InternalVector<Internal, Leaf, BorrowedInternal>,
+        /// derp
         focus: InnerFocusMut<Internal, Leaf, BorrowedInternal>,
+        /// derp
+        borrowed_roots: Vec<BorrowedNode<Internal, Leaf>>,
+        /// derp
+        _marker: std::marker::PhantomData<&'a mut Leaf::Item>,
     },
+    /// derp
     Nonrooted {
+        /// derp
         parent: &'a FocusMut<'a, Internal, Leaf, BorrowedInternal>,
+        /// derp
         focus: InnerFocusMut<Internal, Leaf, BorrowedInternal>,
+        /// derp
+        _marker: std::marker::PhantomData<&'a mut Leaf::Item>,
     },
 }
+
+unsafe impl<'a, Internal, Leaf, BorrowedInternal> Send
+    for FocusMut<'a, Internal, Leaf, BorrowedInternal>
+where
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf::Item: Send,
+{
+}
+
+unsafe impl<'a, Internal, Leaf, BorrowedInternal> Sync
+    for FocusMut<'a, Internal, Leaf, BorrowedInternal>
+where
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf::Item: Sync,
+{
+}
+
+impl<'a, Internal, Leaf, BorrowedInternal> Drop for FocusMut<'a, Internal, Leaf, BorrowedInternal>
+where
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Context = Internal::Context>,
+{
+    fn drop(&mut self) {
+        if let FocusMut::Rooted { borrowed_roots, .. } = self {
+            while let Some(_) = borrowed_roots.pop() {
+                // println!("Dropping borrowed root");
+            }
+        // println!("Lel dropping FocusMutRoot here");
+        } else {
+            // println!("Lel dropping FocusMutSub here");
+        }
+    }
+}
+
+// The above needs to be refactored such that the borrowed nodes are their own Drop type.
 
 impl<'a, Internal, Leaf, BorrowedInternal> FocusMut<'a, Internal, Leaf, BorrowedInternal>
 where
@@ -416,7 +470,9 @@ where
     ) -> Self {
         FocusMut::Rooted {
             origin,
-            focus: InnerFocusMut::from_vector(nodes),
+            focus: InnerFocusMut::from_vector(nodes.clone()),
+            borrowed_roots: nodes,
+            _marker: std::marker::PhantomData,
         }
     }
 
@@ -485,29 +541,33 @@ where
         FocusMut<Internal, Leaf, BorrowedInternal>,
     ) {
         match self {
-            FocusMut::Rooted { focus, origin } => {
+            FocusMut::Rooted { focus, origin, .. } => {
                 let (left, right) = focus.split_at(index, &origin.context);
                 (
                     FocusMut::Nonrooted {
                         focus: left,
                         parent: self,
+                        _marker: std::marker::PhantomData,
                     },
                     FocusMut::Nonrooted {
                         focus: right,
                         parent: self,
+                        _marker: std::marker::PhantomData,
                     },
                 )
             }
-            FocusMut::Nonrooted { focus, parent } => {
+            FocusMut::Nonrooted { focus, parent, .. } => {
                 let (left, right) = focus.split_at(index, parent.context());
                 (
                     FocusMut::Nonrooted {
                         focus: left,
                         parent: self,
+                        _marker: std::marker::PhantomData,
                     },
                     FocusMut::Nonrooted {
                         focus: right,
                         parent: self,
+                        _marker: std::marker::PhantomData,
                     },
                 )
             }
@@ -562,8 +622,8 @@ where
     /// ```
     pub fn get(&mut self, idx: usize) -> Option<&mut Leaf::Item> {
         match self {
-            FocusMut::Rooted { focus, origin } => focus.get(idx, &origin.context),
-            FocusMut::Nonrooted { focus, parent } => focus.get(idx, parent.context()),
+            FocusMut::Rooted { focus, origin, .. } => focus.get(idx, &origin.context),
+            FocusMut::Nonrooted { focus, parent, .. } => focus.get(idx, parent.context()),
         }
     }
 
@@ -585,6 +645,7 @@ where
         self.get(idx).expect("Index out of range.")
     }
 
+    /// derp
     pub fn assert_invariants(&self) -> bool {
         true
     }
@@ -606,7 +667,7 @@ where
     Leaf: LeafTrait<Context = Internal::Context>,
 {
     // origin: Rc<&'a mut InternalVector<Internal, Leaf, BorrowedInternal>>,
-    pub(crate) nodes: Vec<BorrowedNode<Internal, Leaf>>,
+    pub(crate) nodes: ManuallyDrop<Vec<BorrowedNode<Internal, Leaf>>>,
     len: usize,
     // Focus part
     // This indicates the index of the root in the node list and the range of that is covered by it
@@ -617,6 +678,26 @@ where
     leaf: Option<Leaf::Borrowed>,
     // The range that is covered by the lowest part of the focus
     leaf_range: Range<usize>,
+    // Information for when the focus is split, the full borrowed nodes can be destroyed correctly.
+    borrowed_nodes: Vec<BorrowedNode<Internal, Leaf>>,
+}
+
+impl<Internal, Leaf, BorrowedInternal> Drop for InnerFocusMut<Internal, Leaf, BorrowedInternal>
+where
+    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
+    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Leaf: LeafTrait<Context = Internal::Context>,
+{
+    fn drop(&mut self) {
+        self.drop_path_nodes();
+        self.drop_borrowed_nodes();
+        while let Some(node) = self.nodes.pop() {
+            std::mem::forget(node);
+        }
+        unsafe {
+            ManuallyDrop::drop(&mut self.nodes);
+        }
+    }
 }
 
 impl<Internal, Leaf, BorrowedInternal> InnerFocusMut<Internal, Leaf, BorrowedInternal>
@@ -628,12 +709,13 @@ where
     fn empty(&mut self) -> Self {
         InnerFocusMut {
             // origin: self.origin.clone(),
-            nodes: vec![],
+            nodes: ManuallyDrop::new(vec![]),
             len: 0,
             root: None,
-            path: Vec::new(),
+            path: vec![],
             leaf: None,
             leaf_range: 0..0,
+            borrowed_nodes: vec![],
         }
     }
 
@@ -643,12 +725,39 @@ where
             len += node.len();
         }
         InnerFocusMut {
-            nodes,
+            borrowed_nodes: vec![],
+            nodes: ManuallyDrop::new(nodes),
             len,
             root: None,
-            path: Vec::new(),
+            path: vec![],
             leaf: None,
             leaf_range: 0..0,
+        }
+    }
+
+    /// Drops the borrowed nodes for the focus. The borrowed nodes get populated when the focus is
+    /// split. As the split foci don't clean up the parent when both splits are dropped, this is
+    /// necessary to be called when the parent is re-used or dropped. The borrowed nodes cannot
+    /// exist at the same time as the path nodes.
+    fn drop_borrowed_nodes(&mut self) {
+        while let Some(_) = self.borrowed_nodes.pop() {
+            // println!("dropping borrowed");
+        }
+    }
+
+    /// Drops the path nodes for the focus. The path nodes get populated when the focus is used for
+    /// get. As the split foci don't clean up the parent when both splits are dropped, this is
+    /// necessary to be called when the parent is re-used or dropped. The path nodes cannot exist at
+    /// the same time as the borrowed nodes.
+    fn drop_path_nodes(&mut self) {
+        self.root = None;
+        // panic!("rawr {}", self.path.len());
+        if let Some(_) = self.leaf.take() {
+            // println!("dropping leaf {:?} ", self.leaf_range);
+            self.leaf_range = 0..0;
+        }
+        while let Some(_) = self.path.pop() {
+            // println!("dropping internal {:?} ", p.1);
         }
     }
 
@@ -673,6 +782,8 @@ where
     fn split_at(&mut self, index: usize, context: &Internal::Context) -> (Self, Self) {
         // We split the vector in two at the position, we need to find the two positions that denote
         // the last of this vector and the first of the next vector.
+        self.drop_borrowed_nodes(); // Might be going from one split to another so we may need drop.
+
         if index == 0 {
             // This vector becomes empty and the returned one is self.
             let first_part = self.empty();
@@ -693,7 +804,7 @@ where
         let (self_child_position, mut subindex) = self.find_node_info_for_index(index).unwrap();
         // self.len = index;
 
-        let mut left_nodes = self.nodes.clone();
+        let mut left_nodes = ManuallyDrop::into_inner(self.nodes.clone());
         let mut right_nodes = left_nodes.split_off(self_child_position);
         right_nodes.reverse();
 
@@ -704,24 +815,24 @@ where
             let node = right_nodes.pop().unwrap();
             match node {
                 BorrowedNode::Internal(mut internal) => {
-                    let (new_subindex, mut new_internal) = internal.split_at_position(subindex);
+                    let (new_subindex, left, mut right) = internal.split_at_position(subindex);
                     subindex = new_subindex;
-                    let child = new_internal.pop_child(Side::Front, context).unwrap();
-                    if !internal.is_empty() {
-                        left_nodes.push(BorrowedNode::Internal(internal));
+                    let child = right.pop_child(Side::Front, context).unwrap();
+                    if !left.is_empty() {
+                        left_nodes.push(BorrowedNode::Internal(left));
                     }
-                    if !new_internal.is_empty() {
-                        right_nodes.push(BorrowedNode::Internal(new_internal));
+                    if !right.is_empty() {
+                        right_nodes.push(BorrowedNode::Internal(right));
                     }
                     right_nodes.push(child);
                 }
                 BorrowedNode::Leaf(mut leaf) => {
-                    let new_leaf = leaf.split_at(subindex);
-                    if !leaf.is_empty() {
-                        left_nodes.push(BorrowedNode::Leaf(leaf));
+                    let (left, right) = leaf.split_at(subindex);
+                    if !left.is_empty() {
+                        left_nodes.push(BorrowedNode::Leaf(left));
                     }
-                    if !new_leaf.is_empty() {
-                        right_nodes.push(BorrowedNode::Leaf(new_leaf));
+                    if !right.is_empty() {
+                        right_nodes.push(BorrowedNode::Leaf(right));
                     }
                     break;
                 }
@@ -853,16 +964,20 @@ where
     // }
 
     fn move_focus(&mut self, mut idx: usize, context: &Internal::Context) {
+        if !self.borrowed_nodes.is_empty() {
+            self.drop_borrowed_nodes();
+        }
         if self.leaf_range.contains(&idx) {
             // Nothing needs to move here
             return;
         }
+        if let Some(_) = self.leaf.take() {
+            // print!("Dropping leaf {:?} ", self.leaf_range);
+            self.leaf_range = 0..0;
+        }
         if let Some((_, ref mut range)) = self.root {
             if !range.contains(&idx) {
-                self.root.take();
-                self.path.clear();
-                self.leaf = None;
-                self.leaf_range = 0..0;
+                self.drop_path_nodes();
             }
         }
         if self.root.is_none() {
@@ -883,6 +998,7 @@ where
             if range.contains(&idx) {
                 break;
             }
+            // print!("Popping {:?} ", range);
             self.path.pop();
         }
         if self.path.is_empty() {
@@ -1041,19 +1157,22 @@ where
 #[cfg(test)]
 mod test {
     use crate::Vector;
+    use crossbeam;
 
     #[test]
     pub fn single_focus_mut() {
         let mut v = Vector::new();
-        const N: isize = 1_000;
+        const N: isize = 1_000_000;
         for i in 0..N {
             v.push_back(i);
         }
 
-        let mut focus = v.focus_mut();
-        for i in 0..N {
-            let thing = focus.index(i as usize);
-            *thing = -i;
+        {
+            let mut focus = v.focus_mut();
+            for i in 0..N {
+                let thing = focus.index(i as usize);
+                *thing = -i;
+            }
         }
         for (i, v) in v.iter().enumerate() {
             let r = -(i as isize);
@@ -1064,34 +1183,48 @@ mod test {
     #[test]
     pub fn split_focus_mut() {
         let mut v = Vector::new();
-        const N: usize = 1_000;
+        const N: usize = 1_000_000;
         for i in 0..N {
             v.push_back(i);
         }
 
         const S: usize = N / 2;
-        let mut focus = v.focus_mut();
-        let (mut left, mut right) = focus.split_at(S);
-        for i in 0..S {
-            let thing = left.get(i);
-            if let Some(thing) = thing {
-                *thing = 0;
+        println!("Prebuild");
+        {
+            let mut focus = v.focus_mut();
+            println!("Presplit");
+            {
+                let (mut left, mut right) = focus.split_at(S);
+                println!("Postsplit");
+                for i in 0..S {
+                    let thing = left.get(i);
+                    if let Some(thing) = thing {
+                        *thing = 0;
+                    }
+                }
+                crossbeam::scope(|s| {
+                    s.spawn(move |_| {
+                        for i in 0..N - S {
+                            let thing = right.get(i);
+                            if let Some(thing) = thing {
+                                *thing = 1;
+                            }
+                        }
+                    });
+                })
+                .unwrap();
+                println!("End of split");
             }
-        }
-
-        for i in 0..N - S {
-            let thing = right.get(i);
-            if let Some(thing) = thing {
-                *thing = 1;
+            for i in 0..N {
+                if i < S {
+                    assert_eq!(focus.get(i), Some(&mut 0));
+                } else {
+                    assert_eq!(focus.get(i), Some(&mut 1));
+                }
             }
+            println!("Predrop");
         }
-        for i in 0..N {
-            if i < S {
-                assert_eq!(focus.get(i), Some(&mut 0));
-            } else {
-                assert_eq!(focus.get(i), Some(&mut 1));
-            }
-        }
+        println!("Postdrop");
         for (i, v) in v.iter().enumerate() {
             if i < S {
                 assert_eq!(v, &0);
@@ -1099,5 +1232,66 @@ mod test {
                 assert_eq!(v, &1);
             }
         }
+        println!("Post test");
     }
+
+    // #[test]
+    // pub fn split_focus_mut_threaded() {
+    //     let mut v = Vector::new();
+    //     const N: usize = 1_000_000;
+    //     for i in 0..N {
+    //         v.push_back(i);
+    //     }
+    //     let mut focus_mut_parent = v.focus_mut();
+    //     crossbeam::thread::scope(|s| {
+    //         s.spawn(|_| {
+    //             // some work here
+    //             println!("Focus {:?}", focus_mut_parent.get(0));
+    //             println!("Focus Len {:?}", focus_mut_parent.len());
+    //             *focus_mut_parent.get(0).unwrap() = N + 1;
+    //         });
+    //     })
+    //     .unwrap();
+    //     println!("Focus {:?}", focus_mut_parent.get(0));
+    //     drop(v);
+
+    //     // println!("LUL {}", v.len());
+
+    //     // const S: usize = N / 2;
+    //     // println!("Prebuild");
+    //     // let mut focus = v.focus_mut();
+    //     // println!("Presplit");
+    //     // let (mut left, mut right) = focus.split_at(S);
+    //     // println!("Postsplit");
+    //     // for i in 0..S {
+    //     //     let thing = left.get(i);
+    //     //     if let Some(thing) = thing {
+    //     //         *thing = 0;
+    //     //     }
+    //     // }
+
+    //     // for i in 0..N - S {
+    //     //     let thing = right.get(i);
+    //     //     if let Some(thing) = thing {
+    //     //         *thing = 1;
+    //     //     }
+    //     // }
+    //     // for i in 0..N {
+    //     //     if i < S {
+    //     //         assert_eq!(focus.get(i), Some(&mut 0));
+    //     //     } else {
+    //     //         assert_eq!(focus.get(i), Some(&mut 1));
+    //     //     }
+    //     // }
+    //     // println!("Predrop");
+    //     // drop(focus);
+    //     // println!("Postdrop");
+    //     // for (i, v) in v.iter().enumerate() {
+    //     //     if i < S {
+    //     //         assert_eq!(v, &0);
+    //     //     } else {
+    //     //         assert_eq!(v, &1);
+    //     //     }
+    //     // }
+    // }
 }

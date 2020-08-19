@@ -56,6 +56,7 @@ Focus
 
 Sort
 [] Simplify sort functions into a singular function so we don't have too much duplicated code.
+  Requires GATs to properly do this.
 
 Documentation
 [] Write documentation for methods with stubs
