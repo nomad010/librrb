@@ -10,6 +10,7 @@ edition = "2018"
 rand_core = "0.5.1"
 rand_xoshiro = "0.4.0"
 archery = "*"
+num = "*"
 
 [dev-dependencies]
 proptest = "*"

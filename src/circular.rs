@@ -125,6 +125,42 @@ impl<'a, A: Debug> BorrowBufferMut<A> {
         };
         (first, other)
     }
+
+    pub fn iter(&self) -> BorrowedIter<A> {
+        BorrowedIter {
+            consumed: 0,
+            front: 0,
+            back: 0,
+            buffer: self,
+        }
+    }
+}
+
+/// An iterator over a buffer that is obtained by the `CircularBuffer::iter()` method.
+pub struct BorrowedIter<'a, A: 'a + Debug> {
+    consumed: usize,
+    front: usize,
+    back: usize,
+    buffer: &'a BorrowBufferMut<A>,
+}
+
+impl<'a, A: 'a + Debug> Iterator for BorrowedIter<'a, A> {
+    type Item = &'a A;
+
+    fn next(&mut self) -> Option<&'a A> {
+        if self.consumed == self.buffer.len() {
+            None
+        } else {
+            let idx = (self.front + self.consumed) % RRB_WIDTH;
+            self.consumed += 1;
+            self.buffer.get(idx)
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.buffer.len() - self.consumed;
+        (len, Some(len))
+    }
 }
 
 /// A fixed-sized circular buffer. The buffer can hold up to `RRB_WIDTH` items and supports fast

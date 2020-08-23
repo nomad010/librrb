@@ -3,7 +3,8 @@ use crate::node_traits::*;
 use crate::size_table::SizeTable;
 use crate::{Side, RRB_WIDTH};
 use archery::{SharedPointer, SharedPointerKind};
-use std::ops::{Deref, DerefMut, Range};
+use num::Zero;
+use std::ops::{Bound, Deref, DerefMut, Range, RangeBounds};
 
 #[derive(Debug)]
 pub struct SharedPointerEntry<
@@ -23,39 +24,39 @@ where
     }
 }
 
-pub struct DerefPtr<T>(*const T);
+pub struct DerefPtr<A: Clone + std::fmt::Debug>(*const A);
 
-impl<T> Deref for DerefPtr<T> {
-    type Target = T;
+impl<A: Clone + std::fmt::Debug> Deref for DerefPtr<A> {
+    type Target = A;
 
-    fn deref(&self) -> &T {
+    fn deref(&self) -> &A {
         unsafe { &*self.0 }
     }
 }
 
-pub struct DerefMutPtr<T>(*mut T);
+pub struct DerefMutPtr<A: Clone + std::fmt::Debug>(*mut A);
 
-impl<T> Deref for DerefMutPtr<T> {
-    type Target = T;
+impl<A: Clone + std::fmt::Debug> Deref for DerefMutPtr<A> {
+    type Target = A;
 
-    fn deref(&self) -> &T {
+    fn deref(&self) -> &A {
         unsafe { &*self.0 }
     }
 }
 
-impl<T> DerefMut for DerefMutPtr<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
+impl<A: Clone + std::fmt::Debug> DerefMut for DerefMutPtr<A> {
+    fn deref_mut(&mut self) -> &mut A {
         unsafe { &mut *self.0 }
     }
 }
 
-impl<T> Drop for DerefPtr<T> {
+impl<A: Clone + std::fmt::Debug> Drop for DerefPtr<A> {
     fn drop(&mut self) {
         // println!("Ok dropping derefptr");
     }
 }
 
-impl<T> Drop for DerefMutPtr<T> {
+impl<A: Clone + std::fmt::Debug> Drop for DerefMutPtr<A> {
     fn drop(&mut self) {
         // println!("Ok dropping derefptrmut");
     }
@@ -85,18 +86,71 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct BorrowedLeaf<A: Clone + std::fmt::Debug + std::ops::Add> {
-    buffer: BorrowBufferMut<A>,
+pub struct ItemMutGuard<
+    A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
+> {
+    item: *mut A,
+    previous: A,
+    ptrs: Vec<*mut A>,
 }
 
-impl<A: Clone + std::fmt::Debug + std::ops::Add> Drop for BorrowedLeaf<A> {
-    fn drop(&mut self) {
-        // println!("Dropping leaf")
+impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero>
+    Deref for ItemMutGuard<A>
+{
+    type Target = A;
+    fn deref(&self) -> &A {
+        unsafe { &*self.item }
     }
 }
 
-impl<A: Clone + std::fmt::Debug + std::ops::Add> BorrowedLeafTrait for BorrowedLeaf<A> {
+impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero>
+    DerefMut for ItemMutGuard<A>
+{
+    fn deref_mut(&mut self) -> &mut A {
+        unsafe { &mut *self.item }
+    }
+}
+
+impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero> Drop
+    for ItemMutGuard<A>
+{
+    fn drop(&mut self) {
+        println!("Ok dropping itemmutguard");
+        for sum_ptr in &self.ptrs {
+            unsafe {
+                let sum = &mut **sum_ptr;
+                *sum = (*sum).clone() - self.previous.clone() + (*self.item).clone();
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BorrowedLeaf<
+    A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
+> {
+    buffer: BorrowBufferMut<A>,
+    sum: *mut A,
+}
+
+impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero> Drop
+    for BorrowedLeaf<A>
+{
+    fn drop(&mut self) {
+        // println!("Dropping leaf")
+        let mut new_sum = A::zero();
+        for child in self.buffer.iter() {
+            new_sum = child.clone() + new_sum;
+        }
+        unsafe {
+            *self.sum = new_sum;
+        }
+    }
+}
+
+impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero>
+    BorrowedLeafTrait for BorrowedLeaf<A>
+{
     type Item = A;
     type Context = ();
     type ItemMutGuard = DerefMutPtr<A>;
@@ -104,8 +158,14 @@ impl<A: Clone + std::fmt::Debug + std::ops::Add> BorrowedLeafTrait for BorrowedL
     fn split_at(&mut self, idx: usize) -> (Self, Self) {
         let (left, right) = self.buffer.split_at(idx);
         (
-            BorrowedLeaf { buffer: left },
-            BorrowedLeaf { buffer: right },
+            BorrowedLeaf {
+                buffer: left,
+                sum: self.sum,
+            },
+            BorrowedLeaf {
+                buffer: right,
+                sum: self.sum,
+            },
         )
     }
 
@@ -123,24 +183,31 @@ impl<A: Clone + std::fmt::Debug + std::ops::Add> BorrowedLeafTrait for BorrowedL
 }
 
 #[derive(Clone, Debug)]
-pub struct Leaf<A: Clone + std::fmt::Debug + std::ops::Add> {
+pub struct Leaf<
+    A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
+> {
     buffer: CircularBuffer<A>,
+    sum: A,
 }
 
-impl<A: Clone + std::fmt::Debug + std::ops::Add> LeafTrait for Leaf<A> {
+impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero>
+    LeafTrait for Leaf<A>
+{
     type Item = A;
     type Context = ();
     type Borrowed = BorrowedLeaf<A>;
-    type ItemMutGuard = DerefMutPtr<A>;
+    type ItemMutGuard = ItemMutGuard<A>;
 
     fn empty() -> Self {
         Leaf {
             buffer: CircularBuffer::new(),
+            sum: A::zero(),
         }
     }
 
     fn with_item(item: Self::Item, _context: &Self::Context) -> Self {
         Leaf {
+            sum: item.clone(),
             buffer: CircularBuffer::with_item(item),
         }
     }
@@ -163,7 +230,12 @@ impl<A: Clone + std::fmt::Debug + std::ops::Add> LeafTrait for Leaf<A> {
         position: usize,
         context: &Self::Context,
     ) -> Option<Self::ItemMutGuard> {
-        Some(DerefMutPtr(self.get_mut(position, context)?))
+        let item = self.get_mut(position, context)?;
+        Some(ItemMutGuard {
+            item,
+            previous: unsafe { (*item).clone() },
+            ptrs: vec![&mut self.sum],
+        })
     }
 
     fn get_mut(&mut self, position: usize, _context: &Self::Context) -> Option<*mut Self::Item> {
@@ -171,11 +243,14 @@ impl<A: Clone + std::fmt::Debug + std::ops::Add> LeafTrait for Leaf<A> {
     }
 
     fn push(&mut self, side: Side, item: Self::Item, _context: &Self::Context) {
+        self.sum = self.sum.clone() + item.clone();
         self.buffer.push(side, item)
     }
 
     fn pop(&mut self, side: Side, _context: &Self::Context) -> Self::Item {
-        self.buffer.pop(side)
+        let item = self.buffer.pop(side);
+        self.sum = self.sum.clone() - item.clone();
+        item
     }
 
     fn split(&mut self, idx: usize, context: &Self::Context) -> Self {
@@ -198,13 +273,26 @@ impl<A: Clone + std::fmt::Debug + std::ops::Add> LeafTrait for Leaf<A> {
         len: usize,
         _context: &Self::Context,
     ) -> usize {
-        self.buffer
-            .decant_into(&mut destination.buffer, share_side, len)
+        let shared = self
+            .buffer
+            .decant_into(&mut destination.buffer, share_side, len);
+        if shared != 0 {
+            let mut decanted_sum = A::zero();
+            for i in 0..shared {
+                let idx = self.buffer.len() - i - 1;
+                let sum = self.buffer.get(idx).unwrap().clone();
+                decanted_sum = decanted_sum.clone() + sum;
+            }
+            self.sum = self.sum.clone() - decanted_sum.clone();
+            destination.sum = destination.sum.clone() + decanted_sum;
+        }
+        shared
     }
 
     fn borrow_node(&mut self) -> Self::Borrowed {
         BorrowedLeaf {
             buffer: self.buffer.mutable_view(),
+            sum: &mut self.sum as *mut _,
         }
     }
 
@@ -227,20 +315,42 @@ impl<A: Clone + std::fmt::Debug + std::ops::Add> LeafTrait for Leaf<A> {
     }
 }
 
+impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero>
+    Leaf<A>
+{
+    fn sum<R: RangeBounds<usize>>(&self, range: R) -> A {
+        let start = match range.start_bound() {
+            Bound::Included(x) => *x,
+            Bound::Excluded(x) => x + 1,
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(x) => x + 1,
+            Bound::Excluded(x) => *x,
+            Bound::Unbounded => self.len(),
+        };
+        let end = end.min(self.len());
+        let mut result = A::zero();
+        for idx in start..end {
+            result = result.clone() + self.buffer.get(idx).unwrap().clone();
+        }
+        result
+    }
+}
+
 pub struct BorrowedInternal<
-    A: Clone + std::fmt::Debug + std::ops::Add,
+    A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
     P: SharedPointerKind,
-    Leaf: LeafTrait<Item = A, Context = ()>,
 > {
     pub(crate) sizes: SharedPointer<SizeTable, P>,
-    pub(crate) children: BorrowedChildList<A, P, Leaf>,
+    pub(crate) children: BorrowedChildList<A, P>,
+    sum: *mut A,
 }
 
 impl<
-        A: Clone + std::fmt::Debug + std::ops::Add,
+        A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
         P: SharedPointerKind,
-        Leaf: LeafTrait<Item = A, Context = ()>,
-    > Drop for BorrowedInternal<A, P, Leaf>
+    > Drop for BorrowedInternal<A, P>
 {
     fn drop(&mut self) {
         // let f = match &self.children {
@@ -248,28 +358,44 @@ impl<
         //     BorrowedChildList::Leaves(c) => c.represents_full_range(),
         // };
         // println!("Dropping borrowedinternal")
-    }
-}
-
-impl<
-        A: Clone + std::fmt::Debug + std::ops::Add,
-        P: SharedPointerKind,
-        Leaf: LeafTrait<Item = A, Context = ()>,
-    > Clone for BorrowedInternal<A, P, Leaf>
-{
-    fn clone(&self) -> Self {
-        BorrowedInternal {
-            sizes: SharedPointer::clone(&self.sizes),
-            children: self.children.clone(),
+        // println!("Dropping leaf")
+        let mut new_sum = A::zero();
+        match self.children {
+            BorrowedChildList::Internals(ref buffer) => {
+                for child in buffer.iter() {
+                    new_sum = child.0.sum.clone() + new_sum;
+                }
+            }
+            BorrowedChildList::Leaves(ref buffer) => {
+                for child in buffer.iter() {
+                    new_sum = child.0.as_ref().sum.clone() + new_sum;
+                }
+            }
+        }
+        unsafe {
+            *self.sum = new_sum;
         }
     }
 }
 
 impl<
-        A: Clone + std::fmt::Debug + std::ops::Add,
+        A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
         P: SharedPointerKind,
-        Leaf: LeafTrait<Item = A, Context = ()>,
-    > BorrowedInternal<A, P, Leaf>
+    > Clone for BorrowedInternal<A, P>
+{
+    fn clone(&self) -> Self {
+        BorrowedInternal {
+            sizes: SharedPointer::clone(&self.sizes),
+            children: self.children.clone(),
+            sum: self.sum,
+        }
+    }
+}
+
+impl<
+        A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
+        P: SharedPointerKind,
+    > BorrowedInternal<A, P>
 {
     fn left_size(&self) -> usize {
         let range = self.children.range();
@@ -298,10 +424,9 @@ impl<
 }
 
 impl<
-        A: Clone + std::fmt::Debug + std::ops::Add,
+        A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
         P: SharedPointerKind,
-        Leaf: LeafTrait<Item = A, Context = ()>,
-    > std::fmt::Debug for BorrowedInternal<A, P, Leaf>
+    > std::fmt::Debug for BorrowedInternal<A, P>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BorrowedInternal").finish()
@@ -309,12 +434,11 @@ impl<
 }
 
 impl<
-        A: Clone + std::fmt::Debug + std::ops::Add,
+        A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
         P: SharedPointerKind,
-        Leaf: LeafTrait<Item = A, Context = ()>,
-    > BorrowedInternalTrait<Leaf> for BorrowedInternal<A, P, Leaf>
+    > BorrowedInternalTrait<Leaf<A>> for BorrowedInternal<A, P>
 {
-    type InternalChild = Internal<A, P, Leaf>;
+    type InternalChild = Internal<A, P>;
     type ItemMutGuard = DerefMutPtr<Self::InternalChild>;
 
     fn len(&self) -> usize {
@@ -341,7 +465,7 @@ impl<
     fn get_child_mut_at_slot(
         &mut self,
         idx: usize,
-    ) -> Option<(NodeMut<Self::InternalChild, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeMut<Self::InternalChild, Leaf<A>>, Range<usize>)> {
         let left_skipped = self.children.range().start;
         let mut subrange = self.sizes.get_child_range(idx + left_skipped)?;
         subrange.start -= self.left_size();
@@ -358,7 +482,7 @@ impl<
     fn get_child_mut_for_position(
         &mut self,
         position: usize,
-    ) -> Option<(NodeMut<Self::InternalChild, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeMut<Self::InternalChild, Leaf<A>>, Range<usize>)> {
         let index = self.position_info_for(position)?.0;
         self.get_child_mut_at_slot(index)
     }
@@ -367,7 +491,7 @@ impl<
         &mut self,
         side: Side,
         context: &(),
-    ) -> Option<BorrowedNode<Self::InternalChild, Leaf>> {
+    ) -> Option<BorrowedNode<Self::InternalChild, Leaf<A>>> {
         let child = self.get_child_mut_at_side(side)?.0.borrow_node(context);
         if side == Side::Front {
             self.children.range_mut().start += 1;
@@ -391,10 +515,12 @@ impl<
             BorrowedInternal {
                 children: left,
                 sizes: SharedPointer::clone(&self.sizes),
+                sum: self.sum,
             },
             BorrowedInternal {
                 children: right,
                 sizes: SharedPointer::clone(&self.sizes),
+                sum: self.sum,
             },
         )
     }
@@ -408,20 +534,18 @@ impl<
 
 #[derive(Debug)]
 pub(crate) enum BorrowedChildList<
-    A: Clone + std::fmt::Debug + std::ops::Add,
+    A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
     P: SharedPointerKind,
-    Leaf: LeafTrait<Item = A, Context = ()>,
 > {
-    Internals(BorrowBufferMut<SharedPointerEntry<Internal<A, P, Leaf>, P, ()>>),
-    Leaves(BorrowBufferMut<SharedPointerEntry<Leaf, P, ()>>),
+    Internals(BorrowBufferMut<SharedPointerEntry<Internal<A, P>, P, ()>>),
+    Leaves(BorrowBufferMut<SharedPointerEntry<Leaf<A>, P, ()>>),
 }
 
 impl<
         'a,
-        A: Clone + std::fmt::Debug + std::ops::Add,
+        A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
         P: SharedPointerKind,
-        Leaf: LeafTrait<Item = A, Context = ()>,
-    > Clone for BorrowedChildList<A, P, Leaf>
+    > Clone for BorrowedChildList<A, P>
 {
     fn clone(&self) -> Self {
         match self {
@@ -435,10 +559,9 @@ impl<
 
 impl<
         'a,
-        A: Clone + std::fmt::Debug + std::ops::Add,
+        A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
         P: SharedPointerKind,
-        Leaf: LeafTrait<Item = A, Context = ()>,
-    > BorrowedChildList<A, P, Leaf>
+    > BorrowedChildList<A, P>
 {
     fn split_at(&mut self, index: usize) -> (Self, Self) {
         match self {
@@ -477,19 +600,17 @@ impl<
 /// Represents a homogenous list of nodes.
 #[derive(Debug)]
 pub(crate) enum ChildList<
-    A: Clone + std::fmt::Debug + std::ops::Add,
+    A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
     P: SharedPointerKind,
-    Leaf: LeafTrait<Item = A, Context = ()>,
 > {
-    Leaves(CircularBuffer<SharedPointerEntry<Leaf, P, ()>>),
-    Internals(CircularBuffer<SharedPointerEntry<Internal<A, P, Leaf>, P, ()>>),
+    Leaves(CircularBuffer<SharedPointerEntry<Leaf<A>, P, ()>>),
+    Internals(CircularBuffer<SharedPointerEntry<Internal<A, P>, P, ()>>),
 }
 
 impl<
-        A: Clone + std::fmt::Debug + std::ops::Add,
+        A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
         P: SharedPointerKind,
-        Leaf: LeafTrait<Item = A, Context = ()>,
-    > Clone for ChildList<A, P, Leaf>
+    > Clone for ChildList<A, P>
 {
     fn clone(&self) -> Self {
         match self {
@@ -500,10 +621,9 @@ impl<
 }
 
 impl<
-        A: Clone + std::fmt::Debug + std::ops::Add,
+        A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
         P: SharedPointerKind,
-        Leaf: LeafTrait<Item = A, Context = ()>,
-    > ChildList<A, P, Leaf>
+    > ChildList<A, P>
 {
     /// Constructs a new empty list of nodes.
     pub fn new_empty(&self) -> Self {
@@ -518,7 +638,7 @@ impl<
     /// # Panics
     ///
     /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves_ref(&self) -> &CircularBuffer<SharedPointerEntry<Leaf, P, ()>> {
+    pub fn leaves_ref(&self) -> &CircularBuffer<SharedPointerEntry<Leaf<A>, P, ()>> {
         if let ChildList::Leaves(x) = self {
             x
         } else {
@@ -531,9 +651,7 @@ impl<
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals_ref(
-        &self,
-    ) -> &CircularBuffer<SharedPointerEntry<Internal<A, P, Leaf>, P, ()>> {
+    pub fn internals_ref(&self) -> &CircularBuffer<SharedPointerEntry<Internal<A, P>, P, ()>> {
         if let ChildList::Internals(x) = self {
             x
         } else {
@@ -546,7 +664,7 @@ impl<
     /// # Panics
     ///
     /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves_mut(&mut self) -> &mut CircularBuffer<SharedPointerEntry<Leaf, P, ()>> {
+    pub fn leaves_mut(&mut self) -> &mut CircularBuffer<SharedPointerEntry<Leaf<A>, P, ()>> {
         if let ChildList::Leaves(x) = self {
             x
         } else {
@@ -561,7 +679,7 @@ impl<
     /// Panics if `self` is not a list of internal nodes.
     pub fn internals_mut(
         &mut self,
-    ) -> &mut CircularBuffer<SharedPointerEntry<Internal<A, P, Leaf>, P, ()>> {
+    ) -> &mut CircularBuffer<SharedPointerEntry<Internal<A, P>, P, ()>> {
         if let ChildList::Internals(x) = self {
             x
         } else {
@@ -569,7 +687,7 @@ impl<
         }
     }
 
-    pub fn borrow(&mut self) -> BorrowedChildList<A, P, Leaf> {
+    pub fn borrow(&mut self) -> BorrowedChildList<A, P> {
         match self {
             ChildList::Internals(children) => BorrowedChildList::Internals(children.mutable_view()),
             ChildList::Leaves(children) => BorrowedChildList::Leaves(children.mutable_view()),
@@ -592,7 +710,7 @@ impl<
         &mut self,
         child_idx: usize,
         idx: usize,
-        context: &Leaf::Context,
+        context: &<Leaf<A> as LeafTrait>::Context,
     ) -> Option<*mut A> {
         match self {
             ChildList::Leaves(children) => children
@@ -605,6 +723,26 @@ impl<
                 .unwrap()
                 .load_mut(&())
                 .get_mut(idx, context),
+        }
+    }
+
+    pub fn get_mut_guarded(
+        &mut self,
+        child_idx: usize,
+        idx: usize,
+        context: &<Leaf<A> as LeafTrait>::Context,
+    ) -> Option<ItemMutGuard<A>> {
+        match self {
+            ChildList::Leaves(children) => children
+                .get_mut(child_idx)
+                .unwrap()
+                .load_mut(&())
+                .get_mut_guarded(idx, context),
+            ChildList::Internals(children) => children
+                .get_mut(child_idx)
+                .unwrap()
+                .load_mut(&())
+                .get_mut_guarded(idx, context),
         }
     }
 
@@ -624,24 +762,79 @@ impl<
 
 #[derive(Debug)]
 pub struct Internal<
-    A: Clone + std::fmt::Debug + std::ops::Add,
+    A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
     P: SharedPointerKind,
-    Leaf: LeafTrait<Item = A, Context = ()>,
 > {
     sizes: SharedPointer<SizeTable, P>,
-    children: ChildList<A, P, Leaf>,
+    children: ChildList<A, P>,
+    sum: A,
 }
 
 impl<
-        A: Clone + std::fmt::Debug + std::ops::Add,
+        A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
         P: SharedPointerKind,
-        Leaf: LeafTrait<Item = A, Context = ()>,
-    > Clone for Internal<A, P, Leaf>
+    > Clone for Internal<A, P>
 {
     fn clone(&self) -> Self {
         Internal {
             sizes: SharedPointer::clone(&self.sizes),
             children: self.children.clone(),
+            sum: self.sum.clone(),
+        }
+    }
+}
+
+impl<
+        A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
+        P: SharedPointerKind,
+    > Internal<A, P>
+{
+    fn sum<R: RangeBounds<usize>>(&self, range: R) -> A {
+        let start = match range.start_bound() {
+            Bound::Included(x) => *x,
+            Bound::Excluded(x) => x + 1,
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(x) => x + 1,
+            Bound::Excluded(x) => *x,
+            Bound::Unbounded => self.len(),
+        };
+        let end = end.min(self.len());
+
+        if start == 0 && end == self.len() {
+            self.sum.clone()
+        } else {
+            let mut result = A::zero();
+            match self.children {
+                ChildList::Internals(ref children) => {
+                    let mut start_pos = 0;
+                    for idx in 0..children.len() {
+                        let child = children.get(idx).unwrap();
+                        // result = result.clone() + children.get(idx).unwrap().clone();
+                        let end_pos = start_pos + child.0.len();
+                        if start_pos < end && end_pos > start {
+                            let subrange = (start - start_pos)..(end - start_pos);
+                            result = result.clone() + child.0.sum(subrange);
+                        }
+                        start_pos = end_pos;
+                    }
+                }
+                ChildList::Leaves(ref children) => {
+                    let mut start_pos = 0;
+                    for idx in 0..children.len() {
+                        let child = children.get(idx).unwrap();
+                        // result = result.clone() + children.get(idx).unwrap().clone();
+                        let end_pos = start_pos + child.0.len();
+                        if start_pos < end && end_pos > start {
+                            let subrange = (start.saturating_sub(start_pos))..(end - start_pos);
+                            result = result.clone() + child.0.sum(subrange);
+                        }
+                        start_pos = end_pos;
+                    }
+                }
+            }
+            result
         }
     }
 }
@@ -655,18 +848,17 @@ impl<
 // }
 
 impl<
-        A: Clone + std::fmt::Debug + std::ops::Add,
+        A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
         P: SharedPointerKind,
-        Leaf: LeafTrait<Item = A, Context = ()>,
-    > InternalTrait<Leaf> for Internal<A, P, Leaf>
+    > InternalTrait<Leaf<A>> for Internal<A, P>
 {
     // type Item = A;
-    type Borrowed = BorrowedInternal<A, P, Leaf>;
+    type Borrowed = BorrowedInternal<A, P>;
     type Context = ();
 
-    type LeafEntry = SharedPointerEntry<Leaf, P, ()>;
+    type LeafEntry = SharedPointerEntry<Leaf<A>, P, ()>;
     type InternalEntry = SharedPointerEntry<Self, P, ()>;
-    type ItemMutGuard = DerefMutPtr<A>;
+    type ItemMutGuard = ItemMutGuard<A>;
 
     fn empty_internal(level: usize) -> Self {
         debug_assert_ne!(level, 0); // Should be a Leaf
@@ -674,11 +866,13 @@ impl<
             Internal {
                 sizes: SharedPointer::new(SizeTable::new(1)),
                 children: ChildList::Leaves(CircularBuffer::new()),
+                sum: A::zero(),
             }
         } else {
             Internal {
                 sizes: SharedPointer::new(SizeTable::new(level)),
                 children: ChildList::Internals(CircularBuffer::new()),
+                sum: A::zero(),
             }
         }
     }
@@ -687,6 +881,7 @@ impl<
         Internal {
             sizes: SharedPointer::new(SizeTable::new(self.sizes.level())),
             children: self.children.new_empty(),
+            sum: A::zero(),
         }
     }
 
@@ -716,6 +911,17 @@ impl<
                 destination_sizes
                     .push_child(share_side.negate(), origin_sizes.pop_child(share_side));
             }
+            let mut decanted_sum = A::zero();
+            for i in 0..shared {
+                let idx = self.children.slots() - i - 1;
+                let sum = match self.children {
+                    ChildList::Internals(ref children) => children.get(idx).unwrap().0.sum.clone(),
+                    ChildList::Leaves(ref children) => children.get(idx).unwrap().0.sum.clone(),
+                };
+                decanted_sum = decanted_sum.clone() + sum;
+            }
+            self.sum = self.sum.clone() - decanted_sum.clone();
+            destination.sum = destination.sum.clone() + decanted_sum;
         }
 
         shared
@@ -806,7 +1012,7 @@ impl<
         }
     }
 
-    fn get(&self, idx: usize) -> Option<*const Leaf::Item> {
+    fn get(&self, idx: usize) -> Option<*const A> {
         if let Some((array_idx, new_idx)) = self.sizes.position_info_for(idx) {
             self.children.get(array_idx, new_idx)
         } else {
@@ -819,10 +1025,13 @@ impl<
         idx: usize,
         context: &Self::Context,
     ) -> Option<Self::ItemMutGuard> {
-        Some(DerefMutPtr(self.get_mut(idx, context)?))
+        let (array_idx, new_idx) = self.sizes.position_info_for(idx)?;
+        let mut guard = self.children.get_mut_guarded(array_idx, new_idx, context)?;
+        guard.ptrs.push(&mut self.sum);
+        Some(guard)
     }
 
-    fn get_mut(&mut self, idx: usize, context: &Self::Context) -> Option<*mut Leaf::Item> {
+    fn get_mut(&mut self, idx: usize, context: &Self::Context) -> Option<*mut A> {
         if let Some((array_idx, new_idx)) = self.sizes.position_info_for(idx) {
             self.children.get_mut(array_idx, new_idx, context)
         } else {
@@ -830,16 +1039,29 @@ impl<
         }
     }
 
-    fn pop_child(&mut self, side: Side, _context: &Self::Context) -> NodeRc<Self, Leaf> {
+    fn pop_child(&mut self, side: Side, _context: &Self::Context) -> NodeRc<Self, Leaf<A>> {
         SharedPointer::make_mut(&mut self.sizes).pop_child(side);
-        match self.children {
-            ChildList::Internals(ref mut children) => NodeRc::Internal(children.pop(side)),
-            ChildList::Leaves(ref mut children) => NodeRc::Leaf(children.pop(side)),
-        }
+        let (sum, node) = match self.children {
+            ChildList::Internals(ref mut children) => {
+                let child = children.pop(side);
+                (child.0.sum.clone(), NodeRc::Internal(child))
+            }
+            ChildList::Leaves(ref mut children) => {
+                let child = children.pop(side);
+                (child.0.sum.clone(), NodeRc::Leaf(child))
+            }
+        };
+        self.sum = self.sum.clone() - sum;
+        node
     }
 
-    fn push_child(&mut self, side: Side, node: NodeRc<Self, Leaf>, context: &Self::Context) {
+    fn push_child(&mut self, side: Side, node: NodeRc<Self, Leaf<A>>, context: &Self::Context) {
         SharedPointer::make_mut(&mut self.sizes).push_child(side, node.len(context));
+        let sum = match &node {
+            NodeRc::Internal(internal) => internal.0.sum.clone(),
+            NodeRc::Leaf(leaf) => leaf.0.sum.clone(),
+        };
+        self.sum = self.sum.clone() + sum;
         match self.children {
             ChildList::Internals(ref mut children) => children.push(side, node.internal()),
             ChildList::Leaves(ref mut children) => children.push(side, node.leaf()),
@@ -850,6 +1072,7 @@ impl<
         BorrowedInternal {
             children: self.children.borrow(),
             sizes: SharedPointer::clone(&self.sizes),
+            sum: &mut self.sum as *mut _,
         }
     }
 
@@ -869,7 +1092,7 @@ impl<
         self.children.free_slots()
     }
 
-    fn get_child_ref_at_slot(&self, idx: usize) -> Option<(NodeRef<Self, Leaf>, Range<usize>)> {
+    fn get_child_ref_at_slot(&self, idx: usize) -> Option<(NodeRef<Self, Leaf<A>>, Range<usize>)> {
         if let Some(range) = self.sizes.get_child_range(idx) {
             match self.children {
                 ChildList::Internals(ref internals) => {
@@ -887,7 +1110,7 @@ impl<
     fn get_child_ref_for_position(
         &self,
         position: usize,
-    ) -> Option<(NodeRef<Self, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeRef<Self, Leaf<A>>, Range<usize>)> {
         if let Some((child_idx, _)) = self.sizes.position_info_for(position) {
             self.get_child_ref_at_slot(child_idx)
         } else {
@@ -895,7 +1118,10 @@ impl<
         }
     }
 
-    fn get_child_mut_at_slot(&mut self, idx: usize) -> Option<(NodeMut<Self, Leaf>, Range<usize>)> {
+    fn get_child_mut_at_slot(
+        &mut self,
+        idx: usize,
+    ) -> Option<(NodeMut<Self, Leaf<A>>, Range<usize>)> {
         if let Some(range) = self.sizes.get_child_range(idx) {
             match self.children {
                 ChildList::Internals(ref mut internals) => {
@@ -913,7 +1139,7 @@ impl<
     fn get_child_mut_for_position(
         &mut self,
         position: usize,
-    ) -> Option<(NodeMut<Self, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeMut<Self, Leaf<A>>, Range<usize>)> {
         if let Some((child_idx, _)) = self.sizes.position_info_for(position) {
             self.get_child_mut_at_slot(child_idx)
         } else {
@@ -922,6 +1148,7 @@ impl<
     }
 
     fn split_at_child(&mut self, idx: usize, context: &Self::Context) -> Self {
+        // TODO: Need to set the sum values correctly
         if idx <= self.slots() {
             let mut result = self.new_empty();
             self.share_children_with(&mut result, Side::Front, idx, context);
@@ -933,6 +1160,7 @@ impl<
     }
 
     fn split_at_position(&mut self, position: usize, context: &Self::Context) -> Self {
+        // TODO: Need to set the sum values correctly
         if position > self.len() {
             panic!("Trying to split at a position out of bounds of the tree");
         }
@@ -959,11 +1187,11 @@ impl<
 
     fn equal_iter_debug<'a>(
         &self,
-        iter: &mut std::slice::Iter<'a, Leaf::Item>,
+        iter: &mut std::slice::Iter<'a, A>,
         context: &Self::Context,
     ) -> bool
     where
-        Leaf::Item: PartialEq,
+        A: PartialEq,
     {
         let mut result = true;
         match &self.children {
@@ -1018,5 +1246,127 @@ impl<
                 debug_assert_eq!(sum, reported_size);
             }
         }
+    }
+}
+pub trait SumVector<A> {
+    fn sum<R: RangeBounds<usize>>(&self, range: R) -> A;
+
+    fn full_sum(&self) -> A {
+        self.sum(..)
+    }
+}
+
+impl SumVector<usize>
+    for crate::InternalVector<
+        crate::node_impls::annotated_basic::Internal<usize, archery::RcK>,
+        crate::node_impls::annotated_basic::Leaf<usize>,
+        crate::node_impls::annotated_basic::BorrowedInternal<usize, archery::RcK>,
+    >
+{
+    fn sum<R: RangeBounds<usize>>(&self, range: R) -> usize {
+        let start = match range.start_bound() {
+            Bound::Included(x) => *x,
+            Bound::Excluded(x) => x + 1,
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(x) => x + 1,
+            Bound::Excluded(x) => *x,
+            Bound::Unbounded => self.len(),
+        };
+        let mut result = 0;
+        let mut start_pos = 0;
+        for node_idx in self.spine_iter() {
+            let node = node_idx.1;
+            let end_pos = start_pos + node.len(&self.context);
+            println!("Range derp {:?}", start_pos..end_pos);
+            if start_pos < end && end_pos > start {
+                let subrange = start.saturating_sub(start_pos)..(end - start_pos);
+                println!(
+                    "Hitting sum subrange {:?} at {:?}",
+                    subrange,
+                    start_pos..end_pos
+                );
+                result += match node {
+                    NodeRc::Internal(ref node) => {
+                        let internal: &Internal<usize, archery::RcK> = &*node.0;
+                        internal.sum(subrange)
+                    }
+                    NodeRc::Leaf(ref node) => {
+                        let leaf: &Leaf<usize> = &*node.0;
+                        leaf.sum(subrange)
+                    }
+                };
+            }
+            start_pos = end_pos;
+        }
+        result
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::SumVector;
+    use crate::*;
+    use crossbeam;
+
+    #[test]
+    pub fn split_focus_mut_annotations() {
+        let mut v: InternalVector<
+            node_impls::annotated_basic::Internal<usize, archery::RcK>,
+            node_impls::annotated_basic::Leaf<usize>,
+            node_impls::annotated_basic::BorrowedInternal<usize, archery::RcK>,
+        > = InternalVector::new();
+        const N: usize = 1_000;
+        for i in 0..N {
+            v.push_back(1);
+        }
+        // for i in 0..N {
+        //     *v.get_mut_guarded(i).unwrap() = 1;
+        // }
+
+        println!("Kappa {:#?}", v);
+        println!("SumKappa {:#?}", v.sum(6..506));
+
+        // const S: usize = N / 2;
+        // println!("Prebuild");
+        // {
+        //     let mut focus = v.focus_mut();
+        //     println!("Presplit");
+        //     {
+        //         let (mut left, mut right) = focus.split_at(S);
+        //         println!("Postsplit");
+        //         for i in 0..S {
+        //             let thing = left.get(i);
+        //             if let Some(thing) = thing {
+        //                 *thing = 0;
+        //             }
+        //         }
+        //         for i in 0..N - S {
+        //             let thing = right.get(i);
+        //             if let Some(thing) = thing {
+        //                 *thing = 1;
+        //             }
+        //         }
+        //     }
+        //     for i in 0..N {
+        //         if i < S {
+        //             assert_eq!(focus.get(i), Some(&mut 0));
+        //         } else {
+        //             assert_eq!(focus.get(i), Some(&mut 1));
+        //         }
+        //     }
+        //     println!("Predrop");
+        // }
+        // println!("Postdrop");
+        // for (i, v) in v.iter().enumerate() {
+        //     if i < S {
+        //         assert_eq!(v, &0);
+        //     } else {
+        //         assert_eq!(v, &1);
+        //     }
+        // }
+        // println!("Post test");
+        // println!("Kappa {:#?}", v);
     }
 }

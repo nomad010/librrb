@@ -151,7 +151,10 @@ pub trait LeafTrait: Clone + std::fmt::Debug {
 }
 
 pub trait BorrowedInternalTrait<
-    Leaf: LeafTrait<Context = <Self::InternalChild as InternalTrait<Leaf>>::Context>,
+    Leaf: LeafTrait<
+        Context = <Self::InternalChild as InternalTrait<Leaf>>::Context,
+        ItemMutGuard = <Self::InternalChild as InternalTrait<Leaf>>::ItemMutGuard,
+    >,
 >: Clone
 {
     type InternalChild: InternalTrait<Leaf>;
@@ -213,8 +216,12 @@ pub trait BorrowedInternalTrait<
     }
 }
 
-pub trait InternalTrait<Leaf: LeafTrait<Context = <Self as InternalTrait<Leaf>>::Context>>:
-    Clone + std::fmt::Debug
+pub trait InternalTrait<
+    Leaf: LeafTrait<
+        Context = <Self as InternalTrait<Leaf>>::Context,
+        ItemMutGuard = <Self as InternalTrait<Leaf>>::ItemMutGuard,
+    >,
+>: Clone + std::fmt::Debug
 {
     type Context: Clone + std::fmt::Debug + Default;
     type Borrowed: BorrowedInternalTrait<Leaf, InternalChild = Self> + std::fmt::Debug;
@@ -359,7 +366,7 @@ pub trait InternalTrait<Leaf: LeafTrait<Context = <Self as InternalTrait<Leaf>>:
 pub enum NodeRc<Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     Leaf(Internal::LeafEntry),
     Internal(Internal::InternalEntry),
@@ -368,7 +375,7 @@ where
 impl<Internal, Leaf> Clone for NodeRc<Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     fn clone(&self) -> Self {
         match self {
@@ -381,7 +388,7 @@ where
 impl<Internal, Leaf> NodeRc<Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     /// Constructs a new empty of the same level.
     pub fn new_empty(&self, context: &Internal::Context) -> Self {
@@ -485,6 +492,18 @@ where
         match self {
             NodeRc::Leaf(ref mut x) => x.load_mut(context).get_mut(idx, context),
             NodeRc::Internal(ref mut x) => x.load_mut(context).get_mut(idx, context),
+        }
+    }
+
+    /// Returns the element at the given position in the node.
+    pub fn get_mut_guarded(
+        &mut self,
+        idx: usize,
+        context: &Internal::Context,
+    ) -> Option<Leaf::ItemMutGuard> {
+        match self {
+            NodeRc::Leaf(ref mut x) => x.load_mut(context).get_mut_guarded(idx, context),
+            NodeRc::Internal(ref mut x) => x.load_mut(context).get_mut_guarded(idx, context),
         }
     }
 
@@ -618,7 +637,7 @@ where
 impl<Internal, Leaf> NodeRc<Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
     Leaf::Item: PartialEq,
 {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
@@ -642,7 +661,7 @@ where
 pub enum BorrowedNode<Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     Internal(Internal::Borrowed),
     Leaf(Leaf::Borrowed),
@@ -651,7 +670,7 @@ where
 impl<Internal, Leaf> BorrowedNode<Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     pub fn len(&self) -> usize {
         match self {
@@ -729,7 +748,7 @@ where
 pub enum NodeRef<'a, Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     Leaf(&'a Internal::LeafEntry),
     Internal(&'a Internal::InternalEntry),
@@ -738,7 +757,7 @@ where
 impl<'a, Internal, Leaf> NodeRef<'a, Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     /// Returns the size of the of node.
     pub fn len(&self, context: &Internal::Context) -> usize {
@@ -843,7 +862,7 @@ where
 impl<'a, Internal, Leaf> NodeRef<'a, Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
     Leaf::Item: PartialEq,
 {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
@@ -868,7 +887,7 @@ where
 pub enum NodeMut<'a, Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     Leaf(&'a mut Internal::LeafEntry),
     Internal(&'a mut Internal::InternalEntry),
@@ -877,7 +896,7 @@ where
 impl<'a, Internal, Leaf> NodeMut<'a, Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     /// Returns the size of the of node.
     pub fn len(&self, context: &Internal::Context) -> usize {
@@ -996,7 +1015,7 @@ where
 impl<'a, Internal, Leaf> NodeMut<'a, Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
     Leaf::Item: Clone + std::fmt::Debug + PartialEq,
 {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for

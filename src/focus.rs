@@ -19,7 +19,7 @@ use std::ops::{Bound, Range, RangeBounds};
 struct PartialFocus<Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     path: Vec<(Internal::InternalEntry, Range<usize>)>,
     leaf: Internal::LeafEntry,
@@ -29,7 +29,7 @@ where
 impl<'a, Internal, Leaf> PartialFocus<Internal, Leaf>
 where
     Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     /// A helper method to compute the remainder of a path down a tree to a particular index.
     fn tree_path(
@@ -115,7 +115,7 @@ pub struct Focus<'a, Internal, Leaf, BorrowedInternal>
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     tree: &'a InternalVector<Internal, Leaf, BorrowedInternal>,
     spine_position: Option<(Side, usize)>,
@@ -128,7 +128,7 @@ impl<'a, Internal, Leaf, BorrowedInternal> Clone for Focus<'a, Internal, Leaf, B
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -145,7 +145,7 @@ impl<'a, Internal, Leaf, BorrowedInternal> Focus<'a, Internal, Leaf, BorrowedInt
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     /// Constructs a new focus for a Vector.
     ///
@@ -394,7 +394,7 @@ pub enum FocusMut<'a, Internal, Leaf, BorrowedInternal>
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     /// derp
     Rooted {
@@ -423,7 +423,7 @@ unsafe impl<'a, Internal, Leaf, BorrowedInternal> Send
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
     Leaf::Item: Send,
 {
 }
@@ -433,7 +433,7 @@ unsafe impl<'a, Internal, Leaf, BorrowedInternal> Sync
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
     Leaf::Item: Sync,
 {
 }
@@ -442,7 +442,7 @@ impl<'a, Internal, Leaf, BorrowedInternal> Drop for FocusMut<'a, Internal, Leaf,
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     fn drop(&mut self) {
         if let FocusMut::Rooted { borrowed_roots, .. } = self {
@@ -462,7 +462,7 @@ impl<'a, Internal, Leaf, BorrowedInternal> FocusMut<'a, Internal, Leaf, Borrowed
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     pub(crate) fn from_vector(
         origin: &'a mut InternalVector<Internal, Leaf, BorrowedInternal>,
@@ -664,7 +664,7 @@ pub struct InnerFocusMut<Internal, Leaf, BorrowedInternal>
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     // origin: Rc<&'a mut InternalVector<Internal, Leaf, BorrowedInternal>>,
     pub(crate) nodes: ManuallyDrop<Vec<BorrowedNode<Internal, Leaf>>>,
@@ -686,7 +686,7 @@ impl<Internal, Leaf, BorrowedInternal> Drop for InnerFocusMut<Internal, Leaf, Bo
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     fn drop(&mut self) {
         self.drop_path_nodes();
@@ -704,7 +704,7 @@ impl<Internal, Leaf, BorrowedInternal> InnerFocusMut<Internal, Leaf, BorrowedInt
 where
     Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
     BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Context = Internal::Context>,
+    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     fn empty(&mut self) -> Self {
         InnerFocusMut {
@@ -1156,7 +1156,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::Vector;
+    use crate::*;
     use crossbeam;
 
     #[test]
@@ -1234,64 +1234,4 @@ mod test {
         }
         println!("Post test");
     }
-
-    // #[test]
-    // pub fn split_focus_mut_threaded() {
-    //     let mut v = Vector::new();
-    //     const N: usize = 1_000_000;
-    //     for i in 0..N {
-    //         v.push_back(i);
-    //     }
-    //     let mut focus_mut_parent = v.focus_mut();
-    //     crossbeam::thread::scope(|s| {
-    //         s.spawn(|_| {
-    //             // some work here
-    //             println!("Focus {:?}", focus_mut_parent.get(0));
-    //             println!("Focus Len {:?}", focus_mut_parent.len());
-    //             *focus_mut_parent.get(0).unwrap() = N + 1;
-    //         });
-    //     })
-    //     .unwrap();
-    //     println!("Focus {:?}", focus_mut_parent.get(0));
-    //     drop(v);
-
-    //     // println!("LUL {}", v.len());
-
-    //     // const S: usize = N / 2;
-    //     // println!("Prebuild");
-    //     // let mut focus = v.focus_mut();
-    //     // println!("Presplit");
-    //     // let (mut left, mut right) = focus.split_at(S);
-    //     // println!("Postsplit");
-    //     // for i in 0..S {
-    //     //     let thing = left.get(i);
-    //     //     if let Some(thing) = thing {
-    //     //         *thing = 0;
-    //     //     }
-    //     // }
-
-    //     // for i in 0..N - S {
-    //     //     let thing = right.get(i);
-    //     //     if let Some(thing) = thing {
-    //     //         *thing = 1;
-    //     //     }
-    //     // }
-    //     // for i in 0..N {
-    //     //     if i < S {
-    //     //         assert_eq!(focus.get(i), Some(&mut 0));
-    //     //     } else {
-    //     //         assert_eq!(focus.get(i), Some(&mut 1));
-    //     //     }
-    //     // }
-    //     // println!("Predrop");
-    //     // drop(focus);
-    //     // println!("Postdrop");
-    //     // for (i, v) in v.iter().enumerate() {
-    //     //     if i < S {
-    //     //         assert_eq!(v, &0);
-    //     //     } else {
-    //     //         assert_eq!(v, &1);
-    //     //     }
-    //     // }
-    // }
 }
