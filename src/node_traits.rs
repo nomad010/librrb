@@ -1034,3 +1034,227 @@ where
         }
     }
 }
+
+pub trait Node: Sized + Clone + std::fmt::Debug {
+    type Item: Clone + std::fmt::Debug;
+    type Context: Clone + std::fmt::Debug + Default;
+    type Borrowed: Borrowed<Node = Self>;
+    type ItemMutGuard: DerefMut<Target = Self::Item>;
+
+    type Entry: Entry<Item = Self, Context = Self::Context>;
+
+    /// Constructs a new empty node.
+    fn empty(level: usize) -> Self;
+
+    /// Returns the number of items stored in the leaf.
+    fn len(&self) -> usize;
+
+    /// Returns whether the leaf is empty.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Returns the amount of space left in the leaf.
+    fn free_space(&self) -> usize;
+
+    /// Returns whether the leaf is full.
+    fn is_full(&self) -> bool {
+        self.free_space() == 0
+    }
+
+    /// Gets a reference to the item at requested position if it exists.
+    fn get(&self, position: usize) -> Option<*const Self::Item>;
+
+    /// Gets a reference to the item at the front of the leaf.
+    fn front(&self) -> Option<*const Self::Item> {
+        self.get(0)
+    }
+
+    /// Gets a reference to the item at the back of the leaf.
+    fn back(&self) -> Option<*const Self::Item> {
+        self.get(self.len().saturating_sub(1))
+    }
+
+    /// Gets a mutable reference to the item at requested position if it exists.
+    fn get_mut_guarded(
+        &mut self,
+        position: usize,
+        context: &Self::Context,
+    ) -> Option<Self::ItemMutGuard>;
+
+    /// Gets a mutable reference to the item at requested position if it exists.
+    fn get_mut(&mut self, position: usize, context: &Self::Context) -> Option<*mut Self::Item>;
+
+    /// Gets a mutable reference to the item at the front of the leaf.
+    fn front_mut(&mut self, context: &Self::Context) -> Option<*mut Self::Item> {
+        self.get_mut(0, context)
+    }
+
+    /// Gets a reference to the item at the back of the leaf.
+    fn back_mut(&mut self, context: &Self::Context) -> Option<*mut Self::Item> {
+        self.get_mut(self.len().saturating_sub(1), context)
+    }
+
+    /// Attempts to push an element to a side of the buffer.
+    ///
+    /// Panics if the buffer is full.
+    fn push(&mut self, side: Side, item: Self::Item, context: &Self::Context);
+
+    /// Attempts to pop an element from a side of the buffer.
+    ///
+    /// Panics if the buffer is empty.
+    fn pop(&mut self, side: Side, context: &Self::Context) -> Self::Item;
+
+    /// Removes elements from `self` and inserts these elements into `destination`. At most `len`
+    /// elements will be removed. The actual number of elements decanted is returned. Elements are
+    /// popped from `share_side` but pushed into the destination via `share_side.negate()`
+    fn share_children_with(
+        &mut self,
+        destination: &mut Self,
+        share_side: Side,
+        len: usize,
+        context: &Self::Context,
+    ) -> usize;
+
+    fn borrow_node(&mut self) -> Self::Borrowed;
+
+    /// Packs the children of the to the left of the node so that all but the last is dense.
+    fn pack_children(&mut self, context: &Self::Context);
+
+    /// Removes and returns the node at the given side of this node.
+    /// # Panics
+    // This should panic if the node is empty.
+    fn pop_child(&mut self, side: Side, context: &Self::Context) -> Self::Entry;
+
+    /// Adds a node to the given side of this node.
+    /// # Panics
+    // This should panic if the node does not have a slot free.
+    fn push_child(&mut self, side: Side, node: Self::Entry, context: &Self::Context);
+
+    /// Returns the level the node is at in the tree.
+    fn level(&self) -> usize;
+
+    /// Returns the number of direct children of the node.
+    fn slots(&self) -> usize;
+
+    /// Returns the number of direct children that could be inserted into the node.
+    fn free_slots(&self) -> usize;
+
+    /// Returns a reference to the Rc of the child node at the given slot in this node.
+    fn get_child_ref_at_slot(&self, idx: usize) -> Option<(&Self::Entry, Range<usize>)>;
+
+    fn get_child_ref_at_side(&self, side: Side) -> Option<(&Self::Entry, Range<usize>)> {
+        match side {
+            Side::Front => self.get_child_ref_at_slot(0),
+            Side::Back => self.get_child_ref_at_slot(self.slots().saturating_sub(1)),
+        }
+    }
+
+    /// Returns a reference to the Rc of the child node that covers the leaf position in this node.
+    fn get_child_ref_for_position(&self, position: usize) -> Option<(&Self::Entry, Range<usize>)>;
+
+    /// Returns a mutable reference to the Rc of the child node at the given slot in this node.
+    fn get_child_mut_at_slot(&mut self, idx: usize) -> Option<(&mut Self::Entry, Range<usize>)>;
+
+    fn get_child_mut_at_side(&mut self, side: Side) -> Option<(&mut Self::Entry, Range<usize>)> {
+        match side {
+            Side::Front => self.get_child_mut_at_slot(0),
+            Side::Back => self.get_child_mut_at_slot(self.slots().saturating_sub(1)),
+        }
+    }
+
+    /// Returns a mutable reference of the Rc of the child node that covers the leaf position in this node.
+    fn get_child_mut_for_position(
+        &mut self,
+        position: usize,
+    ) -> Option<(&mut Self::Entry, Range<usize>)>;
+
+    /// Splits the node into two at the given slot index.
+    fn split_at_child(&mut self, idx: usize, context: &Self::Context) -> Self;
+
+    /// Splits the node into two at the given position.
+    fn split_at_position(&mut self, position: usize, context: &Self::Context) -> Self;
+
+    /// Checks the invariants that this node may hold if any.
+    #[allow(dead_code)]
+    fn debug_check_invariants(
+        &self,
+        reported_size: usize,
+        reported_level: usize,
+        _context: &Self::Context,
+    ) {
+        debug_assert_eq!(reported_size, self.len());
+        debug_assert_eq!(reported_level, 0);
+    }
+
+    /// Tests whether the node is compatible with the given iterator. This is mainly used for
+    /// debugging purposes.
+    #[allow(dead_code)]
+    fn equal_iter_debug<'a>(
+        &self,
+        iter: &mut std::slice::Iter<'a, Self::Item>,
+        context: &Self::Context,
+    ) -> bool
+    where
+        Self::Item: PartialEq;
+}
+
+pub trait Borrowed: Clone {
+    type Node: Node<Borrowed = Self>;
+    type ItemMutGuard: DerefMut<Target = <Self::Node as Node>::Item>;
+
+    fn len(&self) -> usize;
+
+    fn slots(&self) -> usize;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn range(&self) -> Range<usize>;
+
+    fn level(&self) -> usize;
+
+    fn split_at_child(&mut self, index: usize) -> (Self, Self);
+
+    fn split_at_position(&mut self, position: usize) -> (usize, Self, Self);
+
+    /// Returns a mutable reference to the Rc of the child node at the given slot in this node.
+    fn get_child_mut_at_slot(
+        &mut self,
+        idx: usize,
+    ) -> Option<(&mut <Self::Node as Node>::Entry, Range<usize>)>;
+
+    fn get_child_mut_at_side(
+        &mut self,
+        side: Side,
+    ) -> Option<(&mut <Self::Node as Node>::Entry, Range<usize>)> {
+        match side {
+            Side::Front => self.get_child_mut_at_slot(0),
+            Side::Back => self.get_child_mut_at_slot(self.slots().saturating_sub(1)),
+        }
+    }
+
+    /// Returns a mutable reference to the Rc of the child node that covers the leaf position in this node.
+    fn get_child_mut_for_position(
+        &mut self,
+        position: usize,
+    ) -> Option<(&mut <Self::Node as Node>::Entry, Range<usize>)>;
+
+    /// Logically pops a child from the node. The child is then returned.
+    fn pop_child(&mut self, side: Side, context: &<Self::Node as Node>::Context) -> Option<Self>;
+
+    /// Undoes the popping that has occurred via a call to `pop_child`.
+    fn unpop_child(&mut self, side: Side);
+
+    fn get_mut_guarded(&mut self, idx: usize) -> Option<Self::ItemMutGuard>;
+
+    fn get_mut(&mut self, idx: usize) -> Option<*mut <Self::Node as Node>::Item>;
+
+    /// Checks the invariants that this node may hold if any.
+    #[allow(dead_code)]
+    fn debug_check_invariants(&self, reported_size: usize, reported_level: usize) {
+        debug_assert_eq!(reported_size, self.len());
+        debug_assert_eq!(reported_level, 0);
+    }
+}

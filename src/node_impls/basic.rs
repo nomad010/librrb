@@ -1020,3 +1020,500 @@ impl<
         }
     }
 }
+
+#[derive(Debug)]
+pub enum LolNode<A: Clone + std::fmt::Debug, P: SharedPointerKind> {
+    Internal(Internal<A, P, Leaf<A>>),
+    Leaf(Leaf<A>),
+}
+
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> LolNode<A, P> {
+    fn internal(self) -> Internal<A, P, Leaf<A>> {
+        if let LolNode::Internal(internal) = self {
+            internal
+        } else {
+            panic!("Failed to unwrap a node as an internal node")
+        }
+    }
+
+    fn internal_ref(&self) -> &Internal<A, P, Leaf<A>> {
+        if let LolNode::Internal(ref internal) = self {
+            internal
+        } else {
+            panic!("Failed to unwrap a node as an internal node")
+        }
+    }
+
+    fn internal_mut(&mut self) -> &mut Internal<A, P, Leaf<A>> {
+        if let LolNode::Internal(ref mut internal) = self {
+            internal
+        } else {
+            panic!("Failed to unwrap a node as an internal node")
+        }
+    }
+
+    fn leaf(self) -> Leaf<A> {
+        if let LolNode::Leaf(leaf) = self {
+            leaf
+        } else {
+            panic!("Failed to unwrap a node as a leaf node")
+        }
+    }
+
+    fn leaf_ref(&self) -> &Leaf<A> {
+        if let LolNode::Leaf(ref leaf) = self {
+            leaf
+        } else {
+            panic!("Failed to unwrap a node as a leaf node")
+        }
+    }
+
+    fn leaf_mut(&mut self) -> &mut Leaf<A> {
+        if let LolNode::Leaf(ref mut leaf) = self {
+            leaf
+        } else {
+            panic!("Failed to unwrap a node as a leaf node")
+        }
+    }
+}
+
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> Clone for LolNode<A, P> {
+    fn clone(&self) -> Self {
+        match self {
+            LolNode::Internal(internal) => LolNode::Internal(internal.clone()),
+            LolNode::Leaf(leaf) => LolNode::Leaf(leaf.clone()),
+        }
+    }
+}
+
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> crate::node_traits::Node for LolNode<A, P> {
+    type Item = A;
+    type Context = ();
+    type Borrowed = LolBorrowedNode<A, P>;
+    type ItemMutGuard = DerefMutPtr<A>;
+    type Entry = SharedPointerEntry<Self, P, ()>;
+
+    fn empty(level: usize) -> Self {
+        if level == 0 {
+            LolNode::Leaf(Leaf::empty())
+        } else {
+            LolNode::Internal(Internal::empty_internal(level))
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            LolNode::Internal(internal) => internal.len(),
+            LolNode::Leaf(leaf) => leaf.len(),
+        }
+    }
+
+    fn free_space(&self) -> usize {
+        match self {
+            LolNode::Internal(internal) => internal.free_slots(),
+            LolNode::Leaf(leaf) => leaf.free_space(),
+        }
+    }
+
+    fn get(&self, position: usize) -> Option<*const Self::Item> {
+        match self {
+            LolNode::Internal(internal) => internal.get(position),
+            LolNode::Leaf(leaf) => leaf.get(position),
+        }
+    }
+
+    fn get_mut_guarded(
+        &mut self,
+        position: usize,
+        context: &Self::Context,
+    ) -> Option<Self::ItemMutGuard> {
+        match self {
+            LolNode::Internal(internal) => internal.get_mut_guarded(position, context),
+            LolNode::Leaf(leaf) => leaf.get_mut_guarded(position, context),
+        }
+    }
+
+    fn get_mut(&mut self, position: usize, context: &Self::Context) -> Option<*mut Self::Item> {
+        match self {
+            LolNode::Internal(internal) => internal.get_mut(position, context),
+            LolNode::Leaf(leaf) => leaf.get_mut(position, context),
+        }
+    }
+
+    fn push(&mut self, side: Side, item: Self::Item, context: &Self::Context) {
+        match self {
+            LolNode::Internal(internal) => unreachable!(),
+            LolNode::Leaf(leaf) => leaf.push(side, item, context),
+        }
+    }
+
+    fn pop(&mut self, side: Side, context: &Self::Context) -> Self::Item {
+        match self {
+            LolNode::Internal(internal) => unreachable!(),
+            LolNode::Leaf(leaf) => leaf.pop(side, context),
+        }
+    }
+
+    fn share_children_with(
+        &mut self,
+        destination: &mut Self,
+        share_side: Side,
+        len: usize,
+        context: &Self::Context,
+    ) -> usize {
+        match self {
+            LolNode::Internal(internal) => {
+                internal.share_children_with(destination.internal_mut(), share_side, len, context)
+            }
+            LolNode::Leaf(leaf) => {
+                leaf.share_children_with(destination.leaf_mut(), share_side, len, context)
+            }
+        }
+    }
+
+    fn borrow_node(&mut self) -> Self::Borrowed {
+        match self {
+            LolNode::Internal(internal) => LolBorrowedNode::Internal(internal.borrow_node()),
+            LolNode::Leaf(leaf) => LolBorrowedNode::Leaf(leaf.borrow_node()),
+        }
+    }
+
+    fn pack_children(&mut self, context: &Self::Context) {
+        if let LolNode::Internal(internal) = self {
+            internal.pack_children(context)
+        }
+    }
+
+    fn pop_child(&mut self, side: Side, context: &Self::Context) -> Self::Entry {
+        match self {
+            LolNode::Internal(internal) => {
+                // Derp
+                SharedPointer::make_mut(&mut internal.sizes).pop_child(side);
+                match internal.children {
+                    ChildList::Internals(ref mut children) => children.pop(side),
+                    ChildList::Leaves(ref mut children) => {
+                        SharedPointerEntry(children.pop(side), std::marker::PhantomData)
+                    }
+                }
+            }
+            LolNode::Leaf(leaf) => unreachable!(),
+        }
+        unimplemented!()
+    }
+
+    fn push_child(&mut self, side: Side, node: Self::Entry, context: &Self::Context) {
+        // match self {
+        //     LolNode::Internal(internal) => internal.push_child(side, node, context),
+        //     LolNode::Leaf(leaf) => unimplemented!(),
+        // }
+        unimplemented!()
+    }
+
+    fn level(&self) -> usize {
+        match self {
+            LolNode::Internal(internal) => internal.level(),
+            LolNode::Leaf(leaf) => 0,
+        }
+    }
+
+    fn slots(&self) -> usize {
+        match self {
+            LolNode::Internal(internal) => internal.slots(),
+            LolNode::Leaf(leaf) => leaf.len(),
+        }
+    }
+
+    fn free_slots(&self) -> usize {
+        match self {
+            LolNode::Internal(internal) => internal.free_slots(),
+            LolNode::Leaf(leaf) => leaf.free_space(),
+        }
+    }
+
+    fn get_child_ref_at_slot(&self, idx: usize) -> Option<(&Self::Entry, Range<usize>)> {
+        // match self {
+        //     LolNode::Internal(internal) => internal.get_child_ref_at_slot(idx),
+        //     LolNode::Leaf(leaf) => unimplemented!(),
+        // }
+        unimplemented!()
+    }
+
+    fn get_child_ref_for_position(&self, position: usize) -> Option<(&Self::Entry, Range<usize>)> {
+        // match self {
+        //     LolNode::Internal(internal) => internal.get_child_ref_for_position(position),
+        //     LolNode::Leaf(leaf) => unimplemented!(),
+        // }
+        unimplemented!()
+    }
+
+    fn get_child_mut_at_slot(&mut self, idx: usize) -> Option<(&mut Self::Entry, Range<usize>)> {
+        match self {
+            LolNode::Internal(internal) => {
+                //
+                // internal.get_child_mut_at_slot(idx)
+                unimplemented!()
+            }
+            LolNode::Leaf(leaf) => unimplemented!(),
+        }
+    }
+
+    fn get_child_mut_for_position(
+        &mut self,
+        position: usize,
+    ) -> Option<(&mut Self::Entry, Range<usize>)> {
+        match self {
+            LolNode::Internal(internal) => {
+                //
+                // internal.get_child_mut_for_position(position)
+                unimplemented!()
+            }
+            LolNode::Leaf(leaf) => unimplemented!(),
+        }
+    }
+
+    fn split_at_child(&mut self, idx: usize, context: &Self::Context) -> Self {
+        match self {
+            LolNode::Internal(internal) => LolNode::Internal(internal.split_at_child(idx, context)),
+            LolNode::Leaf(leaf) => LolNode::Leaf(leaf.split(idx, context)),
+        }
+    }
+
+    fn split_at_position(&mut self, position: usize, context: &Self::Context) -> Self {
+        match self {
+            LolNode::Internal(internal) => {
+                LolNode::Internal(internal.split_at_position(position, context))
+            }
+            LolNode::Leaf(leaf) => LolNode::Leaf(leaf.split(position, context)),
+        }
+    }
+
+    fn equal_iter_debug<'a>(
+        &self,
+        iter: &mut std::slice::Iter<'a, Self::Item>,
+        context: &Self::Context,
+    ) -> bool
+    where
+        Self::Item: PartialEq,
+    {
+        match self {
+            LolNode::Internal(internal) => internal.equal_iter_debug(iter, context),
+            LolNode::Leaf(leaf) => leaf.equal_iter_debug(iter, context),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum LolBorrowedNode<A: Clone + std::fmt::Debug, P: SharedPointerKind> {
+    Internal(BorrowedInternal<A, P, Leaf<A>>),
+    Leaf(BorrowedLeaf<A>),
+}
+
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> Clone for LolBorrowedNode<A, P> {
+    fn clone(&self) -> Self {
+        match self {
+            LolBorrowedNode::Internal(internal) => LolBorrowedNode::Internal(internal.clone()),
+            LolBorrowedNode::Leaf(leaf) => LolBorrowedNode::Leaf(leaf.clone()),
+        }
+    }
+}
+
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> crate::node_traits::Borrowed
+    for LolBorrowedNode<A, P>
+{
+    type Node = LolNode<A, P>;
+    type ItemMutGuard = DerefMutPtr<A>;
+
+    fn len(&self) -> usize {
+        match self {
+            LolBorrowedNode::Internal(internal) => internal.len(),
+            LolBorrowedNode::Leaf(leaf) => leaf.len(),
+        }
+    }
+
+    fn slots(&self) -> usize {
+        match self {
+            LolBorrowedNode::Internal(internal) => internal.slots(),
+            LolBorrowedNode::Leaf(leaf) => leaf.len(),
+        }
+    }
+
+    fn range(&self) -> Range<usize> {
+        match self {
+            LolBorrowedNode::Internal(internal) => internal.range(),
+            LolBorrowedNode::Leaf(_) => unreachable!(),
+        }
+    }
+
+    fn level(&self) -> usize {
+        match self {
+            LolBorrowedNode::Internal(internal) => internal.level(),
+            LolBorrowedNode::Leaf(leaf) => 0,
+        }
+    }
+
+    fn split_at_child(&mut self, index: usize) -> (Self, Self) {
+        match self {
+            LolBorrowedNode::Internal(internal) => {
+                let (first, second) = internal.split_at_child(index);
+                (
+                    LolBorrowedNode::Internal(first),
+                    LolBorrowedNode::Internal(second),
+                )
+            }
+            LolBorrowedNode::Leaf(leaf) => {
+                let (first, second) = leaf.split_at(index);
+                (LolBorrowedNode::Leaf(first), LolBorrowedNode::Leaf(second))
+            }
+        }
+    }
+
+    fn split_at_position(&mut self, position: usize) -> (usize, Self, Self) {
+        match self {
+            LolBorrowedNode::Internal(internal) => {
+                let (remaining, first, second) = internal.split_at_position(position);
+                (
+                    remaining,
+                    LolBorrowedNode::Internal(first),
+                    LolBorrowedNode::Internal(second),
+                )
+            }
+            LolBorrowedNode::Leaf(leaf) => {
+                let (first, second) = leaf.split_at(position);
+                (
+                    0,
+                    LolBorrowedNode::Leaf(first),
+                    LolBorrowedNode::Leaf(second),
+                )
+            }
+        }
+    }
+
+    fn get_child_mut_at_slot(
+        &mut self,
+        idx: usize,
+    ) -> Option<(&mut <Self::Node as Node>::Entry, Range<usize>)> {
+        // match self {
+        //     LolBorrowedNode::Internal(internal) => internal.get_child_mut_at_slot(idx),
+        //     LolBorrowedNode::Leaf(leaf) => unreachable!(),
+        // }
+        unimplemented!()
+    }
+
+    fn get_child_mut_for_position(
+        &mut self,
+        position: usize,
+    ) -> Option<(&mut <Self::Node as Node>::Entry, Range<usize>)> {
+        // match self {
+        //     LolBorrowedNode::Internal(internal) => internal.get_child_mut_for_position(position),
+        //     LolBorrowedNode::Leaf(leaf) => unimplemented!(),
+        // }
+        unimplemented!()
+    }
+
+    fn pop_child(&mut self, side: Side, context: &<Self::Node as Node>::Context) -> Option<Self> {
+        // match self {
+        //     LolBorrowedNode::Internal(internal) => {
+        //         let child = self.get_child_mut_at_side(side)?.0;
+        //         if side == Side::Front {
+        //             internal.children.range_mut().start += 1;
+        //         } else {
+        //             internal.children.range_mut().end -= 1;
+        //         }
+        //         if child.0.level() == 0 {
+        //             Some(LolBorrowedNode::Leaf(child.0.borrow_node()))
+        //         } else {
+        //             Some(LolBorrowedNode::Internal(child.0.borrow_node()))
+        //         }
+        //     }
+        //     LolBorrowedNode::Leaf(leaf) => unreachable!(),
+        // }
+        unimplemented!()
+    }
+
+    fn unpop_child(&mut self, side: Side) {
+        match self {
+            LolBorrowedNode::Internal(internal) => internal.unpop_child(side),
+            LolBorrowedNode::Leaf(leaf) => unreachable!(),
+        }
+    }
+
+    fn get_mut_guarded(&mut self, idx: usize) -> Option<Self::ItemMutGuard> {
+        match self {
+            LolBorrowedNode::Internal(internal) => unreachable!(),
+            LolBorrowedNode::Leaf(leaf) => leaf.get_mut_guarded(idx),
+        }
+    }
+
+    fn get_mut(&mut self, idx: usize) -> Option<*mut <Self::Node as Node>::Item> {
+        match self {
+            LolBorrowedNode::Internal(internal) => unreachable!(),
+            LolBorrowedNode::Leaf(leaf) => leaf.get_mut(idx),
+        }
+    }
+}
+
+pub enum NodePtr<A: Clone + std::fmt::Debug, P: SharedPointerKind> {
+    Internal(*const Internal<A, P, Leaf<A>>),
+    Leaf(*const Leaf<A>),
+}
+
+pub enum NodeRef<'a, A: Clone + std::fmt::Debug, P: SharedPointerKind> {
+    Internal(&'a Internal<A, P, Leaf<A>>),
+    Leaf(&'a Leaf<A>),
+}
+
+pub enum NodePtrMut<A: Clone + std::fmt::Debug, P: SharedPointerKind> {
+    Internal(*mut Internal<A, P, Leaf<A>>),
+    Leaf(*mut Leaf<A>),
+}
+
+pub enum NodeRefMut<'a, A: Clone + std::fmt::Debug, P: SharedPointerKind> {
+    Internal(&'a mut Internal<A, P, Leaf<A>>),
+    Leaf(&'a mut Leaf<A>),
+}
+
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> Deref for NodePtr<A, P> {
+    type Target = Node<A, P>;
+
+    fn deref(&self) -> &Self::Target {
+        unimplemented!()
+    }
+}
+
+#[derive(Debug)]
+pub enum NodeEntry<A: Clone + std::fmt::Debug, P: SharedPointerKind> {
+    Internal(SharedPointer<Internal<A, P, Leaf<A>>, P>),
+    Leaf(SharedPointer<Leaf<A>, P>),
+}
+
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> Clone for NodeEntry<A, P> {
+    fn clone(&self) -> Self {
+        match self {
+            NodeEntry::Internal(internal) => NodeEntry::Internal(SharedPointer::clone(internal)),
+            NodeEntry::Leaf(leaf) => NodeEntry::Leaf(SharedPointer::clone(leaf)),
+        }
+    }
+}
+
+impl<A: Clone + std::fmt::Debug, P: SharedPointerKind> Entry for NodeEntry<A, P> {
+    type Item = LolNode<A, P>;
+    type LoadGuard = DerefPtr<LolNode<A, P>>;
+    type LoadMutGuard = DerefMutPtr<LolNode<A, P>>;
+    type Context = ();
+
+    fn new(item: Self::Item) -> Self {
+        match item {
+            LolNode::Internal(internal) => NodeEntry::Internal(SharedPointer::new(internal)),
+            LolNode::Leaf(leaf) => NodeEntry::Leaf(SharedPointer::new(leaf)),
+        }
+    }
+
+    fn load(&self, context: &Self::Context) -> Self::LoadGuard {
+        match self {
+            NodeEntry::Internal(internal) => DerefPtr(**internal),
+            NodeEntry::Leaf(leaf) => DerefPtr(leaf.as_ref()),
+        }
+    }
+
+    fn load_mut(&mut self, context: &Self::Context) -> Self::LoadMutGuard {}
+}

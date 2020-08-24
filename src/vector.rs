@@ -955,7 +955,7 @@ where
             };
             Some(MutBoundGuard {
                 guard: node.get_mut_guarded(subindex, &self.context)?,
-                vector: self
+                vector: self,
             })
         } else {
             None
