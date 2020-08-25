@@ -1,8 +1,7 @@
 use crate::focus::FocusMut;
-use crate::node_traits::{BorrowedInternalTrait, InternalTrait, LeafTrait};
+use crate::node_traits::{InternalTrait, LeafTrait};
 use rand_core::RngCore;
 use std::cmp;
-use std::fmt::Debug;
 use std::mem;
 
 // We need GATs for an additional lifetime and I don't want to work around it here.
@@ -61,16 +60,17 @@ use std::mem;
 //     }
 // }
 
-pub(crate) fn do_single_sort<R, F, Internal, Leaf, BorrowedInternal>(
-    focus: &mut FocusMut<Internal, Leaf, BorrowedInternal>,
+pub(crate) fn do_single_sort<R, F, Internal>(
+    focus: &mut FocusMut<Internal>,
     rng: &mut R,
     comparator: &F,
 ) where
     R: RngCore,
-    F: Fn(&Leaf::Item, &Leaf::Item) -> cmp::Ordering,
-    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    F: Fn(
+        &<Internal::Leaf as LeafTrait>::Item,
+        &<Internal::Leaf as LeafTrait>::Item,
+    ) -> cmp::Ordering,
+    Internal: InternalTrait,
 {
     if focus.len() <= 1 {
         return;
@@ -233,29 +233,19 @@ pub(crate) fn do_single_sort<R, F, Internal, Leaf, BorrowedInternal>(
     }
 }
 
-pub(crate) fn do_dual_sort<
-    R,
-    F,
-    Internal1,
-    Leaf1,
-    Internal2,
-    Leaf2,
-    BorrowedInternal1,
-    BorrowedInternal2,
->(
-    focus: &mut FocusMut<Internal1, Leaf1, BorrowedInternal1>,
-    dual: &mut FocusMut<Internal2, Leaf2, BorrowedInternal2>,
+pub(crate) fn do_dual_sort<R, F, Internal1, Internal2>(
+    focus: &mut FocusMut<Internal1>,
+    dual: &mut FocusMut<Internal2>,
     rng: &mut R,
     comparator: &F,
 ) where
     R: RngCore,
-    F: Fn(&Leaf1::Item, &Leaf1::Item) -> cmp::Ordering,
-    Internal1: InternalTrait<Leaf1, Borrowed = BorrowedInternal1>,
-    BorrowedInternal1: BorrowedInternalTrait<Leaf1, InternalChild = Internal1> + Debug,
-    Leaf1: LeafTrait<Context = Internal1::Context, ItemMutGuard = Internal1::ItemMutGuard>,
-    Internal2: InternalTrait<Leaf2, Borrowed = BorrowedInternal2>,
-    BorrowedInternal2: BorrowedInternalTrait<Leaf2, InternalChild = Internal2> + Debug,
-    Leaf2: LeafTrait<Context = Internal2::Context, ItemMutGuard = Internal2::ItemMutGuard>,
+    F: Fn(
+        &<Internal1::Leaf as LeafTrait>::Item,
+        &<Internal1::Leaf as LeafTrait>::Item,
+    ) -> cmp::Ordering,
+    Internal1: InternalTrait,
+    Internal2: InternalTrait,
 {
     if focus.len() <= 1 {
         return;

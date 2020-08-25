@@ -48,7 +48,7 @@ pub use vector::{InternalVector, Iter, IterMut};
 pub use focus::{Focus, FocusMut};
 
 use archery::{ArcK, RcK};
-use node_impls::basic::{BorrowedInternal, Internal, Leaf};
+use node_impls::basic::{Internal, Leaf};
 
 /// The width of the RRB tree nodes. The maximum number of elements in a leaf or internal node.
 pub const RRB_WIDTH: usize = 64;
@@ -73,40 +73,29 @@ impl Side {
 }
 
 /// derp
-pub type Vector<A> =
-    InternalVector<Internal<A, RcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, RcK, Leaf<A>>>;
+pub type Vector<A> = InternalVector<Internal<Leaf<A>, RcK>>;
 
 /// derp
-pub type RegularVector<A> =
-    InternalVector<Internal<A, RcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, RcK, Leaf<A>>>;
+pub type RegularVector<A> = InternalVector<Internal<Leaf<A>, RcK>>;
 /// derp
-pub type RegularFocus<'a, A> =
-    Focus<'a, Internal<A, RcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, RcK, Leaf<A>>>;
+pub type RegularFocus<'a, A> = Focus<'a, Internal<Leaf<A>, RcK>>;
 /// derp
-pub type RegularFocusMut<'a, A> =
-    FocusMut<'a, Internal<A, RcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, RcK, Leaf<A>>>;
+pub type RegularFocusMut<'a, A> = FocusMut<'a, Internal<Leaf<A>, RcK>>;
 /// derp
-pub type RegularIter<'a, A> =
-    Iter<'a, Internal<A, RcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, RcK, Leaf<A>>>;
+pub type RegularIter<'a, A> = Iter<'a, Internal<Leaf<A>, RcK>>;
 /// derp
-pub type RegularIterMut<'a, A> =
-    IterMut<'a, Internal<A, RcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, RcK, Leaf<A>>>;
+pub type RegularIterMut<'a, A> = IterMut<'a, Internal<Leaf<A>, RcK>>;
 
 /// derp
-pub type ThreadSafeVector<A> =
-    InternalVector<Internal<A, ArcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, ArcK, Leaf<A>>>;
+pub type ThreadSafeVector<A> = InternalVector<Internal<Leaf<A>, ArcK>>;
 /// derp
-pub type ThreadSafeFocus<'a, A> =
-    Focus<'a, Internal<A, ArcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, ArcK, Leaf<A>>>;
+pub type ThreadSafeFocus<'a, A> = Focus<'a, Internal<Leaf<A>, ArcK>>;
 /// derp
-pub type ThreadSafeFocusMut<'a, A> =
-    FocusMut<'a, Internal<A, ArcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, ArcK, Leaf<A>>>;
+pub type ThreadSafeFocusMut<'a, A> = FocusMut<'a, Internal<Leaf<A>, ArcK>>;
 /// derp
-pub type ThreadSafeIter<'a, A> =
-    Iter<'a, Internal<A, ArcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, ArcK, Leaf<A>>>;
+pub type ThreadSafeIter<'a, A> = Iter<'a, Internal<Leaf<A>, ArcK>>;
 /// derp
-pub type ThreadSafeIterMut<'a, A> =
-    IterMut<'a, Internal<A, ArcK, Leaf<A>>, Leaf<A>, BorrowedInternal<A, ArcK, Leaf<A>>>;
+pub type ThreadSafeIterMut<'a, A> = IterMut<'a, Internal<Leaf<A>, ArcK>>;
 
 #[cfg(test)]
 mod test {
