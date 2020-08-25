@@ -16,20 +16,18 @@ use std::ops::{Bound, Range, RangeBounds};
 ///
 /// This tracks the path down to a particular leaf in the tree.
 #[derive(Clone, Debug)]
-struct PartialFocus<Internal, Leaf>
+struct PartialFocus<Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     path: Vec<(Internal::InternalEntry, Range<usize>)>,
     leaf: Internal::LeafEntry,
     leaf_range: Range<usize>,
 }
 
-impl<'a, Internal, Leaf> PartialFocus<Internal, Leaf>
+impl<'a, Internal> PartialFocus<Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     /// A helper method to compute the remainder of a path down a tree to a particular index.
     fn tree_path(
@@ -60,12 +58,11 @@ where
     }
 
     /// Constructs the focus from a tree node. This will focus on the first element in the node.
-    fn from_tree(tree: &'a NodeRc<Internal, Leaf>, context: &Internal::Context) -> Self {
+    fn from_tree(tree: &'a NodeRc<Internal>, context: &Internal::Context) -> Self {
         match tree {
             NodeRc::Internal(internal) => {
                 let mut path = vec![(internal.clone(), 0..tree.len(context))];
-                let (leaf_range, leaf) =
-                    PartialFocus::<Internal, Leaf>::tree_path(&mut path, 0, context);
+                let (leaf_range, leaf) = PartialFocus::<Internal>::tree_path(&mut path, 0, context);
                 PartialFocus {
                     path,
                     leaf,
@@ -88,7 +85,7 @@ where
             }
             let new_idx = idx - self.path.last().unwrap().1.start;
             let (leaf_range, leaf) =
-                PartialFocus::<Internal, Leaf>::tree_path(&mut self.path, new_idx, context);
+                PartialFocus::<Internal>::tree_path(&mut self.path, new_idx, context);
             self.leaf_range = leaf_range;
             self.leaf = leaf;
         }
@@ -96,7 +93,11 @@ where
 
     /// Gets an element from the tree. If the element does not exist this will return `None`. This
     /// will move the focus along if necessary.
-    fn get(&mut self, idx: usize, context: &Internal::Context) -> Option<&Leaf::Item> {
+    fn get(
+        &mut self,
+        idx: usize,
+        context: &Internal::Context,
+    ) -> Option<&<Internal::Leaf as LeafTrait>::Item> {
         if self.path.is_empty() {
             unsafe { Some(&*self.leaf.load(context).get(idx)?) }
         } else if idx >= self.path[0].0.load(context).len() {
@@ -111,22 +112,20 @@ where
 /// A focus for the entire the tree. Like a `PartialFocus`, but this also takes the position in the
 /// spine into account.
 #[derive(Debug)]
-pub struct Focus<'a, Internal, Leaf>
+pub struct Focus<'a, Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
-    tree: &'a InternalVector<Internal, Leaf>,
+    tree: &'a InternalVector<Internal>,
     spine_position: Option<(Side, usize)>,
-    spine_node_focus: PartialFocus<Internal, Leaf>,
+    spine_node_focus: PartialFocus<Internal>,
     focus_range: Range<usize>,
     range: Range<usize>,
 }
 
-impl<'a, Internal, Leaf> Clone for Focus<'a, Internal, Leaf>
+impl<'a, Internal> Clone for Focus<'a, Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     fn clone(&self) -> Self {
         Self {
@@ -139,10 +138,9 @@ where
     }
 }
 
-impl<'a, Internal, Leaf> Focus<'a, Internal, Leaf>
+impl<'a, Internal> Focus<'a, Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     /// Constructs a new focus for a Vector.
     ///
@@ -155,7 +153,7 @@ where
     /// let mut focus = Focus::new(&v);
     /// assert_eq!(focus.get(0), Some(&1));
     /// ```
-    pub fn new(tree: &'a InternalVector<Internal, Leaf>) -> Self {
+    pub fn new(tree: &'a InternalVector<Internal>) -> Self {
         Focus::narrowed_tree(tree, 0..tree.len())
     }
 
@@ -171,10 +169,7 @@ where
     /// let mut focus = Focus::narrowed_tree(&v, 1..3);
     /// assert_eq!(focus.get(0), Some(&2));
     /// ```
-    pub fn narrowed_tree(
-        tree: &'a InternalVector<Internal, Leaf>,
-        mut range: Range<usize>,
-    ) -> Self {
+    pub fn narrowed_tree(tree: &'a InternalVector<Internal>, mut range: Range<usize>) -> Self {
         if range.start >= tree.len() {
             range.start = tree.len();
         }
@@ -272,7 +267,7 @@ where
     /// assert_eq!(focus.get(2), Some(&3));
     /// assert_eq!(focus.get(3), None);
     /// ```
-    pub fn get(&mut self, idx: usize) -> Option<&Leaf::Item> {
+    pub fn get(&mut self, idx: usize) -> Option<&<Internal::Leaf as LeafTrait>::Item> {
         let new_idx = idx + self.range.start;
         if self.range.contains(&new_idx) {
             if !self.focus_range.contains(&new_idx) {
@@ -286,7 +281,7 @@ where
     }
 
     /// Derp
-    pub fn index(&mut self, idx: usize) -> &Leaf::Item {
+    pub fn index(&mut self, idx: usize) -> &<Internal::Leaf as LeafTrait>::Item {
         self.get(idx).unwrap()
     }
 
@@ -387,53 +382,49 @@ where
 }
 
 /// derp
-pub enum FocusMut<'a, Internal, Leaf>
+pub enum FocusMut<'a, Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     /// derp
     Rooted {
         /// derp
-        origin: &'a mut InternalVector<Internal, Leaf>,
+        origin: &'a mut InternalVector<Internal>,
         /// derp
-        focus: InnerFocusMut<Internal, Leaf>,
+        focus: InnerFocusMut<Internal>,
         /// derp
-        borrowed_roots: Vec<BorrowedNode<Internal, Leaf>>,
+        borrowed_roots: Vec<BorrowedNode<Internal>>,
         /// derp
-        _marker: std::marker::PhantomData<&'a mut Leaf::Item>,
+        _marker: std::marker::PhantomData<&'a mut <Internal::Leaf as LeafTrait>::Item>,
     },
     /// derp
     Nonrooted {
         /// derp
-        parent: &'a FocusMut<'a, Internal, Leaf>,
+        parent: &'a FocusMut<'a, Internal>,
         /// derp
-        focus: InnerFocusMut<Internal, Leaf>,
+        focus: InnerFocusMut<Internal>,
         /// derp
-        _marker: std::marker::PhantomData<&'a mut Leaf::Item>,
+        _marker: std::marker::PhantomData<&'a mut <Internal::Leaf as LeafTrait>::Item>,
     },
 }
 
-unsafe impl<'a, Internal, Leaf> Send for FocusMut<'a, Internal, Leaf>
+unsafe impl<'a, Internal> Send for FocusMut<'a, Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
-    Leaf::Item: Send,
+    Internal: InternalTrait,
+    <Internal::Leaf as LeafTrait>::Item: Send,
 {
 }
 
-unsafe impl<'a, Internal, Leaf> Sync for FocusMut<'a, Internal, Leaf>
+unsafe impl<'a, Internal> Sync for FocusMut<'a, Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
-    Leaf::Item: Sync,
+    Internal: InternalTrait,
+    <Internal::Leaf as LeafTrait>::Item: Sync,
 {
 }
 
-impl<'a, Internal, Leaf> Drop for FocusMut<'a, Internal, Leaf>
+impl<'a, Internal> Drop for FocusMut<'a, Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     fn drop(&mut self) {
         if let FocusMut::Rooted { borrowed_roots, .. } = self {
@@ -449,14 +440,13 @@ where
 
 // The above needs to be refactored such that the borrowed nodes are their own Drop type.
 
-impl<'a, Internal, Leaf> FocusMut<'a, Internal, Leaf>
+impl<'a, Internal> FocusMut<'a, Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     pub(crate) fn from_vector(
-        origin: &'a mut InternalVector<Internal, Leaf>,
-        nodes: Vec<BorrowedNode<Internal, Leaf>>,
+        origin: &'a mut InternalVector<Internal>,
+        nodes: Vec<BorrowedNode<Internal>>,
     ) -> Self {
         FocusMut::Rooted {
             origin,
@@ -523,10 +513,7 @@ where
     ///
     /// Panics if the given index is greater than the focus' length.
     ///
-    pub fn split_at(
-        &mut self,
-        index: usize,
-    ) -> (FocusMut<Internal, Leaf>, FocusMut<Internal, Leaf>) {
+    pub fn split_at(&mut self, index: usize) -> (FocusMut<Internal>, FocusMut<Internal>) {
         match self {
             FocusMut::Rooted { focus, origin, .. } => {
                 let (left, right) = focus.split_at(index, &origin.context);
@@ -607,7 +594,7 @@ where
     /// assert_eq!(focus.get(2), Some(&mut 3));
     /// assert_eq!(focus.get(3), None);
     /// ```
-    pub fn get(&mut self, idx: usize) -> Option<&mut Leaf::Item> {
+    pub fn get(&mut self, idx: usize) -> Option<&mut <Internal::Leaf as LeafTrait>::Item> {
         match self {
             FocusMut::Rooted { focus, origin, .. } => focus.get(idx, &origin.context),
             FocusMut::Nonrooted { focus, parent, .. } => focus.get(idx, parent.context()),
@@ -628,7 +615,7 @@ where
     /// assert_eq!(focus.index(1), &mut 2);
     /// assert_eq!(focus.index(2), &mut 3);
     /// ```
-    pub fn index(&mut self, idx: usize) -> &mut Leaf::Item {
+    pub fn index(&mut self, idx: usize) -> &mut <Internal::Leaf as LeafTrait>::Item {
         self.get(idx).expect("Index out of range.")
     }
 
@@ -647,13 +634,12 @@ where
 
 /// A focus of the elements of a vector. The focus allows mutation of the elements in the vector.
 #[derive(Clone)]
-pub struct InnerFocusMut<Internal, Leaf>
+pub struct InnerFocusMut<Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     // origin: Rc<&'a mut InternalVector<Internal, Leaf, BorrowedInternal>>,
-    pub(crate) nodes: ManuallyDrop<Vec<BorrowedNode<Internal, Leaf>>>,
+    pub(crate) nodes: ManuallyDrop<Vec<BorrowedNode<Internal>>>,
     len: usize,
     // Focus part
     // This indicates the index of the root in the node list and the range of that is covered by it
@@ -661,17 +647,16 @@ where
     // The listing of internal nodes below the borrowed root node along with their associated ranges
     path: Vec<(Internal::Borrowed, Range<usize>)>,
     // The leaf of the focus part, might not exist if the borrowed root is a leaf node
-    leaf: Option<Leaf::Borrowed>,
+    leaf: Option<<Internal::Leaf as LeafTrait>::Borrowed>,
     // The range that is covered by the lowest part of the focus
     leaf_range: Range<usize>,
     // Information for when the focus is split, the full borrowed nodes can be destroyed correctly.
-    borrowed_nodes: Vec<BorrowedNode<Internal, Leaf>>,
+    borrowed_nodes: Vec<BorrowedNode<Internal>>,
 }
 
-impl<Internal, Leaf> Drop for InnerFocusMut<Internal, Leaf>
+impl<Internal> Drop for InnerFocusMut<Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     fn drop(&mut self) {
         self.drop_path_nodes();
@@ -685,10 +670,9 @@ where
     }
 }
 
-impl<Internal, Leaf> InnerFocusMut<Internal, Leaf>
+impl<Internal> InnerFocusMut<Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     fn empty(&mut self) -> Self {
         InnerFocusMut {
@@ -703,7 +687,7 @@ where
         }
     }
 
-    pub(crate) fn from_vector(nodes: Vec<BorrowedNode<Internal, Leaf>>) -> Self {
+    pub(crate) fn from_vector(nodes: Vec<BorrowedNode<Internal>>) -> Self {
         let mut len = 0;
         for node in nodes.iter() {
             len += node.len();
@@ -1068,7 +1052,11 @@ where
     /// assert_eq!(focus.get(2), Some(&mut 3));
     /// assert_eq!(focus.get(3), None);
     /// ```
-    pub fn get(&mut self, idx: usize, context: &Internal::Context) -> Option<&mut Leaf::Item> {
+    pub fn get(
+        &mut self,
+        idx: usize,
+        context: &Internal::Context,
+    ) -> Option<&mut <Internal::Leaf as LeafTrait>::Item> {
         self.move_focus(idx, context);
         if self.leaf_range.contains(&idx) {
             // println!("In branch A {} with idx for in {:?}", idx, self.leaf_range);

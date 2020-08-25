@@ -149,14 +149,8 @@ pub trait LeafTrait: Clone + std::fmt::Debug {
         Self::Item: PartialEq;
 }
 
-pub trait BorrowedInternalTrait<
-    Leaf: LeafTrait<
-        Context = <Self::Concrete as InternalTrait<Leaf>>::Context,
-        ItemMutGuard = <Self::Concrete as InternalTrait<Leaf>>::ItemMutGuard,
-    >,
->: Clone + std::fmt::Debug
-{
-    type Concrete: InternalTrait<Leaf, Borrowed = Self>;
+pub trait BorrowedInternalTrait: Clone + std::fmt::Debug {
+    type Concrete: InternalTrait<Borrowed = Self>;
     type ItemMutGuard: DerefMut<Target = Self::Concrete>;
 
     fn len(&self) -> usize;
@@ -179,12 +173,12 @@ pub trait BorrowedInternalTrait<
     fn get_child_mut_at_slot(
         &mut self,
         idx: usize,
-    ) -> Option<(NodeMut<Self::Concrete, Leaf>, Range<usize>)>;
+    ) -> Option<(NodeMut<Self::Concrete>, Range<usize>)>;
 
     fn get_child_mut_at_side(
         &mut self,
         side: Side,
-    ) -> Option<(NodeMut<Self::Concrete, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeMut<Self::Concrete>, Range<usize>)> {
         match side {
             Side::Front => self.get_child_mut_at_slot(0),
             Side::Back => self.get_child_mut_at_slot(self.slots().saturating_sub(1)),
@@ -195,14 +189,14 @@ pub trait BorrowedInternalTrait<
     fn get_child_mut_for_position(
         &mut self,
         position: usize,
-    ) -> Option<(NodeMut<Self::Concrete, Leaf>, Range<usize>)>;
+    ) -> Option<(NodeMut<Self::Concrete>, Range<usize>)>;
 
     /// Logically pops a child from the node. The child is then returned.
     fn pop_child(
         &mut self,
         side: Side,
-        context: &Leaf::Context,
-    ) -> Option<BorrowedNode<Self::Concrete, Leaf>>;
+        context: &<<Self::Concrete as InternalTrait>::Leaf as LeafTrait>::Context,
+    ) -> Option<BorrowedNode<Self::Concrete>>;
 
     /// Undoes the popping that has occurred via a call to `pop_child`.
     fn unpop_child(&mut self, side: Side);
@@ -215,20 +209,15 @@ pub trait BorrowedInternalTrait<
     }
 }
 
-pub trait InternalTrait<
-    Leaf: LeafTrait<
-        Context = <Self as InternalTrait<Leaf>>::Context,
-        ItemMutGuard = <Self as InternalTrait<Leaf>>::ItemMutGuard,
-    >,
->: Clone + std::fmt::Debug
-{
+pub trait InternalTrait: Clone + std::fmt::Debug {
     type Context: Clone + std::fmt::Debug + Default;
-    type Borrowed: BorrowedInternalTrait<Leaf, Concrete = Self> + std::fmt::Debug;
+    type Borrowed: BorrowedInternalTrait<Concrete = Self> + std::fmt::Debug;
 
-    type LeafEntry: Entry<Item = Leaf, Context = Self::Context>;
+    type Leaf: LeafTrait<Context = Self::Context, ItemMutGuard = Self::ItemMutGuard>;
+    type LeafEntry: Entry<Item = Self::Leaf, Context = Self::Context>;
     type InternalEntry: Entry<Item = Self, Context = Self::Context>;
 
-    type ItemMutGuard: DerefMut<Target = Leaf::Item>;
+    type ItemMutGuard: DerefMut<Target = <Self::Leaf as LeafTrait>::Item>;
 
     /// Constructs a new empty internal node that is at the given level in the tree.
     fn empty_internal(level: usize) -> Self;
@@ -252,7 +241,7 @@ pub trait InternalTrait<
     fn pack_children(&mut self, context: &Self::Context);
 
     /// Returns a reference to the element at the given index in the tree.
-    fn get(&self, idx: usize) -> Option<*const Leaf::Item>;
+    fn get(&self, idx: usize) -> Option<*const <Self::Leaf as LeafTrait>::Item>;
 
     /// Returns a mutable reference to the element at the given index in the tree.
     fn get_mut_guarded(
@@ -262,17 +251,21 @@ pub trait InternalTrait<
     ) -> Option<Self::ItemMutGuard>;
 
     /// Returns a mutable reference to the element at the given index in the tree.
-    fn get_mut(&mut self, idx: usize, context: &Self::Context) -> Option<*mut Leaf::Item>;
+    fn get_mut(
+        &mut self,
+        idx: usize,
+        context: &Self::Context,
+    ) -> Option<*mut <Self::Leaf as LeafTrait>::Item>;
 
     /// Removes and returns the node at the given side of this node.
     /// # Panics
     // This should panic if the node is empty.
-    fn pop_child(&mut self, side: Side, context: &Self::Context) -> NodeRc<Self, Leaf>;
+    fn pop_child(&mut self, side: Side, context: &Self::Context) -> NodeRc<Self>;
 
     /// Adds a node to the given side of this node.
     /// # Panics
     // This should panic if the node does not have a slot free.
-    fn push_child(&mut self, side: Side, node: NodeRc<Self, Leaf>, context: &Self::Context);
+    fn push_child(&mut self, side: Side, node: NodeRc<Self>, context: &Self::Context);
 
     fn borrow_node(&mut self) -> Self::Borrowed;
 
@@ -299,9 +292,9 @@ pub trait InternalTrait<
     }
 
     /// Returns a reference to the Rc of the child node at the given slot in this node.
-    fn get_child_ref_at_slot(&self, idx: usize) -> Option<(NodeRef<Self, Leaf>, Range<usize>)>;
+    fn get_child_ref_at_slot(&self, idx: usize) -> Option<(NodeRef<Self>, Range<usize>)>;
 
-    fn get_child_ref_at_side(&self, side: Side) -> Option<(NodeRef<Self, Leaf>, Range<usize>)> {
+    fn get_child_ref_at_side(&self, side: Side) -> Option<(NodeRef<Self>, Range<usize>)> {
         match side {
             Side::Front => self.get_child_ref_at_slot(0),
             Side::Back => self.get_child_ref_at_slot(self.slots().saturating_sub(1)),
@@ -309,15 +302,12 @@ pub trait InternalTrait<
     }
 
     /// Returns a reference to the Rc of the child node that covers the leaf position in this node.
-    fn get_child_ref_for_position(
-        &self,
-        position: usize,
-    ) -> Option<(NodeRef<Self, Leaf>, Range<usize>)>;
+    fn get_child_ref_for_position(&self, position: usize) -> Option<(NodeRef<Self>, Range<usize>)>;
 
     /// Returns a mutable reference to the Rc of the child node at the given slot in this node.
-    fn get_child_mut_at_slot(&mut self, idx: usize) -> Option<(NodeMut<Self, Leaf>, Range<usize>)>;
+    fn get_child_mut_at_slot(&mut self, idx: usize) -> Option<(NodeMut<Self>, Range<usize>)>;
 
-    fn get_child_mut_at_side(&mut self, side: Side) -> Option<(NodeMut<Self, Leaf>, Range<usize>)> {
+    fn get_child_mut_at_side(&mut self, side: Side) -> Option<(NodeMut<Self>, Range<usize>)> {
         match side {
             Side::Front => self.get_child_mut_at_slot(0),
             Side::Back => self.get_child_mut_at_slot(self.slots().saturating_sub(1)),
@@ -328,7 +318,7 @@ pub trait InternalTrait<
     fn get_child_mut_for_position(
         &mut self,
         position: usize,
-    ) -> Option<(NodeMut<Self, Leaf>, Range<usize>)>;
+    ) -> Option<(NodeMut<Self>, Range<usize>)>;
 
     /// Splits the node into two at the given slot index.
     fn split_at_child(&mut self, idx: usize, context: &Self::Context) -> Self;
@@ -353,28 +343,26 @@ pub trait InternalTrait<
     #[allow(dead_code)]
     fn equal_iter_debug<'a>(
         &self,
-        iter: &mut std::slice::Iter<'a, Leaf::Item>,
+        iter: &mut std::slice::Iter<'a, <Self::Leaf as LeafTrait>::Item>,
         context: &Self::Context,
     ) -> bool
     where
-        Leaf::Item: PartialEq;
+        <Self::Leaf as LeafTrait>::Item: PartialEq;
 }
 
 /// Represents an arbitrary node in the tree.
 #[derive(Debug)]
-pub enum NodeRc<Internal, Leaf>
+pub enum NodeRc<Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     Leaf(Internal::LeafEntry),
     Internal(Internal::InternalEntry),
 }
 
-impl<Internal, Leaf> Clone for NodeRc<Internal, Leaf>
+impl<Internal> Clone for NodeRc<Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     fn clone(&self) -> Self {
         match self {
@@ -384,10 +372,9 @@ where
     }
 }
 
-impl<Internal, Leaf> NodeRc<Internal, Leaf>
+impl<Internal> NodeRc<Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     /// Constructs a new empty of the same level.
     pub fn new_empty(&self, context: &Internal::Context) -> Self {
@@ -396,7 +383,7 @@ where
             NodeRc::Internal(x) => {
                 NodeRc::Internal(Internal::InternalEntry::new(x.load(context).new_empty()))
             }
-            NodeRc::Leaf(_) => NodeRc::Leaf(Internal::LeafEntry::new(Leaf::empty())),
+            NodeRc::Leaf(_) => NodeRc::Leaf(Internal::LeafEntry::new(Internal::Leaf::empty())),
         }
     }
 
@@ -479,7 +466,11 @@ where
     }
 
     /// Returns the element at the given position in the node.
-    pub fn get(&self, idx: usize, context: &Internal::Context) -> Option<*const Leaf::Item> {
+    pub fn get(
+        &self,
+        idx: usize,
+        context: &Internal::Context,
+    ) -> Option<*const <Internal::Leaf as LeafTrait>::Item> {
         match self {
             NodeRc::Leaf(x) => x.load(context).get(idx),
             NodeRc::Internal(x) => x.load(context).get(idx),
@@ -487,7 +478,11 @@ where
     }
 
     /// Returns the element at the given position in the node.
-    pub fn get_mut(&mut self, idx: usize, context: &Internal::Context) -> Option<*mut Leaf::Item> {
+    pub fn get_mut(
+        &mut self,
+        idx: usize,
+        context: &Internal::Context,
+    ) -> Option<*mut <Internal::Leaf as LeafTrait>::Item> {
         match self {
             NodeRc::Leaf(ref mut x) => x.load_mut(context).get_mut(idx, context),
             NodeRc::Internal(ref mut x) => x.load_mut(context).get_mut(idx, context),
@@ -499,7 +494,7 @@ where
         &mut self,
         idx: usize,
         context: &Internal::Context,
-    ) -> Option<Leaf::ItemMutGuard> {
+    ) -> Option<<Internal::Leaf as LeafTrait>::ItemMutGuard> {
         match self {
             NodeRc::Leaf(ref mut x) => x.load_mut(context).get_mut_guarded(idx, context),
             NodeRc::Internal(ref mut x) => x.load_mut(context).get_mut_guarded(idx, context),
@@ -579,7 +574,7 @@ where
         }
     }
 
-    pub fn borrow_node(&mut self, context: &Internal::Context) -> BorrowedNode<Internal, Leaf> {
+    pub fn borrow_node(&mut self, context: &Internal::Context) -> BorrowedNode<Internal> {
         match self {
             NodeRc::Internal(internal) => {
                 BorrowedNode::Internal(internal.load_mut(context).borrow_node())
@@ -633,18 +628,17 @@ where
     }
 }
 
-impl<Internal, Leaf> NodeRc<Internal, Leaf>
+impl<Internal> NodeRc<Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
-    Leaf::Item: PartialEq,
+    Internal: InternalTrait,
+    <Internal::Leaf as LeafTrait>::Item: PartialEq,
 {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
     #[allow(dead_code)]
     pub(crate) fn equal_iter_debug<'a>(
         &self,
-        iter: &mut std::slice::Iter<'a, Leaf::Item>,
+        iter: &mut std::slice::Iter<'a, <Internal::Leaf as LeafTrait>::Item>,
         context: &Internal::Context,
     ) -> bool {
         match self {
@@ -657,19 +651,17 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub enum BorrowedNode<Internal, Leaf>
+pub enum BorrowedNode<Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     Internal(Internal::Borrowed),
-    Leaf(Leaf::Borrowed),
+    Leaf(<Internal::Leaf as LeafTrait>::Borrowed),
 }
 
-impl<Internal, Leaf> BorrowedNode<Internal, Leaf>
+impl<Internal> BorrowedNode<Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     pub fn len(&self) -> usize {
         match self {
@@ -685,7 +677,7 @@ where
         }
     }
 
-    pub fn leaf(self) -> Leaf::Borrowed {
+    pub fn leaf(self) -> <Internal::Leaf as LeafTrait>::Borrowed {
         if let BorrowedNode::Leaf(x) = self {
             x
         } else {
@@ -711,7 +703,7 @@ where
     /// # Panics
     ///
     /// Panics if `self` is not a leaf node.
-    pub fn leaf_mut(&mut self) -> &mut Leaf::Borrowed {
+    pub fn leaf_mut(&mut self) -> &mut <Internal::Leaf as LeafTrait>::Borrowed {
         if let BorrowedNode::Leaf(x) = self {
             x
         } else {
@@ -744,19 +736,17 @@ where
 
 /// Represents an immutable reference to an arbitrary node in the tree.
 #[derive(Debug)]
-pub enum NodeRef<'a, Internal, Leaf>
+pub enum NodeRef<'a, Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     Leaf(&'a Internal::LeafEntry),
     Internal(&'a Internal::InternalEntry),
 }
 
-impl<'a, Internal, Leaf> NodeRef<'a, Internal, Leaf>
+impl<'a, Internal> NodeRef<'a, Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     /// Returns the size of the of node.
     pub fn len(&self, context: &Internal::Context) -> usize {
@@ -796,7 +786,11 @@ where
     }
 
     /// Returns the element at the given position in the node.
-    pub fn get(&self, idx: usize, context: &Internal::Context) -> Option<*const Leaf::Item> {
+    pub fn get(
+        &self,
+        idx: usize,
+        context: &Internal::Context,
+    ) -> Option<*const <Internal::Leaf as LeafTrait>::Item> {
         match self {
             NodeRef::Leaf(x) => x.load(context).get(idx),
             NodeRef::Internal(x) => x.load(context).get(idx),
@@ -858,18 +852,17 @@ where
     }
 }
 
-impl<'a, Internal, Leaf> NodeRef<'a, Internal, Leaf>
+impl<'a, Internal> NodeRef<'a, Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
-    Leaf::Item: PartialEq,
+    Internal: InternalTrait,
+    <Internal::Leaf as LeafTrait>::Item: PartialEq,
 {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
     #[allow(dead_code)]
     pub(crate) fn equal_iter_debug<'b>(
         &self,
-        iter: &mut std::slice::Iter<'b, Leaf::Item>,
+        iter: &mut std::slice::Iter<'b, <Internal::Leaf as LeafTrait>::Item>,
         context: &Internal::Context,
     ) -> bool {
         match self {
@@ -883,19 +876,17 @@ where
 
 /// Represents an immutable reference to an arbitrary node in the tree.
 #[derive(Debug)]
-pub enum NodeMut<'a, Internal, Leaf>
+pub enum NodeMut<'a, Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     Leaf(&'a mut Internal::LeafEntry),
     Internal(&'a mut Internal::InternalEntry),
 }
 
-impl<'a, Internal, Leaf> NodeMut<'a, Internal, Leaf>
+impl<'a, Internal> NodeMut<'a, Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
+    Internal: InternalTrait,
 {
     /// Returns the size of the of node.
     pub fn len(&self, context: &Internal::Context) -> usize {
@@ -939,7 +930,7 @@ where
         &self,
         idx: usize,
         context: &Internal::Context,
-    ) -> Option<*const <Leaf as LeafTrait>::Item> {
+    ) -> Option<*const <Internal::Leaf as LeafTrait>::Item> {
         match self {
             NodeMut::Leaf(x) => x.load(context).get(idx),
             NodeMut::Internal(x) => x.load(context).get(idx),
@@ -981,7 +972,7 @@ where
     }
 
     /// derp
-    pub fn borrow_node(self, context: &Internal::Context) -> BorrowedNode<Internal, Leaf> {
+    pub fn borrow_node(self, context: &Internal::Context) -> BorrowedNode<Internal> {
         match self {
             NodeMut::Internal(internal) => {
                 BorrowedNode::Internal(internal.load_mut(context).borrow_node())
@@ -1011,18 +1002,17 @@ where
     }
 }
 
-impl<'a, Internal, Leaf> NodeMut<'a, Internal, Leaf>
+impl<'a, Internal> NodeMut<'a, Internal>
 where
-    Internal: InternalTrait<Leaf>,
-    Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
-    Leaf::Item: Clone + std::fmt::Debug + PartialEq,
+    Internal: InternalTrait,
+    <Internal::Leaf as LeafTrait>::Item: Clone + std::fmt::Debug + PartialEq,
 {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
     #[allow(dead_code)]
     pub(crate) fn equal_iter_debug<'b>(
         &self,
-        iter: &mut std::slice::Iter<'b, Leaf::Item>,
+        iter: &mut std::slice::Iter<'b, <Internal::Leaf as LeafTrait>::Item>,
         context: &Internal::Context,
     ) -> bool {
         match self {
