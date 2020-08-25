@@ -241,7 +241,11 @@ pub trait InternalTrait: Clone + std::fmt::Debug {
     fn pack_children(&mut self, context: &Self::Context);
 
     /// Returns a reference to the element at the given index in the tree.
-    fn get(&self, idx: usize) -> Option<*const <Self::Leaf as LeafTrait>::Item>;
+    fn get(
+        &self,
+        idx: usize,
+        context: &Self::Context,
+    ) -> Option<*const <Self::Leaf as LeafTrait>::Item>;
 
     /// Returns a mutable reference to the element at the given index in the tree.
     fn get_mut_guarded(
@@ -473,7 +477,7 @@ where
     ) -> Option<*const <Internal::Leaf as LeafTrait>::Item> {
         match self {
             NodeRc::Leaf(x) => x.load(context).get(idx),
-            NodeRc::Internal(x) => x.load(context).get(idx),
+            NodeRc::Internal(x) => x.load(context).get(idx, context),
         }
     }
 
@@ -793,7 +797,7 @@ where
     ) -> Option<*const <Internal::Leaf as LeafTrait>::Item> {
         match self {
             NodeRef::Leaf(x) => x.load(context).get(idx),
-            NodeRef::Internal(x) => x.load(context).get(idx),
+            NodeRef::Internal(x) => x.load(context).get(idx, context),
         }
     }
 
@@ -933,7 +937,7 @@ where
     ) -> Option<*const <Internal::Leaf as LeafTrait>::Item> {
         match self {
             NodeMut::Leaf(x) => x.load(context).get(idx),
-            NodeMut::Internal(x) => x.load(context).get(idx),
+            NodeMut::Internal(x) => x.load(context).get(idx, context),
         }
     }
 

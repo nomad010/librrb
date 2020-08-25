@@ -694,10 +694,19 @@ impl<
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn get(&self, child_idx: usize, idx: usize) -> Option<*const A> {
+    pub fn get(
+        &self,
+        child_idx: usize,
+        idx: usize,
+        context: &<Leaf<A> as LeafTrait>::Context,
+    ) -> Option<*const A> {
         match self {
-            ChildList::Leaves(children) => children.get(child_idx).unwrap().load(&()).get(idx),
-            ChildList::Internals(children) => children.get(child_idx).unwrap().load(&()).get(idx),
+            ChildList::Leaves(children) => children.get(child_idx).unwrap().load(context).get(idx),
+            ChildList::Internals(children) => children
+                .get(child_idx)
+                .unwrap()
+                .load(context)
+                .get(idx, context),
         }
     }
 
@@ -1008,9 +1017,9 @@ impl<
         }
     }
 
-    fn get(&self, idx: usize) -> Option<*const A> {
+    fn get(&self, idx: usize, context: &Self::Context) -> Option<*const A> {
         if let Some((array_idx, new_idx)) = self.sizes.position_info_for(idx) {
-            self.children.get(array_idx, new_idx)
+            self.children.get(array_idx, new_idx, context)
         } else {
             None
         }
