@@ -15,10 +15,9 @@ pub trait Entry: Clone + std::fmt::Debug {
     fn load_mut(&mut self, context: &Self::Context) -> Self::LoadMutGuard;
 }
 
-pub trait BorrowedLeafTrait: Clone {
-    type Context: Clone + std::fmt::Debug + Default;
-    type Item;
-    type ItemMutGuard: DerefMut<Target = Self::Item>;
+pub trait BorrowedLeafTrait: Clone + std::fmt::Debug {
+    type Concrete: LeafTrait<Borrowed = Self>;
+    type ItemMutGuard: DerefMut<Target = <Self::Concrete as LeafTrait>::Item>;
 
     fn split_at(&mut self, idx: usize) -> (Self, Self);
 
@@ -30,7 +29,7 @@ pub trait BorrowedLeafTrait: Clone {
 
     fn get_mut_guarded(&mut self, idx: usize) -> Option<Self::ItemMutGuard>;
 
-    fn get_mut(&mut self, idx: usize) -> Option<*mut Self::Item>;
+    fn get_mut(&mut self, idx: usize) -> Option<*mut <Self::Concrete as LeafTrait>::Item>;
 
     /// Checks the invariants that this node may hold if any.
     #[allow(dead_code)]
@@ -43,7 +42,7 @@ pub trait BorrowedLeafTrait: Clone {
 pub trait LeafTrait: Clone + std::fmt::Debug {
     type Item: Clone + std::fmt::Debug;
     type Context: Clone + std::fmt::Debug + Default;
-    type Borrowed: BorrowedLeafTrait<Item = Self::Item, Context = Self::Context> + std::fmt::Debug;
+    type Borrowed: BorrowedLeafTrait<Concrete = Self> + std::fmt::Debug;
     type ItemMutGuard: DerefMut<Target = Self::Item>;
 
     /// Constructs a new empty leaf.
@@ -152,13 +151,13 @@ pub trait LeafTrait: Clone + std::fmt::Debug {
 
 pub trait BorrowedInternalTrait<
     Leaf: LeafTrait<
-        Context = <Self::InternalChild as InternalTrait<Leaf>>::Context,
-        ItemMutGuard = <Self::InternalChild as InternalTrait<Leaf>>::ItemMutGuard,
+        Context = <Self::Concrete as InternalTrait<Leaf>>::Context,
+        ItemMutGuard = <Self::Concrete as InternalTrait<Leaf>>::ItemMutGuard,
     >,
->: Clone
+>: Clone + std::fmt::Debug
 {
-    type InternalChild: InternalTrait<Leaf>;
-    type ItemMutGuard: DerefMut<Target = Self::InternalChild>;
+    type Concrete: InternalTrait<Leaf, Borrowed = Self>;
+    type ItemMutGuard: DerefMut<Target = Self::Concrete>;
 
     fn len(&self) -> usize;
 
@@ -180,12 +179,12 @@ pub trait BorrowedInternalTrait<
     fn get_child_mut_at_slot(
         &mut self,
         idx: usize,
-    ) -> Option<(NodeMut<Self::InternalChild, Leaf>, Range<usize>)>;
+    ) -> Option<(NodeMut<Self::Concrete, Leaf>, Range<usize>)>;
 
     fn get_child_mut_at_side(
         &mut self,
         side: Side,
-    ) -> Option<(NodeMut<Self::InternalChild, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeMut<Self::Concrete, Leaf>, Range<usize>)> {
         match side {
             Side::Front => self.get_child_mut_at_slot(0),
             Side::Back => self.get_child_mut_at_slot(self.slots().saturating_sub(1)),
@@ -196,14 +195,14 @@ pub trait BorrowedInternalTrait<
     fn get_child_mut_for_position(
         &mut self,
         position: usize,
-    ) -> Option<(NodeMut<Self::InternalChild, Leaf>, Range<usize>)>;
+    ) -> Option<(NodeMut<Self::Concrete, Leaf>, Range<usize>)>;
 
     /// Logically pops a child from the node. The child is then returned.
     fn pop_child(
         &mut self,
         side: Side,
         context: &Leaf::Context,
-    ) -> Option<BorrowedNode<Self::InternalChild, Leaf>>;
+    ) -> Option<BorrowedNode<Self::Concrete, Leaf>>;
 
     /// Undoes the popping that has occurred via a call to `pop_child`.
     fn unpop_child(&mut self, side: Side);
@@ -224,7 +223,7 @@ pub trait InternalTrait<
 >: Clone + std::fmt::Debug
 {
     type Context: Clone + std::fmt::Debug + Default;
-    type Borrowed: BorrowedInternalTrait<Leaf, InternalChild = Self> + std::fmt::Debug;
+    type Borrowed: BorrowedInternalTrait<Leaf, Concrete = Self> + std::fmt::Debug;
 
     type LeafEntry: Entry<Item = Leaf, Context = Self::Context>;
     type InternalEntry: Entry<Item = Self, Context = Self::Context>;

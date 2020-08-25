@@ -111,23 +111,21 @@ where
 /// A focus for the entire the tree. Like a `PartialFocus`, but this also takes the position in the
 /// spine into account.
 #[derive(Debug)]
-pub struct Focus<'a, Internal, Leaf, BorrowedInternal>
+pub struct Focus<'a, Internal, Leaf>
 where
-    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf>,
     Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
-    tree: &'a InternalVector<Internal, Leaf, BorrowedInternal>,
+    tree: &'a InternalVector<Internal, Leaf>,
     spine_position: Option<(Side, usize)>,
     spine_node_focus: PartialFocus<Internal, Leaf>,
     focus_range: Range<usize>,
     range: Range<usize>,
 }
 
-impl<'a, Internal, Leaf, BorrowedInternal> Clone for Focus<'a, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf> Clone for Focus<'a, Internal, Leaf>
 where
-    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf>,
     Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     fn clone(&self) -> Self {
@@ -141,10 +139,9 @@ where
     }
 }
 
-impl<'a, Internal, Leaf, BorrowedInternal> Focus<'a, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf> Focus<'a, Internal, Leaf>
 where
-    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf>,
     Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     /// Constructs a new focus for a Vector.
@@ -158,7 +155,7 @@ where
     /// let mut focus = Focus::new(&v);
     /// assert_eq!(focus.get(0), Some(&1));
     /// ```
-    pub fn new(tree: &'a InternalVector<Internal, Leaf, BorrowedInternal>) -> Self {
+    pub fn new(tree: &'a InternalVector<Internal, Leaf>) -> Self {
         Focus::narrowed_tree(tree, 0..tree.len())
     }
 
@@ -175,7 +172,7 @@ where
     /// assert_eq!(focus.get(0), Some(&2));
     /// ```
     pub fn narrowed_tree(
-        tree: &'a InternalVector<Internal, Leaf, BorrowedInternal>,
+        tree: &'a InternalVector<Internal, Leaf>,
         mut range: Range<usize>,
     ) -> Self {
         if range.start >= tree.len() {
@@ -390,18 +387,17 @@ where
 }
 
 /// derp
-pub enum FocusMut<'a, Internal, Leaf, BorrowedInternal>
+pub enum FocusMut<'a, Internal, Leaf>
 where
-    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf>,
     Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     /// derp
     Rooted {
         /// derp
-        origin: &'a mut InternalVector<Internal, Leaf, BorrowedInternal>,
+        origin: &'a mut InternalVector<Internal, Leaf>,
         /// derp
-        focus: InnerFocusMut<Internal, Leaf, BorrowedInternal>,
+        focus: InnerFocusMut<Internal, Leaf>,
         /// derp
         borrowed_roots: Vec<BorrowedNode<Internal, Leaf>>,
         /// derp
@@ -410,38 +406,33 @@ where
     /// derp
     Nonrooted {
         /// derp
-        parent: &'a FocusMut<'a, Internal, Leaf, BorrowedInternal>,
+        parent: &'a FocusMut<'a, Internal, Leaf>,
         /// derp
-        focus: InnerFocusMut<Internal, Leaf, BorrowedInternal>,
+        focus: InnerFocusMut<Internal, Leaf>,
         /// derp
         _marker: std::marker::PhantomData<&'a mut Leaf::Item>,
     },
 }
 
-unsafe impl<'a, Internal, Leaf, BorrowedInternal> Send
-    for FocusMut<'a, Internal, Leaf, BorrowedInternal>
+unsafe impl<'a, Internal, Leaf> Send for FocusMut<'a, Internal, Leaf>
 where
-    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf>,
     Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
     Leaf::Item: Send,
 {
 }
 
-unsafe impl<'a, Internal, Leaf, BorrowedInternal> Sync
-    for FocusMut<'a, Internal, Leaf, BorrowedInternal>
+unsafe impl<'a, Internal, Leaf> Sync for FocusMut<'a, Internal, Leaf>
 where
-    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf>,
     Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
     Leaf::Item: Sync,
 {
 }
 
-impl<'a, Internal, Leaf, BorrowedInternal> Drop for FocusMut<'a, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf> Drop for FocusMut<'a, Internal, Leaf>
 where
-    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf>,
     Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     fn drop(&mut self) {
@@ -458,14 +449,13 @@ where
 
 // The above needs to be refactored such that the borrowed nodes are their own Drop type.
 
-impl<'a, Internal, Leaf, BorrowedInternal> FocusMut<'a, Internal, Leaf, BorrowedInternal>
+impl<'a, Internal, Leaf> FocusMut<'a, Internal, Leaf>
 where
-    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf>,
     Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     pub(crate) fn from_vector(
-        origin: &'a mut InternalVector<Internal, Leaf, BorrowedInternal>,
+        origin: &'a mut InternalVector<Internal, Leaf>,
         nodes: Vec<BorrowedNode<Internal, Leaf>>,
     ) -> Self {
         FocusMut::Rooted {
@@ -536,10 +526,7 @@ where
     pub fn split_at(
         &mut self,
         index: usize,
-    ) -> (
-        FocusMut<Internal, Leaf, BorrowedInternal>,
-        FocusMut<Internal, Leaf, BorrowedInternal>,
-    ) {
+    ) -> (FocusMut<Internal, Leaf>, FocusMut<Internal, Leaf>) {
         match self {
             FocusMut::Rooted { focus, origin, .. } => {
                 let (left, right) = focus.split_at(index, &origin.context);
@@ -660,10 +647,9 @@ where
 
 /// A focus of the elements of a vector. The focus allows mutation of the elements in the vector.
 #[derive(Clone)]
-pub struct InnerFocusMut<Internal, Leaf, BorrowedInternal>
+pub struct InnerFocusMut<Internal, Leaf>
 where
-    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf>,
     Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     // origin: Rc<&'a mut InternalVector<Internal, Leaf, BorrowedInternal>>,
@@ -673,7 +659,7 @@ where
     // This indicates the index of the root in the node list and the range of that is covered by it
     root: Option<(usize, Range<usize>)>,
     // The listing of internal nodes below the borrowed root node along with their associated ranges
-    path: Vec<(BorrowedInternal, Range<usize>)>,
+    path: Vec<(Internal::Borrowed, Range<usize>)>,
     // The leaf of the focus part, might not exist if the borrowed root is a leaf node
     leaf: Option<Leaf::Borrowed>,
     // The range that is covered by the lowest part of the focus
@@ -682,10 +668,9 @@ where
     borrowed_nodes: Vec<BorrowedNode<Internal, Leaf>>,
 }
 
-impl<Internal, Leaf, BorrowedInternal> Drop for InnerFocusMut<Internal, Leaf, BorrowedInternal>
+impl<Internal, Leaf> Drop for InnerFocusMut<Internal, Leaf>
 where
-    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf>,
     Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     fn drop(&mut self) {
@@ -700,10 +685,9 @@ where
     }
 }
 
-impl<Internal, Leaf, BorrowedInternal> InnerFocusMut<Internal, Leaf, BorrowedInternal>
+impl<Internal, Leaf> InnerFocusMut<Internal, Leaf>
 where
-    Internal: InternalTrait<Leaf, Borrowed = BorrowedInternal>,
-    BorrowedInternal: BorrowedInternalTrait<Leaf, InternalChild = Internal> + Debug,
+    Internal: InternalTrait<Leaf>,
     Leaf: LeafTrait<Context = Internal::Context, ItemMutGuard = Internal::ItemMutGuard>,
 {
     fn empty(&mut self) -> Self {

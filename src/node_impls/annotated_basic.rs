@@ -151,8 +151,7 @@ impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Outp
 impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero>
     BorrowedLeafTrait for BorrowedLeaf<A>
 {
-    type Item = A;
-    type Context = ();
+    type Concrete = Leaf<A>;
     type ItemMutGuard = DerefMutPtr<A>;
 
     fn split_at(&mut self, idx: usize) -> (Self, Self) {
@@ -177,7 +176,7 @@ impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Outp
         Some(DerefMutPtr(self.buffer.get_mut_ptr(idx)?))
     }
 
-    fn get_mut(&mut self, idx: usize) -> Option<*mut Self::Item> {
+    fn get_mut(&mut self, idx: usize) -> Option<*mut <Self::Concrete as LeafTrait>::Item> {
         self.buffer.get_mut_ptr(idx)
     }
 }
@@ -438,8 +437,8 @@ impl<
         P: SharedPointerKind,
     > BorrowedInternalTrait<Leaf<A>> for BorrowedInternal<A, P>
 {
-    type InternalChild = Internal<A, P>;
-    type ItemMutGuard = DerefMutPtr<Self::InternalChild>;
+    type Concrete = Internal<A, P>;
+    type ItemMutGuard = DerefMutPtr<Self::Concrete>;
 
     fn len(&self) -> usize {
         let range = self.children.range();
@@ -465,7 +464,7 @@ impl<
     fn get_child_mut_at_slot(
         &mut self,
         idx: usize,
-    ) -> Option<(NodeMut<Self::InternalChild, Leaf<A>>, Range<usize>)> {
+    ) -> Option<(NodeMut<Self::Concrete, Leaf<A>>, Range<usize>)> {
         let left_skipped = self.children.range().start;
         let mut subrange = self.sizes.get_child_range(idx + left_skipped)?;
         subrange.start -= self.left_size();
@@ -482,7 +481,7 @@ impl<
     fn get_child_mut_for_position(
         &mut self,
         position: usize,
-    ) -> Option<(NodeMut<Self::InternalChild, Leaf<A>>, Range<usize>)> {
+    ) -> Option<(NodeMut<Self::Concrete, Leaf<A>>, Range<usize>)> {
         let index = self.position_info_for(position)?.0;
         self.get_child_mut_at_slot(index)
     }
@@ -491,7 +490,7 @@ impl<
         &mut self,
         side: Side,
         context: &(),
-    ) -> Option<BorrowedNode<Self::InternalChild, Leaf<A>>> {
+    ) -> Option<BorrowedNode<Self::Concrete, Leaf<A>>> {
         let child = self.get_child_mut_at_side(side)?.0.borrow_node(context);
         if side == Side::Front {
             self.children.range_mut().start += 1;
@@ -1260,7 +1259,6 @@ impl SumVector<usize>
     for crate::InternalVector<
         crate::node_impls::annotated_basic::Internal<usize, archery::RcK>,
         crate::node_impls::annotated_basic::Leaf<usize>,
-        crate::node_impls::annotated_basic::BorrowedInternal<usize, archery::RcK>,
     >
 {
     fn sum<R: RangeBounds<usize>>(&self, range: R) -> usize {
@@ -1315,10 +1313,9 @@ mod test {
         let mut v: InternalVector<
             node_impls::annotated_basic::Internal<usize, archery::RcK>,
             node_impls::annotated_basic::Leaf<usize>,
-            node_impls::annotated_basic::BorrowedInternal<usize, archery::RcK>,
         > = InternalVector::new();
         const N: usize = 1_000;
-        for i in 0..N {
+        for _ in 0..N {
             v.push_back(1);
         }
         // for i in 0..N {

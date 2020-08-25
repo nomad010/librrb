@@ -97,8 +97,7 @@ impl<A: Clone + std::fmt::Debug> Drop for BorrowedLeaf<A> {
 }
 
 impl<A: Clone + std::fmt::Debug> BorrowedLeafTrait for BorrowedLeaf<A> {
-    type Item = A;
-    type Context = ();
+    type Concrete = Leaf<A>;
     type ItemMutGuard = DerefMutPtr<A>;
 
     fn split_at(&mut self, idx: usize) -> (Self, Self) {
@@ -117,7 +116,7 @@ impl<A: Clone + std::fmt::Debug> BorrowedLeafTrait for BorrowedLeaf<A> {
         Some(DerefMutPtr(self.buffer.get_mut_ptr(idx)?))
     }
 
-    fn get_mut(&mut self, idx: usize) -> Option<*mut Self::Item> {
+    fn get_mut(&mut self, idx: usize) -> Option<*mut <Self::Concrete as LeafTrait>::Item> {
         self.buffer.get_mut_ptr(idx)
     }
 }
@@ -314,8 +313,8 @@ impl<
         Leaf: LeafTrait<Item = A, Context = (), ItemMutGuard = DerefMutPtr<A>>,
     > BorrowedInternalTrait<Leaf> for BorrowedInternal<A, P, Leaf>
 {
-    type InternalChild = Internal<A, P, Leaf>;
-    type ItemMutGuard = DerefMutPtr<Self::InternalChild>;
+    type Concrete = Internal<A, P, Leaf>;
+    type ItemMutGuard = DerefMutPtr<Self::Concrete>;
 
     fn len(&self) -> usize {
         let range = self.children.range();
@@ -341,7 +340,7 @@ impl<
     fn get_child_mut_at_slot(
         &mut self,
         idx: usize,
-    ) -> Option<(NodeMut<Self::InternalChild, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeMut<Self::Concrete, Leaf>, Range<usize>)> {
         let left_skipped = self.children.range().start;
         let mut subrange = self.sizes.get_child_range(idx + left_skipped)?;
         subrange.start -= self.left_size();
@@ -358,7 +357,7 @@ impl<
     fn get_child_mut_for_position(
         &mut self,
         position: usize,
-    ) -> Option<(NodeMut<Self::InternalChild, Leaf>, Range<usize>)> {
+    ) -> Option<(NodeMut<Self::Concrete, Leaf>, Range<usize>)> {
         let index = self.position_info_for(position)?.0;
         self.get_child_mut_at_slot(index)
     }
@@ -367,7 +366,7 @@ impl<
         &mut self,
         side: Side,
         context: &(),
-    ) -> Option<BorrowedNode<Self::InternalChild, Leaf>> {
+    ) -> Option<BorrowedNode<Self::Concrete, Leaf>> {
         let child = self.get_child_mut_at_side(side)?.0.borrow_node(context);
         if side == Side::Front {
             self.children.range_mut().start += 1;
