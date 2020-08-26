@@ -30,14 +30,17 @@ where
     Internal: InternalTrait,
 {
     /// A helper method to compute the remainder of a path down a tree to a particular index.
-    fn tree_path(
+    async fn tree_path(
         nodes: &mut Vec<(Internal::InternalEntry, Range<usize>)>,
         mut idx: usize,
         context: &Internal::Context,
     ) -> (Range<usize>, Internal::LeafEntry) {
         while let Some((previous_root, range)) = nodes.last() {
-            let (next_node, next_range) = if let Some((subchild, subchild_range)) =
-                previous_root.load(context).get_child_ref_for_position(idx)
+            let (next_node, next_range) = if let Some((subchild, subchild_range)) = previous_root
+                .load(context)
+                .await
+                .get_child_ref_for_position(idx)
+                .await
             {
                 let subrange_len = subchild_range.end - subchild_range.start;
                 let absolute_subrange_start = range.start + subchild_range.start;
@@ -58,11 +61,12 @@ where
     }
 
     /// Constructs the focus from a tree node. This will focus on the first element in the node.
-    fn from_tree(tree: &'a NodeRc<Internal>, context: &Internal::Context) -> Self {
+    async fn from_tree(tree: &'a NodeRc<Internal>, context: &Internal::Context) -> Self {
         match tree {
             NodeRc::Internal(internal) => {
-                let mut path = vec![(internal.clone(), 0..tree.len(context))];
-                let (leaf_range, leaf) = PartialFocus::<Internal>::tree_path(&mut path, 0, context);
+                let mut path = vec![(internal.clone(), 0..tree.len(context).await)];
+                let (leaf_range, leaf) =
+                    PartialFocus::<Internal>::tree_path(&mut path, 0, context).await;
                 PartialFocus {
                     path,
                     leaf,
@@ -72,20 +76,20 @@ where
             NodeRc::Leaf(leaf) => PartialFocus {
                 path: Vec::new(),
                 leaf: leaf.clone(),
-                leaf_range: 0..leaf.load(context).len(),
+                leaf_range: 0..leaf.load(context).await.len().await,
             },
         }
     }
 
     /// Moves the focus to a new index in the tree.
-    pub fn move_focus(&mut self, idx: usize, context: &Internal::Context) {
+    pub async fn move_focus(&mut self, idx: usize, context: &Internal::Context) {
         if !self.leaf_range.contains(&idx) {
             while !self.path.last().unwrap().1.contains(&idx) {
                 self.path.pop();
             }
             let new_idx = idx - self.path.last().unwrap().1.start;
             let (leaf_range, leaf) =
-                PartialFocus::<Internal>::tree_path(&mut self.path, new_idx, context);
+                PartialFocus::<Internal>::tree_path(&mut self.path, new_idx, context).await;
             self.leaf_range = leaf_range;
             self.leaf = leaf;
         }
@@ -93,18 +97,27 @@ where
 
     /// Gets an element from the tree. If the element does not exist this will return `None`. This
     /// will move the focus along if necessary.
-    fn get(
+    async fn get(
         &mut self,
         idx: usize,
         context: &Internal::Context,
     ) -> Option<&<Internal::Leaf as LeafTrait>::Item> {
         if self.path.is_empty() {
-            unsafe { Some(&*self.leaf.load(context).get(idx)?) }
-        } else if idx >= self.path[0].0.load(context).len() {
+            unsafe { Some(&*self.leaf.load(context).await.get(idx).await?) }
+        } else if idx >= self.path[0].0.load(context).await.len().await {
             None
         } else {
-            self.move_focus(idx, context);
-            unsafe { Some(&*self.leaf.load(context).get(idx - self.leaf_range.start)?) }
+            self.move_focus(idx, context).await;
+            unsafe {
+                Some(
+                    &*self
+                        .leaf
+                        .load(context)
+                        .await
+                        .get(idx - self.leaf_range.start)
+                        .await?,
+                )
+            }
         }
     }
 }
@@ -140,7 +153,7 @@ where
 
 impl<'a, Internal> Focus<'a, Internal>
 where
-    Internal: InternalTrait,
+    Internal: InternalTrait + 'static,
 {
     /// Constructs a new focus for a Vector.
     ///
@@ -153,8 +166,8 @@ where
     /// let mut focus = Focus::new(&v);
     /// assert_eq!(focus.get(0), Some(&1));
     /// ```
-    pub fn new(tree: &'a InternalVector<Internal>) -> Self {
-        Focus::narrowed_tree(tree, 0..tree.len())
+    pub async fn new(tree: &'a InternalVector<Internal>) -> Focus<'a, Internal> {
+        Focus::narrowed_tree(tree, 0..tree.len()).await
     }
 
     /// Constructs a new focus for a Vector. The focus is narrowed by the given range, only
@@ -169,7 +182,10 @@ where
     /// let mut focus = Focus::narrowed_tree(&v, 1..3);
     /// assert_eq!(focus.get(0), Some(&2));
     /// ```
-    pub fn narrowed_tree(tree: &'a InternalVector<Internal>, mut range: Range<usize>) -> Self {
+    pub async fn narrowed_tree(
+        tree: &'a InternalVector<Internal>,
+        mut range: Range<usize>,
+    ) -> Focus<'a, Internal> {
         if range.start >= tree.len() {
             range.start = tree.len();
         }
@@ -183,7 +199,7 @@ where
         let mut focus_node = &tree.root;
         for (node_position, node) in tree_iter {
             let range_start = range_end;
-            range_end = range_start + node.len(&tree.context);
+            range_end = range_start + node.len(&tree.context).await;
 
             if range.start < range_end && range.end > range_start {
                 focus_range = range_start..range_end;
@@ -194,7 +210,7 @@ where
         Focus {
             tree,
             spine_position,
-            spine_node_focus: PartialFocus::from_tree(focus_node, &tree.context),
+            spine_node_focus: PartialFocus::from_tree(focus_node, &tree.context).await,
             focus_range,
             range,
         }
@@ -202,7 +218,7 @@ where
 
     /// Refocuses to a different index within the tree. This will move to a different spine node if
     /// necessary.
-    fn refocus(&mut self, idx: usize) {
+    async fn refocus(&mut self, idx: usize) {
         debug_assert!(idx < self.focus_range.start || idx >= self.focus_range.end);
         if idx < self.focus_range.start {
             let skip_amount = match self.spine_position {
@@ -214,12 +230,12 @@ where
             };
             let mut range_end = self.focus_range.start;
             for (position, node) in self.tree.spine_iter().rev().skip(skip_amount) {
-                let range_start = range_end - node.len(&self.tree.context);
+                let range_start = range_end - node.len(&self.tree.context).await;
                 let range = range_start..range_end;
                 if range.contains(&idx) {
                     self.spine_position = position;
                     self.focus_range = range;
-                    self.spine_node_focus = PartialFocus::from_tree(node, &self.tree.context);
+                    self.spine_node_focus = PartialFocus::from_tree(node, &self.tree.context).await;
                     self.spine_node_focus
                         .move_focus(idx - range_start, &self.tree.context);
                     break;
@@ -236,14 +252,15 @@ where
             };
             let mut range_start = self.focus_range.end;
             for (position, node) in self.tree.spine_iter().skip(skip_amount) {
-                let range_end = range_start + node.len(&self.tree.context);
+                let range_end = range_start + node.len(&self.tree.context).await;
                 let range = range_start..range_end;
                 if range.contains(&idx) {
                     self.spine_position = position;
                     self.focus_range = range;
-                    self.spine_node_focus = PartialFocus::from_tree(node, &self.tree.context);
+                    self.spine_node_focus = PartialFocus::from_tree(node, &self.tree.context).await;
                     self.spine_node_focus
-                        .move_focus(idx - range_start, &self.tree.context);
+                        .move_focus(idx - range_start, &self.tree.context)
+                        .await;
                     break;
                 }
                 range_start = range_end;
@@ -267,22 +284,23 @@ where
     /// assert_eq!(focus.get(2), Some(&3));
     /// assert_eq!(focus.get(3), None);
     /// ```
-    pub fn get(&mut self, idx: usize) -> Option<&<Internal::Leaf as LeafTrait>::Item> {
+    pub async fn get(&mut self, idx: usize) -> Option<&<Internal::Leaf as LeafTrait>::Item> {
         let new_idx = idx + self.range.start;
         if self.range.contains(&new_idx) {
             if !self.focus_range.contains(&new_idx) {
-                self.refocus(new_idx);
+                self.refocus(new_idx).await;
             }
             self.spine_node_focus
                 .get(new_idx - self.focus_range.start, &self.tree.context)
+                .await
         } else {
             None
         }
     }
 
     /// Derp
-    pub fn index(&mut self, idx: usize) -> &<Internal::Leaf as LeafTrait>::Item {
-        self.get(idx).unwrap()
+    pub async fn index(&mut self, idx: usize) -> &<Internal::Leaf as LeafTrait>::Item {
+        self.get(idx).await.unwrap()
     }
 
     /// Returns the length of the range that is accessible through the focus.
@@ -332,7 +350,7 @@ where
     /// focus.narrow(1..1);
     /// assert_eq!(focus.get(0), None);
     /// ```
-    pub fn narrow<R: RangeBounds<usize>>(&mut self, range: R) {
+    pub async fn narrow<R: RangeBounds<usize>>(&mut self, range: R) {
         let range_start = match range.start_bound() {
             Bound::Unbounded => 0,
             Bound::Included(x) => *x,
@@ -348,7 +366,7 @@ where
         }
         let new_start = self.range.start + range_start;
         let new_end = new_start + range_end - range_start;
-        let new_focus = Focus::narrowed_tree(&self.tree, new_start..new_end);
+        let new_focus = Focus::narrowed_tree(&self.tree, new_start..new_end).await;
         *self = new_focus;
     }
 
@@ -369,14 +387,14 @@ where
     /// assert_eq!(second_focus.get(0), Some(&2));
     /// assert_eq!(second_focus.get(1), Some(&3));
     /// ```
-    pub fn split_at(self, idx: usize) -> (Self, Self) {
+    pub async fn split_at(self, idx: usize) -> (Self, Self) {
         if idx >= self.len() {
             panic!("Split is out of range")
         }
         let first_range = self.range.start..idx;
         let second_range = idx..self.range.end;
-        let first = Focus::narrowed_tree(self.tree, first_range);
-        let second = Focus::narrowed_tree(self.tree, second_range);
+        let first = Focus::narrowed_tree(self.tree, first_range).await;
+        let second = Focus::narrowed_tree(self.tree, second_range).await;
         (first, second)
     }
 }
@@ -747,7 +765,7 @@ where
     ///
     /// Panics if the given index is greater than the focus' length.
     ///
-    fn split_at(&mut self, index: usize, context: &Internal::Context) -> (Self, Self) {
+    async fn split_at(&mut self, index: usize, context: &Internal::Context) -> (Self, Self) {
         // We split the vector in two at the position, we need to find the two positions that denote
         // the last of this vector and the first of the next vector.
         self.drop_borrowed_nodes(); // Might be going from one split to another so we may need drop.
@@ -756,20 +774,21 @@ where
             // This vector becomes empty and the returned one is self.
             let first_part = self.empty();
             let second_part = self.clone();
-            debug_assert!(first_part.assert_invariants());
-            debug_assert!(second_part.assert_invariants());
+            debug_assert!(first_part.assert_invariants().await);
+            debug_assert!(second_part.assert_invariants().await);
             return (first_part, second_part);
         } else if index == self.len {
             // This vector is unchanged and the returned one is empty.
             let first_part = self.clone();
             let second_part = self.empty();
-            debug_assert!(first_part.assert_invariants());
-            debug_assert!(second_part.assert_invariants());
+            debug_assert!(first_part.assert_invariants().await);
+            debug_assert!(second_part.assert_invariants().await);
             return (first_part, second_part);
         }
         let original_len = self.len;
         // index is now 1..self.len()
-        let (self_child_position, mut subindex) = self.find_node_info_for_index(index).unwrap();
+        let (self_child_position, mut subindex) =
+            self.find_node_info_for_index(index).await.unwrap();
         // self.len = index;
 
         let mut left_nodes = ManuallyDrop::into_inner(self.nodes.clone());
@@ -783,23 +802,24 @@ where
             let node = right_nodes.pop().unwrap();
             match node {
                 BorrowedNode::Internal(mut internal) => {
-                    let (new_subindex, left, mut right) = internal.split_at_position(subindex);
+                    let (new_subindex, left, mut right) =
+                        internal.split_at_position(subindex).await;
                     subindex = new_subindex;
                     let child = right.pop_child(Side::Front, context).unwrap();
-                    if !left.is_empty() {
+                    if !left.is_empty().await {
                         left_nodes.push(BorrowedNode::Internal(left));
                     }
-                    if !right.is_empty() {
+                    if !right.is_empty().await {
                         right_nodes.push(BorrowedNode::Internal(right));
                     }
                     right_nodes.push(child);
                 }
                 BorrowedNode::Leaf(mut leaf) => {
-                    let (left, right) = leaf.split_at(subindex);
-                    if !left.is_empty() {
+                    let (left, right) = leaf.split_at(subindex).await;
+                    if !left.is_empty().await {
                         left_nodes.push(BorrowedNode::Leaf(left));
                     }
-                    if !right.is_empty() {
+                    if !right.is_empty().await {
                         right_nodes.push(BorrowedNode::Leaf(right));
                     }
                     break;
@@ -816,8 +836,8 @@ where
         let first_part = InnerFocusMut::from_vector(left_nodes);
         let second_part = InnerFocusMut::from_vector(right_nodes);
         assert_eq!(first_part.len + second_part.len, original_len);
-        debug_assert!(first_part.assert_invariants());
-        debug_assert!(second_part.assert_invariants());
+        debug_assert!(first_part.assert_invariants().await);
+        debug_assert!(second_part.assert_invariants().await);
         (first_part, second_part)
     }
 
@@ -1101,26 +1121,26 @@ where
     // }
 
     /// Returns the spine position and subindex corresponding the given index.
-    fn find_node_info_for_index(&self, index: usize) -> Option<(usize, usize)> {
+    async fn find_node_info_for_index(&self, index: usize) -> Option<(usize, usize)> {
         if index >= self.len {
             None
         } else {
             let mut forward_end = 0;
 
             for (idx, node) in self.nodes.iter().enumerate() {
-                if index < forward_end + node.len() {
+                if index < forward_end + node.len().await {
                     return Some((idx, index - forward_end));
                 }
-                forward_end += node.len();
+                forward_end += node.len().await;
             }
             unreachable!();
         }
     }
 
-    fn assert_invariants(&self) -> bool {
+    async fn assert_invariants(&self) -> bool {
         let mut cumulative = 0;
         for node in self.nodes.iter() {
-            cumulative += node.len();
+            cumulative += node.len().await;
         }
         cumulative == self.len
     }

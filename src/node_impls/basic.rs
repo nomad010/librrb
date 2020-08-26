@@ -5,6 +5,8 @@ use crate::{Side, RRB_WIDTH};
 use archery::{SharedPointer, SharedPointerKind};
 use std::ops::{Deref, DerefMut, Range};
 
+use async_trait::async_trait;
+
 #[derive(Debug)]
 pub struct SharedPointerEntry<
     I: Clone + std::fmt::Debug,
@@ -61,6 +63,7 @@ impl<T> Drop for DerefMutPtr<T> {
     }
 }
 
+#[async_trait(?Send)]
 impl<I, P, C> Entry for SharedPointerEntry<I, P, C>
 where
     I: Clone + std::fmt::Debug,
@@ -72,15 +75,15 @@ where
     type LoadMutGuard = DerefMutPtr<I>;
     type Context = C;
 
-    fn new(item: Self::Item) -> Self {
+    async fn new(item: Self::Item) -> Self {
         SharedPointerEntry(SharedPointer::new(item), std::marker::PhantomData)
     }
 
-    fn load<'a>(&'a self, _context: &Self::Context) -> Self::LoadGuard {
+    async fn load(&self, _context: &Self::Context) -> Self::LoadGuard {
         DerefPtr(self.0.deref() as *const I)
     }
 
-    fn load_mut<'a>(&'a mut self, _context: &Self::Context) -> Self::LoadMutGuard {
+    async fn load_mut<'a>(&'a mut self, _context: &Self::Context) -> Self::LoadMutGuard {
         DerefMutPtr(SharedPointer::make_mut(&mut self.0))
     }
 }
@@ -96,11 +99,12 @@ impl<A: Clone + std::fmt::Debug> Drop for BorrowedLeaf<A> {
     }
 }
 
+#[async_trait(?Send)]
 impl<A: Clone + std::fmt::Debug> BorrowedLeafTrait for BorrowedLeaf<A> {
     type Concrete = Leaf<A>;
     type ItemMutGuard = DerefMutPtr<A>;
 
-    fn split_at(&mut self, idx: usize) -> (Self, Self) {
+    async fn split_at(&mut self, idx: usize) -> (Self, Self) {
         let (left, right) = self.buffer.split_at(idx);
         (
             BorrowedLeaf { buffer: left },
@@ -108,15 +112,15 @@ impl<A: Clone + std::fmt::Debug> BorrowedLeafTrait for BorrowedLeaf<A> {
         )
     }
 
-    fn len(&self) -> usize {
+    async fn len(&self) -> usize {
         self.buffer.len()
     }
 
-    fn get_mut_guarded(&mut self, idx: usize) -> Option<Self::ItemMutGuard> {
+    async fn get_mut_guarded(&mut self, idx: usize) -> Option<Self::ItemMutGuard> {
         Some(DerefMutPtr(self.buffer.get_mut_ptr(idx)?))
     }
 
-    fn get_mut(&mut self, idx: usize) -> Option<*mut <Self::Concrete as LeafTrait>::Item> {
+    async fn get_mut(&mut self, idx: usize) -> Option<*mut <Self::Concrete as LeafTrait>::Item> {
         self.buffer.get_mut_ptr(idx)
     }
 }
@@ -616,6 +620,7 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> Clone for Internal<Leaf, P> {
 //     }
 // }
 
+#[async_trait]
 impl<Leaf: LeafTrait, P: SharedPointerKind> InternalTrait for Internal<Leaf, P> {
     // type Item = A;
     type Borrowed = BorrowedInternal<Leaf, P>;
@@ -626,7 +631,7 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> InternalTrait for Internal<Leaf, P> 
     type InternalEntry = SharedPointerEntry<Self, P, Leaf::Context>;
     type ItemMutGuard = Leaf::ItemMutGuard;
 
-    fn empty_internal(level: usize) -> Self {
+    async fn empty_internal(level: usize) -> Self {
         debug_assert_ne!(level, 0); // Should be a Leaf
         if level == 1 {
             Internal {
@@ -641,21 +646,21 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> InternalTrait for Internal<Leaf, P> 
         }
     }
 
-    fn new_empty(&self) -> Self {
+    async fn new_empty(&self) -> Self {
         Internal {
             sizes: SharedPointer::new(SizeTable::new(self.sizes.level())),
             children: self.children.new_empty(),
         }
     }
 
-    fn share_children_with(
+    async fn share_children_with(
         &mut self,
         destination: &mut Self,
         share_side: Side,
         len: usize,
         _context: &Self::Context,
     ) -> usize {
-        debug_assert_eq!(self.level(), destination.level());
+        debug_assert_eq!(self.level().await, destination.level().await);
         let shared = match self.children {
             ChildList::Internals(ref mut children) => {
                 debug_assert_eq!(children.len(), self.sizes.len());
@@ -663,7 +668,9 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> InternalTrait for Internal<Leaf, P> 
             }
             ChildList::Leaves(ref mut children) => {
                 debug_assert_eq!(children.len(), self.sizes.len());
-                children.decant_into(destination.children.leaves_mut(), share_side, len)
+                children
+                    .decant_into(destination.children.leaves_mut(), share_side, len)
+                    .await
             }
         };
         if shared != 0 {
@@ -948,24 +955,24 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> InternalTrait for Internal<Leaf, P> 
         result
     }
 
-    fn debug_check_invariants(
+    async fn debug_check_invariants(
         &self,
         reported_size: usize,
         reported_level: usize,
         context: &Self::Context,
     ) {
-        debug_assert_eq!(reported_level, self.level());
+        debug_assert_eq!(reported_level, self.level().await);
         match &self.children {
             ChildList::Internals(internals) => {
-                debug_assert_eq!(internals.len(), self.sizes.len());
+                debug_assert_eq!(internals.len().await, self.sizes.len());
                 let mut sum = 0;
                 for (idx, internal) in internals.iter().enumerate() {
                     let child_size = self.sizes.get_child_size(idx).unwrap();
-                    internal.load(context).debug_check_invariants(
-                        child_size,
-                        reported_level - 1,
-                        context,
-                    );
+                    internal
+                        .load(context)
+                        .await
+                        .debug_check_invariants(child_size, reported_level - 1, context)
+                        .await;
                     sum += child_size;
                 }
                 debug_assert_eq!(sum, reported_size);
