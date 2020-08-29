@@ -587,9 +587,9 @@ where
             // Finally, we create a new node of height one more than the old root and set that as
             // the new root. We leave the root empty
             let new_root = NodeRc::Internal(
-                Internal::InternalEntry::new(
-                    Internal::empty_internal(self.root.level(&self.context).await + 1).await,
-                )
+                Internal::InternalEntry::new(Internal::empty_internal(
+                    self.root.level(&self.context).await + 1,
+                ))
                 .await,
             );
             let mut new_node = mem::replace(&mut self.root, new_root);
@@ -1122,9 +1122,9 @@ where
             // The root moves to either the left or right spine and the root becomes empty
             // We replace the left with root here and right with an empty node
             let new_root = NodeRc::Internal(
-                Internal::InternalEntry::new(
-                    Internal::empty_internal(self.root.level(&self.context).await + 1).await,
-                )
+                Internal::InternalEntry::new(Internal::empty_internal(
+                    self.root.level(&self.context).await + 1,
+                ))
                 .await,
             );
             let mut new_left = mem::replace(&mut self.root, new_root);
@@ -1145,9 +1145,9 @@ where
             // The root moves to either the left or right spine and the root becomes empty
             // We replace the right with root here and left with an empty node
             let new_root = NodeRc::Internal(
-                Internal::InternalEntry::new(
-                    Internal::empty_internal(other.root.level(&self.context).await + 1).await,
-                )
+                Internal::InternalEntry::new(Internal::empty_internal(
+                    other.root.level(&self.context).await + 1,
+                ))
                 .await,
             );
             let mut new_right = mem::replace(&mut other.root, new_root);
@@ -1273,9 +1273,9 @@ where
 
         if !other.root.is_empty(&self.context).await {
             let new_root = NodeRc::Internal(
-                Internal::InternalEntry::new(
-                    Internal::empty_internal(self.root.level(&self.context).await + 1).await,
-                )
+                Internal::InternalEntry::new(Internal::empty_internal(
+                    self.root.level(&self.context).await + 1,
+                ))
                 .await,
             );
             let old_root = mem::replace(&mut self.root, new_root);

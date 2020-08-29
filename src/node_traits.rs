@@ -18,27 +18,26 @@ pub trait Entry: Clone + std::fmt::Debug {
     async fn load_mut(&mut self, context: &Self::Context) -> Self::LoadMutGuard;
 }
 
-#[async_trait(?Send)]
 pub trait BorrowedLeafTrait: Clone + std::fmt::Debug {
     type Concrete: LeafTrait<Borrowed = Self>;
     type ItemMutGuard: DerefMut<Target = <Self::Concrete as LeafTrait>::Item>;
 
-    async fn split_at(&mut self, idx: usize) -> (Self, Self);
+    fn split_at(&mut self, idx: usize) -> (Self, Self);
 
-    async fn len(&self) -> usize;
+    fn len(&self) -> usize;
 
-    async fn is_empty(&self) -> bool {
-        self.len().await == 0
+    fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
-    async fn get_mut_guarded(&mut self, idx: usize) -> Option<Self::ItemMutGuard>;
+    fn get_mut_guarded(&mut self, idx: usize) -> Option<Self::ItemMutGuard>;
 
-    async fn get_mut(&mut self, idx: usize) -> Option<*mut <Self::Concrete as LeafTrait>::Item>;
+    fn get_mut(&mut self, idx: usize) -> Option<*mut <Self::Concrete as LeafTrait>::Item>;
 
     /// Checks the invariants that this node may hold if any.
     #[allow(dead_code)]
-    async fn debug_check_invariants(&self, reported_size: usize, reported_level: usize) {
-        debug_assert_eq!(reported_size, self.len().await);
+    fn debug_check_invariants(&self, reported_size: usize, reported_level: usize) {
+        debug_assert_eq!(reported_size, self.len());
         debug_assert_eq!(reported_level, 0);
     }
 }
@@ -229,10 +228,10 @@ pub trait InternalTrait: Clone + std::fmt::Debug {
     type ItemMutGuard: DerefMut<Target = <Self::Leaf as LeafTrait>::Item>;
 
     /// Constructs a new empty internal node that is at the given level in the tree.
-    async fn empty_internal(level: usize) -> Self;
+    fn empty_internal(level: usize) -> Self;
 
     /// Constructs a new internal node of the same level, but with no children.
-    async fn new_empty(&self) -> Self;
+    fn new_empty(&self) -> Self;
 
     /// Removes elements from `self` and inserts these elements into `destination`. At most `len`
     /// elements will be removed. The actual number of elements decanted is returned. Elements are
@@ -406,7 +405,7 @@ where
         //TODO: This shouldn't have context
         match self {
             NodeRc::Internal(x) => NodeRc::Internal(
-                Internal::InternalEntry::new(x.load(context).await.new_empty().await).await,
+                Internal::InternalEntry::new(x.load(context).await.new_empty()).await,
             ),
             NodeRc::Leaf(_) => {
                 NodeRc::Leaf(Internal::LeafEntry::new(Internal::Leaf::empty()).await)
@@ -720,7 +719,7 @@ where
 {
     pub async fn len(&self) -> usize {
         match self {
-            BorrowedNode::Leaf(leaf) => leaf.len().await,
+            BorrowedNode::Leaf(leaf) => leaf.len(),
             BorrowedNode::Internal(internal) => internal.len().await,
         }
     }
@@ -781,10 +780,7 @@ where
 
     pub async fn debug_check_invariants(&self, reported_size: usize, reported_level: usize) {
         match self {
-            BorrowedNode::Leaf(leaf) => {
-                leaf.debug_check_invariants(reported_size, reported_level)
-                    .await
-            }
+            BorrowedNode::Leaf(leaf) => leaf.debug_check_invariants(reported_size, reported_level),
             BorrowedNode::Internal(internal) => {
                 internal
                     .debug_check_invariants(reported_size, reported_level)

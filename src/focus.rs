@@ -878,11 +878,11 @@ where
                     right_nodes.push(child);
                 }
                 BorrowedNode::Leaf(mut leaf) => {
-                    let (left, right) = leaf.split_at(subindex).await;
-                    if !left.is_empty().await {
+                    let (left, right) = leaf.split_at(subindex);
+                    if !left.is_empty() {
                         left_nodes.push(BorrowedNode::Leaf(left));
                     }
-                    if !right.is_empty().await {
+                    if !right.is_empty() {
                         right_nodes.push(BorrowedNode::Leaf(right));
                     }
                     break;
@@ -1153,7 +1153,7 @@ where
             // println!("In branch A {} with idx for in {:?}", idx, self.leaf_range);
             let position = idx - self.leaf_range.start;
             if let Some(ref mut leaf) = self.leaf {
-                let ptr = leaf.get_mut(position).await?;
+                let ptr = leaf.get_mut(position)?;
                 // println!("In branch B with idx {:?}", unsafe { &mut *ptr });
                 unsafe { Some(&mut *ptr) }
             } else {
@@ -1163,7 +1163,7 @@ where
                 //     self.nodes.get(1)
                 // );
                 let root_index = self.root.as_ref().unwrap().0;
-                let ptr = self.nodes[root_index].leaf_mut().get_mut(position).await?;
+                let ptr = self.nodes[root_index].leaf_mut().get_mut(position)?;
                 // println!("doodah focus {:p}", ptr);
                 unsafe { Some(&mut *ptr) }
             }

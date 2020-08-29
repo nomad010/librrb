@@ -99,12 +99,11 @@ impl<A: Clone + std::fmt::Debug> Drop for BorrowedLeaf<A> {
     }
 }
 
-#[async_trait(?Send)]
 impl<A: Clone + std::fmt::Debug> BorrowedLeafTrait for BorrowedLeaf<A> {
     type Concrete = Leaf<A>;
     type ItemMutGuard = DerefMutPtr<A>;
 
-    async fn split_at(&mut self, idx: usize) -> (Self, Self) {
+    fn split_at(&mut self, idx: usize) -> (Self, Self) {
         let (left, right) = self.buffer.split_at(idx);
         (
             BorrowedLeaf { buffer: left },
@@ -112,15 +111,15 @@ impl<A: Clone + std::fmt::Debug> BorrowedLeafTrait for BorrowedLeaf<A> {
         )
     }
 
-    async fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.buffer.len()
     }
 
-    async fn get_mut_guarded(&mut self, idx: usize) -> Option<Self::ItemMutGuard> {
+    fn get_mut_guarded(&mut self, idx: usize) -> Option<Self::ItemMutGuard> {
         Some(DerefMutPtr(self.buffer.get_mut_ptr(idx)?))
     }
 
-    async fn get_mut(&mut self, idx: usize) -> Option<*mut <Self::Concrete as LeafTrait>::Item> {
+    fn get_mut(&mut self, idx: usize) -> Option<*mut <Self::Concrete as LeafTrait>::Item> {
         self.buffer.get_mut_ptr(idx)
     }
 }
@@ -656,7 +655,7 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> InternalTrait for Internal<Leaf, P> 
     type InternalEntry = SharedPointerEntry<Self, P, Leaf::Context>;
     type ItemMutGuard = Leaf::ItemMutGuard;
 
-    async fn empty_internal(level: usize) -> Self {
+    fn empty_internal(level: usize) -> Self {
         debug_assert_ne!(level, 0); // Should be a Leaf
         if level == 1 {
             Internal {
@@ -671,7 +670,7 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> InternalTrait for Internal<Leaf, P> 
         }
     }
 
-    async fn new_empty(&self) -> Self {
+    fn new_empty(&self) -> Self {
         Internal {
             sizes: SharedPointer::new(SizeTable::new(self.sizes.level())),
             children: self.children.new_empty(),
@@ -938,7 +937,7 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> InternalTrait for Internal<Leaf, P> 
 
     async fn split_at_child(&mut self, idx: usize, context: &Self::Context) -> Self {
         if idx <= self.slots().await {
-            let mut result = self.new_empty().await;
+            let mut result = self.new_empty();
             self.share_children_with(&mut result, Side::Front, idx, context)
                 .await;
             std::mem::swap(self, &mut result);
