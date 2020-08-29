@@ -3085,6 +3085,7 @@ mod test {
     use proptest::prelude::*;
     use proptest::proptest;
     use proptest_derive::Arbitrary;
+    use tokio::runtime::Runtime;
 
     const MAX_EXTEND_SIZE: usize = 1000;
 
@@ -3180,91 +3181,97 @@ mod test {
         }
     }
 
-    // proptest! {
-    //     #[test]
-    //     fn random_u64(actions: ActionList<u64>) {
-    //         let mut vec: Vec<u64> = Vec::new();
-    //         let mut vector: Vector<u64> = Vector::new();
+    proptest! {
+        #[test]
+        fn random_u64(actions: ActionList<u64>) {
 
-    //         for action in &actions.actions {
-    //             match action {
-    //                 Action::PushFront(item) => {
-    //                     vec.insert(0, item.clone());
-    //                     vector.push_front(item.clone());
-    //                     assert_eq!(vec.len(), vector.len());
-    //                     assert!(vector.equal_vec(&vec));
-    //                 },
-    //                 Action::PushBack(item) => {
-    //                     vec.push(item.clone());
-    //                     vector.push_back(item.clone());
-    //                     assert_eq!(vec.len(), vector.len());
-    //                     assert!(vector.equal_vec(&vec));
-    //                 },
-    //                 Action::ExtendFront(items) => {
-    //                     for item in items {
-    //                         vec.insert(0, item.clone());
-    //                         vector.push_front(item.clone());
-    //                     }
-    //                     assert_eq!(vec.len(), vector.len());
-    //                     assert!(vector.equal_vec(&vec));
-    //                 }
-    //                 Action::ExtendBack(items) => {
-    //                     for item in items {
-    //                         vec.push(item.clone());
-    //                         vector.push_back(item.clone());
-    //                     }
-    //                     assert_eq!(vec.len(), vector.len());
-    //                     assert!(vector.equal_vec(&vec));
-    //                 }
-    //                 Action::SplitLeft(index) => {
-    //                     let index = index % (1 + vec.len());
-    //                     vec.truncate(index);
-    //                     vector.slice_from_start(index);
-    //                     assert_eq!(vec.len(), vector.len());
-    //                     assert!(vector.equal_vec(&vec));
-    //                 }
-    //                 Action::SplitRight(index) => {
-    //                     let index = index % (1 + vec.len());
-    //                     vec = vec.split_off(index);
-    //                     vector.slice_to_end(index);
-    //                     assert_eq!(vec.len(), vector.len());
-    //                     assert!(vector.equal_vec(&vec));
-    //                 }
-    //                 Action::ConcatFront(items) => {
-    //                     let mut new_vector = Vector::new();
-    //                     for item in items {
-    //                         vec.insert(0, item.clone());
-    //                         new_vector.push_front(item.clone());
-    //                     }
-    //                     new_vector.append(vector);
-    //                     vector = new_vector;
-    //                     assert_eq!(vec.len(), vector.len());
-    //                     assert!(vector.equal_vec(&vec));
-    //                 }
-    //                 Action::ConcatBack(items) => {
-    //                     let mut new_vector = Vector::new();
-    //                     for item in items {
-    //                         vec.push(item.clone());
-    //                         new_vector.push_back(item.clone());
-    //                     }
-    //                     vector.append(new_vector);
-    //                     assert_eq!(vec.len(), vector.len());
-    //                     assert!(vector.equal_vec(&vec));
-    //                 }
-    //             }
-    //             assert!(vector.assert_invariants());
-    //         }
+            let mut rt = Runtime::new().unwrap();
 
-    //         assert_eq!(
-    //             vector.iter().cloned().collect::<Vec<_>>(),
-    //             vec
-    //         );
-    //         assert_eq!(
-    //             vector.iter().rev().cloned().collect::<Vec<_>>(),
-    //             vec.iter().rev().cloned().collect::<Vec<_>>()
-    //         );
-    //     }
-    // }
+            // Spawn a future onto the runtime
+            rt.block_on(async {
+                let mut vec: Vec<u64> = Vec::new();
+                let mut vector: Vector<u64> = Vector::new().await;
+
+                for action in &actions.actions {
+                    match action {
+                        Action::PushFront(item) => {
+                            vec.insert(0, item.clone());
+                            vector.push_front(item.clone()).await;
+                            assert_eq!(vec.len(), vector.len());
+                            assert!(vector.equal_vec(&vec).await);
+                        },
+                        Action::PushBack(item) => {
+                            vec.push(item.clone());
+                            vector.push_back(item.clone()).await;
+                            assert_eq!(vec.len(), vector.len());
+                            assert!(vector.equal_vec(&vec).await);
+                        },
+                        Action::ExtendFront(items) => {
+                            for item in items {
+                                vec.insert(0, item.clone());
+                                vector.push_front(item.clone()).await;
+                            }
+                            assert_eq!(vec.len(), vector.len());
+                            assert!(vector.equal_vec(&vec).await);
+                        }
+                        Action::ExtendBack(items) => {
+                            for item in items {
+                                vec.push(item.clone());
+                                vector.push_back(item.clone()).await;
+                            }
+                            assert_eq!(vec.len(), vector.len());
+                            assert!(vector.equal_vec(&vec).await);
+                        }
+                        Action::SplitLeft(index) => {
+                            let index = index % (1 + vec.len());
+                            vec.truncate(index);
+                            vector.slice_from_start(index).await;
+                            assert_eq!(vec.len(), vector.len());
+                            assert!(vector.equal_vec(&vec).await);
+                        }
+                        Action::SplitRight(index) => {
+                            let index = index % (1 + vec.len());
+                            vec = vec.split_off(index);
+                            vector.slice_to_end(index).await;
+                            assert_eq!(vec.len(), vector.len());
+                            assert!(vector.equal_vec(&vec).await);
+                        }
+                        Action::ConcatFront(items) => {
+                            let mut new_vector = Vector::new().await;
+                            for item in items {
+                                vec.insert(0, item.clone());
+                                new_vector.push_front(item.clone()).await;
+                            }
+                            new_vector.append(vector).await;
+                            vector = new_vector;
+                            assert_eq!(vec.len(), vector.len());
+                            assert!(vector.equal_vec(&vec).await);
+                        }
+                        Action::ConcatBack(items) => {
+                            let mut new_vector = Vector::new().await;
+                            for item in items {
+                                vec.push(item.clone());
+                                new_vector.push_back(item.clone()).await;
+                            }
+                            vector.append(new_vector).await;
+                            assert_eq!(vec.len(), vector.len());
+                            assert!(vector.equal_vec(&vec).await);
+                        }
+                    }
+                    assert!(vector.assert_invariants().await);
+                }
+
+                assert_eq!(
+                    vector.iter().await.collect::<Vec<u64>>().await,
+                    vec
+                );
+                // assert_eq!(
+                //     vector.iter().await.rev().collect::<Vec<u64>>().await,
+                //     vec.iter().rev().cloned().collect::<Vec<_>>()
+                // );
+        });
+    }
+    }
 
     #[tokio::test]
     pub async fn empty() {

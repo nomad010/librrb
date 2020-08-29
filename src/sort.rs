@@ -466,20 +466,28 @@ where
 mod test {
     use crate::*;
     use ::proptest::num::i32;
+    use futures::StreamExt;
     use proptest::proptest;
+    use tokio::runtime::Runtime;
 
-    // proptest! {
-    //     #[tokio::test]
-    //     async fn test_quicksort(ref input in proptest::collection::vec(i32::ANY, 0..10_000)) {
-    //         let mut vec = input.clone();
-    //         let mut vector = Vector::new().await;
-    //         for i in vec.iter() {
-    //             vector.push_back(*i).await;
-    //         }
-    //         assert!(vec.iter().eq(vector.iter()));
-    //         vector.sort();
-    //         vec.sort();
-    //         assert!(vec.iter().eq(vector.iter()));
-    //     }
-    // }
+    proptest! {
+        #[test]
+        fn test_quicksort(ref input in proptest::collection::vec(i32::ANY, 0..10_000)) {
+            // Create the runtime
+            let mut rt = Runtime::new().unwrap();
+
+            // Spawn a future onto the runtime
+            rt.block_on(async {
+                let mut vec = input.clone();
+                let mut vector = Vector::new().await;
+                for i in vec.iter() {
+                    vector.push_back(*i).await;
+                }
+                assert_eq!(vec, vector.iter().await.collect::<Vec<i32>>().await);
+                vector.sort().await;
+                vec.sort();
+                assert_eq!(vec, vector.iter().await.collect::<Vec<i32>>().await);
+            });
+        }
+    }
 }
