@@ -193,7 +193,7 @@ pub trait BorrowedInternalTrait: Clone + std::fmt::Debug {
         match side {
             Side::Front => self.get_child_mut_at_slot(0).await,
             Side::Back => {
-                self.get_child_mut_at_slot(self.slots().saturating_sub(1))
+                self.get_child_mut_at_slot(self.slots().await.saturating_sub(1))
                     .await
             }
         }
@@ -313,10 +313,13 @@ pub trait InternalTrait: Clone + std::fmt::Debug {
     /// Returns a reference to the Rc of the child node at the given slot in this node.
     async fn get_child_ref_at_slot(&self, idx: usize) -> Option<(NodeRef<Self>, Range<usize>)>;
 
-    async fn get_child_ref_at_side(&self, side: Side) -> Option<(NodeRef<Self>, Range<usize>)> {
+    async fn get_child_ref_at_side(&self, side: Side) -> Option<(NodeRef<'_, Self>, Range<usize>)> {
         match side {
-            Side::Front => self.get_child_ref_at_slot(0),
-            Side::Back => self.get_child_ref_at_slot(self.slots().await.saturating_sub(1)),
+            Side::Front => self.get_child_ref_at_slot(0).await,
+            Side::Back => {
+                self.get_child_ref_at_slot(self.slots().await.saturating_sub(1))
+                    .await
+            }
         }
     }
 
@@ -329,10 +332,16 @@ pub trait InternalTrait: Clone + std::fmt::Debug {
     /// Returns a mutable reference to the Rc of the child node at the given slot in this node.
     async fn get_child_mut_at_slot(&mut self, idx: usize) -> Option<(NodeMut<Self>, Range<usize>)>;
 
-    async fn get_child_mut_at_side(&mut self, side: Side) -> Option<(NodeMut<Self>, Range<usize>)> {
+    async fn get_child_mut_at_side(
+        &mut self,
+        side: Side,
+    ) -> Option<(NodeMut<'_, Self>, Range<usize>)> {
         match side {
             Side::Front => self.get_child_mut_at_slot(0).await,
-            Side::Back => self.get_child_mut_at_slot(self.slots().await.saturating_sub(1)),
+            Side::Back => {
+                self.get_child_mut_at_slot(self.slots().await.saturating_sub(1))
+                    .await
+            }
         }
     }
 
@@ -402,10 +411,12 @@ where
     pub async fn new_empty(&self, context: &Internal::Context) -> Self {
         //TODO: This shouldn't have context
         match self {
-            NodeRc::Internal(x) => NodeRc::Internal(Internal::InternalEntry::new(
-                x.load(context).await.new_empty(),
-            )),
-            NodeRc::Leaf(_) => NodeRc::Leaf(Internal::LeafEntry::new(Internal::Leaf::empty())),
+            NodeRc::Internal(x) => NodeRc::Internal(
+                Internal::InternalEntry::new(x.load(context).await.new_empty().await).await,
+            ),
+            NodeRc::Leaf(_) => {
+                NodeRc::Leaf(Internal::LeafEntry::new(Internal::Leaf::empty()).await)
+            }
         }
     }
 
@@ -459,8 +470,8 @@ where
     /// Returns whether the node is completely empty.
     pub async fn is_empty(&self, context: &Internal::Context) -> bool {
         match self {
-            NodeRc::Leaf(x) => x.load(context).await.is_empty(),
-            NodeRc::Internal(x) => x.load(context).await.is_empty(),
+            NodeRc::Leaf(x) => x.load(context).await.is_empty().await,
+            NodeRc::Internal(x) => x.load(context).await.is_empty().await,
         }
     }
 
@@ -534,8 +545,8 @@ where
     /// Returns the number of children that can be inserted into this node.
     pub async fn free_slots(&self, context: &Internal::Context) -> usize {
         match self {
-            NodeRc::Leaf(x) => x.load(context).free_space().await,
-            NodeRc::Internal(x) => x.load(context).free_slots().await,
+            NodeRc::Leaf(x) => x.load(context).await.free_space().await,
+            NodeRc::Internal(x) => x.load(context).await.free_slots().await,
         }
     }
 
@@ -843,35 +854,35 @@ where
     }
 
     /// Returns the level of the node.
-    pub fn level(&self, context: &Internal::Context) -> usize {
+    pub async fn level(&self, context: &Internal::Context) -> usize {
         match self {
             NodeRef::Leaf(_) => 0,
-            NodeRef::Internal(x) => x.load(context).level(),
+            NodeRef::Internal(x) => x.load(context).await.level().await,
         }
     }
 
     /// Tests whether the node is a leaf.
-    pub fn is_leaf(&self, context: &Internal::Context) -> bool {
-        self.level(context) == 0
+    pub async fn is_leaf(&self, context: &Internal::Context) -> bool {
+        self.level(context).await == 0
     }
 
     /// Returns the element at the given position in the node.
-    pub fn get(
+    pub async fn get(
         &self,
         idx: usize,
         context: &Internal::Context,
     ) -> Option<*const <Internal::Leaf as LeafTrait>::Item> {
         match self {
-            NodeRef::Leaf(x) => x.load(context).get(idx),
-            NodeRef::Internal(x) => x.load(context).get(idx, context),
+            NodeRef::Leaf(x) => x.load(context).await.get(idx).await,
+            NodeRef::Internal(x) => x.load(context).await.get(idx, context).await,
         }
     }
 
     /// Returns the number of children that can be inserted into this node.
-    pub fn free_slots(&self, context: &Internal::Context) -> usize {
+    pub async fn free_slots(&self, context: &Internal::Context) -> usize {
         match self {
-            NodeRef::Leaf(x) => x.load(context).free_space(),
-            NodeRef::Internal(x) => x.load(context).free_slots(),
+            NodeRef::Leaf(x) => x.load(context).await.free_space().await,
+            NodeRef::Internal(x) => x.load(context).await.free_slots().await,
         }
     }
 
@@ -947,7 +958,12 @@ where
                     .equal_iter_debug(iter, context)
                     .await
             }
-            NodeRef::Leaf(ref leaf) => leaf.load(context).equal_iter_debug(iter, context),
+            NodeRef::Leaf(ref leaf) => {
+                leaf.load(context)
+                    .await
+                    .equal_iter_debug(iter, context)
+                    .await
+            }
         }
     }
 }
@@ -1018,8 +1034,8 @@ where
     /// Returns the number of children that can be inserted into this node.
     pub async fn free_slots(&self, context: &Internal::Context) -> usize {
         match self {
-            NodeMut::Leaf(x) => x.load(context).free_space().await,
-            NodeMut::Internal(x) => x.load(context).free_slots().await,
+            NodeMut::Leaf(x) => x.load(context).await.free_space().await,
+            NodeMut::Internal(x) => x.load(context).await.free_slots().await,
         }
     }
 

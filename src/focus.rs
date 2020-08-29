@@ -153,7 +153,7 @@ where
 
 impl<'a, Internal> Focus<'a, Internal>
 where
-    Internal: InternalTrait + 'static,
+    Internal: InternalTrait + 'a,
 {
     /// Constructs a new focus for a Vector.
     ///
@@ -162,9 +162,14 @@ where
     /// ```
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::{Focus, Vector};
+    /// # use futures::stream::StreamExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
     /// let v = vector![1, 2, 3];
-    /// let mut focus = Focus::new(&v);
-    /// assert_eq!(focus.get(0), Some(&1));
+    /// let mut focus = Focus::new(&v).await;
+    /// assert_eq!(focus.get(0).await, Some(&1));
+    /// }
     /// ```
     pub async fn new(tree: &'a InternalVector<Internal>) -> Focus<'a, Internal> {
         Focus::narrowed_tree(tree, 0..tree.len()).await
@@ -178,9 +183,14 @@ where
     /// ```
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::{Focus, Vector};
+    /// # use futures::stream::StreamExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
     /// let v = vector![1, 2, 3];
-    /// let mut focus = Focus::narrowed_tree(&v, 1..3);
-    /// assert_eq!(focus.get(0), Some(&2));
+    /// let mut focus = Focus::narrowed_tree(&v, 1..3).await;
+    /// assert_eq!(focus.get(0).await, Some(&2));
+    /// }
     /// ```
     pub async fn narrowed_tree(
         tree: &'a InternalVector<Internal>,
@@ -237,7 +247,8 @@ where
                     self.focus_range = range;
                     self.spine_node_focus = PartialFocus::from_tree(node, &self.tree.context).await;
                     self.spine_node_focus
-                        .move_focus(idx - range_start, &self.tree.context);
+                        .move_focus(idx - range_start, &self.tree.context)
+                        .await;
                     break;
                 }
                 range_end = range_start;
@@ -277,12 +288,17 @@ where
     /// ```
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::{Focus, Vector};
+    /// # use futures::stream::StreamExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
     /// let v = vector![1, 2, 3];
-    /// let mut focus = Focus::new(&v);
-    /// assert_eq!(focus.get(0), Some(&1));
-    /// assert_eq!(focus.get(1), Some(&2));
-    /// assert_eq!(focus.get(2), Some(&3));
-    /// assert_eq!(focus.get(3), None);
+    /// let mut focus = Focus::new(&v).await;
+    /// assert_eq!(focus.get(0).await, Some(&1));
+    /// assert_eq!(focus.get(1).await, Some(&2));
+    /// assert_eq!(focus.get(2).await, Some(&3));
+    /// assert_eq!(focus.get(3).await, None);
+    /// }
     /// ```
     pub async fn get(&mut self, idx: usize) -> Option<&<Internal::Leaf as LeafTrait>::Item> {
         let new_idx = idx + self.range.start;
@@ -310,9 +326,14 @@ where
     /// ```
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::{Focus, Vector};
+    /// # use futures::stream::StreamExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
     /// let v = vector![1, 2, 3];
-    /// assert_eq!(Focus::new(&v).len(), 3);
-    /// assert_eq!(Focus::narrowed_tree(&v, 3..3).len(), 0);
+    /// assert_eq!(Focus::new(&v).await.len(), 3);
+    /// assert_eq!(Focus::narrowed_tree(&v, 3..3).await.len(), 0);
+    /// }
     /// ```
     pub fn len(&self) -> usize {
         self.range.end - self.range.start
@@ -325,9 +346,14 @@ where
     /// ```
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::{Focus, Vector};
+    /// # use futures::stream::StreamExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
     /// let v = vector![1, 2, 3];
-    /// assert!(!Focus::new(&v).is_empty());
-    /// assert!(Focus::narrowed_tree(&v, 3..3).is_empty());
+    /// assert!(!Focus::new(&v).await.is_empty());
+    /// assert!(Focus::narrowed_tree(&v, 3..3).await.is_empty());
+    /// }
     /// ```
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -340,15 +366,20 @@ where
     /// ```
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::{Focus, Vector};
+    /// # use futures::stream::StreamExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
     /// let v = vector![1, 2, 3];
-    /// let mut focus = Focus::new(&v);
-    /// assert_eq!(focus.get(0), Some(&1));
-    /// focus.narrow(1..3);
-    /// assert_eq!(focus.get(0), Some(&2));
-    /// focus.narrow(1..2);
-    /// assert_eq!(focus.get(0), Some(&3));
-    /// focus.narrow(1..1);
-    /// assert_eq!(focus.get(0), None);
+    /// let mut focus = Focus::new(&v).await;
+    /// assert_eq!(focus.get(0).await, Some(&1));
+    /// focus.narrow(1..3).await;
+    /// assert_eq!(focus.get(0).await, Some(&2));
+    /// focus.narrow(1..2).await;
+    /// assert_eq!(focus.get(0).await, Some(&3));
+    /// focus.narrow(1..1).await;
+    /// assert_eq!(focus.get(0).await, None);
+    /// }
     /// ```
     pub async fn narrow<R: RangeBounds<usize>>(&mut self, range: R) {
         let range_start = match range.start_bound() {
@@ -379,15 +410,20 @@ where
     /// ```
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::{Focus, Vector};
+    /// # use futures::stream::StreamExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
     /// let v = vector![1, 2, 3];
-    /// let focus = Focus::new(&v);
-    /// let (mut first_focus, mut second_focus) = focus.split_at(1);
-    /// assert_eq!(first_focus.get(0), Some(&1));
-    /// assert_eq!(first_focus.get(1), None);
-    /// assert_eq!(second_focus.get(0), Some(&2));
-    /// assert_eq!(second_focus.get(1), Some(&3));
+    /// let focus = Focus::new(&v).await;
+    /// let (mut first_focus, mut second_focus) = focus.split_at(1).await;
+    /// assert_eq!(first_focus.get(0).await, Some(&1));
+    /// assert_eq!(first_focus.get(1).await, None);
+    /// assert_eq!(second_focus.get(0).await, Some(&2));
+    /// assert_eq!(second_focus.get(1).await, Some(&3));
+    /// }
     /// ```
-    pub async fn split_at(self, idx: usize) -> (Self, Self) {
+    pub async fn split_at(self, idx: usize) -> (Focus<'a, Internal>, Focus<'a, Internal>) {
         if idx >= self.len() {
             panic!("Split is out of range")
         }
@@ -462,13 +498,13 @@ impl<'a, Internal> FocusMut<'a, Internal>
 where
     Internal: InternalTrait,
 {
-    pub(crate) fn from_vector(
+    pub(crate) async fn from_vector(
         origin: &'a mut InternalVector<Internal>,
         nodes: Vec<BorrowedNode<Internal>>,
-    ) -> Self {
+    ) -> FocusMut<'a, Internal> {
         FocusMut::Rooted {
             origin,
-            focus: InnerFocusMut::from_vector(nodes.clone()),
+            focus: InnerFocusMut::from_vector(nodes.clone()).await,
             borrowed_roots: nodes,
             _marker: std::marker::PhantomData,
         }
@@ -481,11 +517,16 @@ where
     /// ```
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::Vector;
+    /// # use futures::stream::StreamExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
     /// let mut v = vector![1, 2, 3];
-    /// let mut focus_1 = v.focus_mut();
-    /// let (focus_1, focus_2) = focus_1.split_at(1);
+    /// let mut focus_1 = v.focus_mut().await;
+    /// let (focus_1, focus_2) = focus_1.split_at(1).await;
     /// assert_eq!(focus_1.len(), 1);
     /// assert_eq!(focus_2.len(), 2);
+    /// }
     /// ```
     pub fn len(&self) -> usize {
         match self {
@@ -500,11 +541,16 @@ where
     /// ```
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::Vector;
+    /// # use futures::stream::StreamExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
     /// let mut v = vector![1, 2, 3];
-    /// let mut focus_1 = v.focus_mut();
-    /// let (focus_1, focus_2) = focus_1.split_at(0);
+    /// let mut focus_1 = v.focus_mut().await;
+    /// let (focus_1, focus_2) = focus_1.split_at(0).await;
     /// assert!(focus_1.is_empty());
     /// assert!(!focus_2.is_empty());
+    /// }
     /// ```
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -519,22 +565,30 @@ where
     /// ```
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::Vector;
+    /// # use futures::stream::StreamExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
     /// let mut v = vector![1, 2, 3];
-    /// let mut focus_1 = v.focus_mut();
-    /// let (mut focus_1, mut focus_2) = focus_1.split_at(1);
-    /// assert_eq!(focus_1.get(0), Some(&mut 1));
-    /// assert_eq!(focus_1.get(1), None);
-    /// assert_eq!(focus_2.get(0), Some(&mut 2));
-    /// assert_eq!(focus_2.get(1), Some(&mut 3));
+    /// let mut focus_1 = v.focus_mut().await;
+    /// let (mut focus_1, mut focus_2) = focus_1.split_at(1).await;
+    /// assert_eq!(focus_1.get(0).await, Some(&mut 1));
+    /// assert_eq!(focus_1.get(1).await, None);
+    /// assert_eq!(focus_2.get(0).await, Some(&mut 2));
+    /// assert_eq!(focus_2.get(1).await, Some(&mut 3));
+    /// }
     /// ```
     /// # Panics
     ///
     /// Panics if the given index is greater than the focus' length.
     ///
-    pub fn split_at(&mut self, index: usize) -> (FocusMut<Internal>, FocusMut<Internal>) {
+    pub async fn split_at(
+        &mut self,
+        index: usize,
+    ) -> (FocusMut<'_, Internal>, FocusMut<'_, Internal>) {
         match self {
             FocusMut::Rooted { focus, origin, .. } => {
-                let (left, right) = focus.split_at(index, &origin.context);
+                let (left, right) = focus.split_at(index, &origin.context).await;
                 (
                     FocusMut::Nonrooted {
                         focus: left,
@@ -549,7 +603,7 @@ where
                 )
             }
             FocusMut::Nonrooted { focus, parent, .. } => {
-                let (left, right) = focus.split_at(index, parent.context());
+                let (left, right) = focus.split_at(index, parent.context()).await;
                 (
                     FocusMut::Nonrooted {
                         focus: left,
@@ -605,17 +659,22 @@ where
     /// ```
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::Vector;
+    /// # use futures::stream::StreamExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
     /// let mut v = vector![1, 2, 3];
-    /// let mut focus = v.focus_mut();
-    /// assert_eq!(focus.get(0), Some(&mut 1));
-    /// assert_eq!(focus.get(1), Some(&mut 2));
-    /// assert_eq!(focus.get(2), Some(&mut 3));
-    /// assert_eq!(focus.get(3), None);
+    /// let mut focus = v.focus_mut().await;
+    /// assert_eq!(focus.get(0).await, Some(&mut 1));
+    /// assert_eq!(focus.get(1).await, Some(&mut 2));
+    /// assert_eq!(focus.get(2).await, Some(&mut 3));
+    /// assert_eq!(focus.get(3).await, None);
+    /// }
     /// ```
-    pub fn get(&mut self, idx: usize) -> Option<&mut <Internal::Leaf as LeafTrait>::Item> {
+    pub async fn get(&mut self, idx: usize) -> Option<&mut <Internal::Leaf as LeafTrait>::Item> {
         match self {
-            FocusMut::Rooted { focus, origin, .. } => focus.get(idx, &origin.context),
-            FocusMut::Nonrooted { focus, parent, .. } => focus.get(idx, parent.context()),
+            FocusMut::Rooted { focus, origin, .. } => focus.get(idx, &origin.context).await,
+            FocusMut::Nonrooted { focus, parent, .. } => focus.get(idx, parent.context()).await,
         }
     }
 
@@ -627,14 +686,19 @@ where
     /// ```
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::Vector;
+    /// # use futures::stream::StreamExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
     /// let mut v = vector![1, 2, 3];
-    /// let mut focus = v.focus_mut();
-    /// assert_eq!(focus.index(0), &mut 1);
-    /// assert_eq!(focus.index(1), &mut 2);
-    /// assert_eq!(focus.index(2), &mut 3);
+    /// let mut focus = v.focus_mut().await;
+    /// assert_eq!(focus.index(0).await, &mut 1);
+    /// assert_eq!(focus.index(1).await, &mut 2);
+    /// assert_eq!(focus.index(2).await, &mut 3);
+    /// }
     /// ```
-    pub fn index(&mut self, idx: usize) -> &mut <Internal::Leaf as LeafTrait>::Item {
-        self.get(idx).expect("Index out of range.")
+    pub async fn index(&mut self, idx: usize) -> &mut <Internal::Leaf as LeafTrait>::Item {
+        self.get(idx).await.expect("Index out of range.")
     }
 
     /// derp
@@ -705,10 +769,10 @@ where
         }
     }
 
-    pub(crate) fn from_vector(nodes: Vec<BorrowedNode<Internal>>) -> Self {
+    pub(crate) async fn from_vector(nodes: Vec<BorrowedNode<Internal>>) -> Self {
         let mut len = 0;
         for node in nodes.iter() {
-            len += node.len();
+            len += node.len().await;
         }
         InnerFocusMut {
             borrowed_nodes: vec![],
@@ -805,7 +869,7 @@ where
                     let (new_subindex, left, mut right) =
                         internal.split_at_position(subindex).await;
                     subindex = new_subindex;
-                    let child = right.pop_child(Side::Front, context).unwrap();
+                    let child = right.pop_child(Side::Front, context).await.unwrap();
                     if !left.is_empty().await {
                         left_nodes.push(BorrowedNode::Internal(left));
                     }
@@ -833,8 +897,8 @@ where
         // self.leaf = None;
         // self.leaf_range = 0..0;
 
-        let first_part = InnerFocusMut::from_vector(left_nodes);
-        let second_part = InnerFocusMut::from_vector(right_nodes);
+        let first_part = InnerFocusMut::from_vector(left_nodes).await;
+        let second_part = InnerFocusMut::from_vector(right_nodes).await;
         assert_eq!(first_part.len + second_part.len, original_len);
         debug_assert!(first_part.assert_invariants().await);
         debug_assert!(second_part.assert_invariants().await);
@@ -951,7 +1015,7 @@ where
     //     });
     // }
 
-    fn move_focus(&mut self, mut idx: usize, context: &Internal::Context) {
+    async fn move_focus(&mut self, mut idx: usize, context: &Internal::Context) {
         if !self.borrowed_nodes.is_empty() {
             self.drop_borrowed_nodes();
         }
@@ -971,9 +1035,9 @@ where
         if self.root.is_none() {
             // If the root is unassigned we can potentially find a new one.
             if idx < self.len {
-                let (node_position, new_idx) = self.find_node_info_for_index(idx).unwrap();
+                let (node_position, new_idx) = self.find_node_info_for_index(idx).await.unwrap();
                 let node_start = idx - new_idx;
-                let node_len = self.nodes[node_position].len();
+                let node_len = self.nodes[node_position].len().await;
                 self.root = Some((node_position, node_start..node_start + node_len));
             } else {
                 // No match for the root we just go ahead and retun as we have no hope of finding
@@ -998,6 +1062,7 @@ where
                     BorrowedNode::Internal(internal) => {
                         let (subchild, subchild_range) = internal
                             .get_child_mut_for_position(idx - range.start)
+                            .await
                             .unwrap();
                         let absolute_subchild_range = (subchild_range.start + range.start)
                             ..(subchild_range.end + range.start);
@@ -1005,12 +1070,13 @@ where
                         match subchild {
                             NodeMut::Internal(subchild) => {
                                 self.path.push((
-                                    subchild.load_mut(context).borrow_node(),
+                                    subchild.load_mut(context).await.borrow_node().await,
                                     absolute_subchild_range,
                                 ));
                             }
                             NodeMut::Leaf(subchild) => {
-                                self.leaf = Some(subchild.load_mut(context).borrow_node());
+                                self.leaf =
+                                    Some(subchild.load_mut(context).await.borrow_node().await);
                                 self.leaf_range = absolute_subchild_range;
                                 return;
                             }
@@ -1034,7 +1100,8 @@ where
         loop {
             let (parent, parent_subrange) = self.path.last_mut().unwrap();
             let parent = &mut *parent;
-            let (child_node, child_subrange) = parent.get_child_mut_for_position(idx).unwrap();
+            let (child_node, child_subrange) =
+                parent.get_child_mut_for_position(idx).await.unwrap();
             idx -= child_subrange.start;
             let child_subrange = (parent_subrange.start + child_subrange.start)
                 ..(parent_subrange.start + child_subrange.end);
@@ -1043,13 +1110,14 @@ where
             // idx = new_idx;
             match child_node {
                 NodeMut::Internal(internal) => {
-                    let mut new_root = internal.load_mut(context);
-                    self.path.push((new_root.borrow_node(), child_subrange));
+                    let mut new_root = internal.load_mut(context).await;
+                    self.path
+                        .push((new_root.borrow_node().await, child_subrange));
                 }
                 NodeMut::Leaf(leaf) => {
                     // skipped_items.start += this_skipped_items;
                     // skipped_items.end = skipped_items.start + leaf_len;
-                    self.leaf = Some(leaf.load_mut(context).borrow_node());
+                    self.leaf = Some(leaf.load_mut(context).await.borrow_node().await);
                     self.leaf_range = child_subrange;
                     break;
                 }
@@ -1065,24 +1133,29 @@ where
     /// ```
     /// # #[macro_use] extern crate librrb;
     /// # use librrb::Vector;
+    /// # use futures::stream::StreamExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
     /// let mut v = vector![1, 2, 3];
-    /// let mut focus = v.focus_mut();
-    /// assert_eq!(focus.get(0), Some(&mut 1));
-    /// assert_eq!(focus.get(1), Some(&mut 2));
-    /// assert_eq!(focus.get(2), Some(&mut 3));
-    /// assert_eq!(focus.get(3), None);
+    /// let mut focus = v.focus_mut().await;
+    /// assert_eq!(focus.get(0).await, Some(&mut 1));
+    /// assert_eq!(focus.get(1).await, Some(&mut 2));
+    /// assert_eq!(focus.get(2).await, Some(&mut 3));
+    /// assert_eq!(focus.get(3).await, None);
+    /// }
     /// ```
-    pub fn get(
+    pub async fn get(
         &mut self,
         idx: usize,
         context: &Internal::Context,
     ) -> Option<&mut <Internal::Leaf as LeafTrait>::Item> {
-        self.move_focus(idx, context);
+        self.move_focus(idx, context).await;
         if self.leaf_range.contains(&idx) {
             // println!("In branch A {} with idx for in {:?}", idx, self.leaf_range);
             let position = idx - self.leaf_range.start;
             if let Some(ref mut leaf) = self.leaf {
-                let ptr = leaf.get_mut(position)?;
+                let ptr = leaf.get_mut(position).await?;
                 // println!("In branch B with idx {:?}", unsafe { &mut *ptr });
                 unsafe { Some(&mut *ptr) }
             } else {
@@ -1092,7 +1165,7 @@ where
                 //     self.nodes.get(1)
                 // );
                 let root_index = self.root.as_ref().unwrap().0;
-                let ptr = self.nodes[root_index].leaf_mut().get_mut(position)?;
+                let ptr = self.nodes[root_index].leaf_mut().get_mut(position).await?;
                 // println!("doodah focus {:p}", ptr);
                 unsafe { Some(&mut *ptr) }
             }
@@ -1150,74 +1223,72 @@ where
 mod test {
     use crate::*;
     use crossbeam;
+    use futures::stream::StreamExt;
 
-    #[test]
-    pub fn single_focus_mut() {
-        let mut v = Vector::new();
+    #[tokio::test]
+    pub async fn single_focus_mut() {
+        let mut v = Vector::new().await;
         const N: isize = 1_000_000;
         for i in 0..N {
-            v.push_back(i);
+            v.push_back(i).await;
         }
 
         {
-            let mut focus = v.focus_mut();
+            let mut focus = v.focus_mut().await;
             for i in 0..N {
-                let thing = focus.index(i as usize);
+                let thing = focus.index(i as usize).await;
                 *thing = -i;
             }
         }
-        for (i, v) in v.iter().enumerate() {
+        let mut iter = v.iter().await.enumerate();
+        while let Some((i, v)) = iter.next().await {
             let r = -(i as isize);
             assert_eq!(v, &r);
         }
     }
 
-    #[test]
-    pub fn split_focus_mut() {
-        let mut v = Vector::new();
+    #[tokio::test]
+    pub async fn split_focus_mut() {
+        let mut v = Vector::new().await;
         const N: usize = 1_000_000;
         for i in 0..N {
-            v.push_back(i);
+            v.push_back(i).await;
         }
 
         const S: usize = N / 2;
         println!("Prebuild");
         {
-            let mut focus = v.focus_mut();
+            let mut focus = v.focus_mut().await;
             println!("Presplit");
             {
-                let (mut left, mut right) = focus.split_at(S);
+                let (mut left, mut right) = focus.split_at(S).await;
                 println!("Postsplit");
                 for i in 0..S {
-                    let thing = left.get(i);
+                    let thing = left.get(i).await;
                     if let Some(thing) = thing {
                         *thing = 0;
                     }
                 }
-                crossbeam::scope(|s| {
-                    s.spawn(move |_| {
-                        for i in 0..N - S {
-                            let thing = right.get(i);
-                            if let Some(thing) = thing {
-                                *thing = 1;
-                            }
-                        }
-                    });
-                })
-                .unwrap();
+                for i in 0..N - S {
+                    let thing = right.get(i).await;
+                    if let Some(thing) = thing {
+                        *thing = 1;
+                    }
+                }
                 println!("End of split");
             }
             for i in 0..N {
                 if i < S {
-                    assert_eq!(focus.get(i), Some(&mut 0));
+                    assert_eq!(focus.get(i).await, Some(&mut 0));
                 } else {
-                    assert_eq!(focus.get(i), Some(&mut 1));
+                    assert_eq!(focus.get(i).await, Some(&mut 1));
                 }
             }
             println!("Predrop");
         }
         println!("Postdrop");
-        for (i, v) in v.iter().enumerate() {
+        let mut iter = v.iter().await.enumerate();
+        while let Some((i, v)) = iter.next().await {
             if i < S {
                 assert_eq!(v, &0);
             } else {
