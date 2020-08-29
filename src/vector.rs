@@ -555,11 +555,7 @@ where
     async fn complete_leaf(&mut self, side: Side) {
         debug_assert_eq!(self.left_spine.len(), self.right_spine.len());
         debug_assert_eq!(
-            self.leaf_ref(side)
-                .load(&self.context)
-                .await
-                .free_space()
-                .await,
+            self.leaf_ref(side).load(&self.context).await.free_space(),
             0
         );
         let (spine, other_spine) = match side {
@@ -617,14 +613,7 @@ where
     /// Pushes an item into a side leaf of the tree. This fixes up some invariants in the case that
     /// the root sits directly above the leaves.
     async fn push_side(&mut self, side: Side, item: <Internal::Leaf as LeafTrait>::Item) {
-        if self
-            .leaf_ref(side)
-            .load(&self.context)
-            .await
-            .free_space()
-            .await
-            == 0
-        {
+        if self.leaf_ref(side).load(&self.context).await.free_space() == 0 {
             self.complete_leaf(side).await;
         }
         match side {
@@ -641,8 +630,7 @@ where
         }
         .load_mut(&self.context)
         .await
-        .push(side, item, &self.context)
-        .await;
+        .push(side, item, &self.context);
         self.len += 1;
 
         if self.spine_ref(side).len() == 1 {
@@ -818,8 +806,7 @@ where
                         .leaf_mut()
                         .load_mut(&self.context)
                         .await
-                        .pop(side, &self.context)
-                        .await,
+                        .pop(side, &self.context),
                 )
             } else {
                 None
@@ -838,13 +825,9 @@ where
                     .unwrap_or(&mut self.root)
                     .leaf_mut(),
             };
-            let item = leaf
-                .load_mut(&self.context)
-                .await
-                .pop(side, &self.context)
-                .await;
+            let item = leaf.load_mut(&self.context).await.pop(side, &self.context);
 
-            if leaf.load(&self.context).await.is_empty().await {
+            if leaf.load(&self.context).await.is_empty() {
                 self.empty_leaf(side).await;
             } else if self.spine_ref(side).len() == 1 {
                 self.fixup_spine_tops().await;
@@ -928,7 +911,7 @@ where
     /// ```
     pub async fn front(&self) -> Option<&<Internal::Leaf as LeafTrait>::Item> {
         let leaf = self.left_spine.first().unwrap_or(&self.root);
-        unsafe { Some(&*leaf.leaf_ref().load(&self.context).await.front().await?) }
+        unsafe { Some(&*leaf.leaf_ref().load(&self.context).await.front()?) }
     }
 
     /// Returns a mutable reference to the item at the front of the sequence. If the tree is empty
@@ -956,8 +939,7 @@ where
                     .leaf_mut()
                     .load_mut(&self.context)
                     .await
-                    .front_mut(&self.context)
-                    .await?,
+                    .front_mut(&self.context)?,
             )
         }
     }
@@ -981,7 +963,7 @@ where
     /// ```
     pub async fn back(&self) -> Option<&<Internal::Leaf as LeafTrait>::Item> {
         let leaf = self.right_spine.first().unwrap_or(&self.root);
-        unsafe { Some(&*leaf.leaf_ref().load(&self.context).await.back().await?) }
+        unsafe { Some(&*leaf.leaf_ref().load(&self.context).await.back()?) }
     }
 
     /// Returns a mutable reference to the item at the back of the sequence. If the tree is empty
@@ -1009,8 +991,7 @@ where
                     .leaf_mut()
                     .load_mut(&self.context)
                     .await
-                    .back_mut(&self.context)
-                    .await?,
+                    .back_mut(&self.context)?,
             )
         }
     }
@@ -1602,7 +1583,7 @@ where
                     spine.push(child);
                 }
                 NodeRc::Leaf(leaf) => {
-                    break leaf.load(&self.context).await.is_empty().await;
+                    break leaf.load(&self.context).await.is_empty();
                 }
             }
         };

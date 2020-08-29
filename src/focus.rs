@@ -76,7 +76,7 @@ where
             NodeRc::Leaf(leaf) => PartialFocus {
                 path: Vec::new(),
                 leaf: leaf.clone(),
-                leaf_range: 0..leaf.load(context).await.len().await,
+                leaf_range: 0..leaf.load(context).await.len(),
             },
         }
     }
@@ -103,7 +103,7 @@ where
         context: &Internal::Context,
     ) -> Option<&<Internal::Leaf as LeafTrait>::Item> {
         if self.path.is_empty() {
-            unsafe { Some(&*self.leaf.load(context).await.get(idx).await?) }
+            unsafe { Some(&*self.leaf.load(context).await.get(idx)?) }
         } else if idx >= self.path[0].0.load(context).await.len().await {
             None
         } else {
@@ -114,8 +114,7 @@ where
                         .leaf
                         .load(context)
                         .await
-                        .get(idx - self.leaf_range.start)
-                        .await?,
+                        .get(idx - self.leaf_range.start)?,
                 )
             }
         }
@@ -1075,8 +1074,7 @@ where
                                 ));
                             }
                             NodeMut::Leaf(subchild) => {
-                                self.leaf =
-                                    Some(subchild.load_mut(context).await.borrow_node().await);
+                                self.leaf = Some(subchild.load_mut(context).await.borrow_node());
                                 self.leaf_range = absolute_subchild_range;
                                 return;
                             }
@@ -1117,7 +1115,7 @@ where
                 NodeMut::Leaf(leaf) => {
                     // skipped_items.start += this_skipped_items;
                     // skipped_items.end = skipped_items.start + leaf_len;
-                    self.leaf = Some(leaf.load_mut(context).await.borrow_node().await);
+                    self.leaf = Some(leaf.load_mut(context).await.borrow_node());
                     self.leaf_range = child_subrange;
                     break;
                 }
