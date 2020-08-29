@@ -291,7 +291,7 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> BorrowedInternalTrait for BorrowedIn
     type Concrete = Internal<Leaf, P>;
     type ItemMutGuard = DerefMutPtr<Self::Concrete>;
 
-    async fn len(&self) -> usize {
+    fn len(&self) -> usize {
         let range = self.children.range();
         if range.start == range.end {
             0
@@ -300,19 +300,19 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> BorrowedInternalTrait for BorrowedIn
         }
     }
 
-    async fn slots(&self) -> usize {
+    fn slots(&self) -> usize {
         self.children.range().len()
     }
 
-    async fn range(&self) -> Range<usize> {
+    fn range(&self) -> Range<usize> {
         self.children.range().clone()
     }
 
-    async fn level(&self) -> usize {
+    fn level(&self) -> usize {
         self.sizes.level()
     }
 
-    async fn get_child_mut_at_slot(
+    fn get_child_mut_at_slot(
         &mut self,
         idx: usize,
     ) -> Option<(NodeMut<'_, Self::Concrete>, Range<usize>)> {
@@ -329,12 +329,12 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> BorrowedInternalTrait for BorrowedIn
         Some((node, subrange))
     }
 
-    async fn get_child_mut_for_position(
+    fn get_child_mut_for_position(
         &mut self,
         position: usize,
     ) -> Option<(NodeMut<'_, Self::Concrete>, Range<usize>)> {
         let index = self.position_info_for(position)?.0;
-        self.get_child_mut_at_slot(index).await
+        self.get_child_mut_at_slot(index)
     }
 
     async fn pop_child(
@@ -343,8 +343,7 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> BorrowedInternalTrait for BorrowedIn
         context: &Leaf::Context,
     ) -> Option<BorrowedNode<Self::Concrete>> {
         let child = self
-            .get_child_mut_at_side(side)
-            .await?
+            .get_child_mut_at_side(side)?
             .0
             .borrow_node(context)
             .await;
@@ -356,7 +355,7 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> BorrowedInternalTrait for BorrowedIn
         Some(child)
     }
 
-    async fn unpop_child(&mut self, side: Side) {
+    fn unpop_child(&mut self, side: Side) {
         if side == Side::Front {
             self.children.range_mut().start -= 1;
         } else {
@@ -364,7 +363,7 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> BorrowedInternalTrait for BorrowedIn
         }
     }
 
-    async fn split_at_child(&mut self, index: usize) -> (Self, Self) {
+    fn split_at_child(&mut self, index: usize) -> (Self, Self) {
         let (left, right) = self.children.split_at(index);
         (
             BorrowedInternal {
@@ -378,9 +377,9 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> BorrowedInternalTrait for BorrowedIn
         )
     }
 
-    async fn split_at_position(&mut self, position: usize) -> (usize, Self, Self) {
+    fn split_at_position(&mut self, position: usize) -> (usize, Self, Self) {
         let index = self.position_info_for(position).unwrap();
-        let result = self.split_at_child(index.0).await;
+        let result = self.split_at_child(index.0);
         (index.1, result.0, result.1)
     }
 }

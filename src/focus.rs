@@ -865,14 +865,13 @@ where
             let node = right_nodes.pop().unwrap();
             match node {
                 BorrowedNode::Internal(mut internal) => {
-                    let (new_subindex, left, mut right) =
-                        internal.split_at_position(subindex).await;
+                    let (new_subindex, left, mut right) = internal.split_at_position(subindex);
                     subindex = new_subindex;
                     let child = right.pop_child(Side::Front, context).await.unwrap();
-                    if !left.is_empty().await {
+                    if !left.is_empty() {
                         left_nodes.push(BorrowedNode::Internal(left));
                     }
-                    if !right.is_empty().await {
+                    if !right.is_empty() {
                         right_nodes.push(BorrowedNode::Internal(right));
                     }
                     right_nodes.push(child);
@@ -1061,7 +1060,6 @@ where
                     BorrowedNode::Internal(internal) => {
                         let (subchild, subchild_range) = internal
                             .get_child_mut_for_position(idx - range.start)
-                            .await
                             .unwrap();
                         let absolute_subchild_range = (subchild_range.start + range.start)
                             ..(subchild_range.end + range.start);
@@ -1098,8 +1096,7 @@ where
         loop {
             let (parent, parent_subrange) = self.path.last_mut().unwrap();
             let parent = &mut *parent;
-            let (child_node, child_subrange) =
-                parent.get_child_mut_for_position(idx).await.unwrap();
+            let (child_node, child_subrange) = parent.get_child_mut_for_position(idx).unwrap();
             idx -= child_subrange.start;
             let child_subrange = (parent_subrange.start + child_subrange.start)
                 ..(parent_subrange.start + child_subrange.end);

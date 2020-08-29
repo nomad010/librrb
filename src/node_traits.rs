@@ -157,43 +157,40 @@ pub trait BorrowedInternalTrait: Clone + std::fmt::Debug {
     type Concrete: InternalTrait<Borrowed = Self>;
     type ItemMutGuard: DerefMut<Target = Self::Concrete>;
 
-    async fn len(&self) -> usize;
+    fn len(&self) -> usize;
 
-    async fn slots(&self) -> usize;
+    fn slots(&self) -> usize;
 
-    async fn is_empty(&self) -> bool {
-        self.len().await == 0
+    fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
-    async fn range(&self) -> Range<usize>;
+    fn range(&self) -> Range<usize>;
 
-    async fn level(&self) -> usize;
+    fn level(&self) -> usize;
 
-    async fn split_at_child(&mut self, index: usize) -> (Self, Self);
+    fn split_at_child(&mut self, index: usize) -> (Self, Self);
 
-    async fn split_at_position(&mut self, position: usize) -> (usize, Self, Self);
+    fn split_at_position(&mut self, position: usize) -> (usize, Self, Self);
 
     /// Returns a mutable reference to the Rc of the child node at the given slot in this node.
-    async fn get_child_mut_at_slot(
+    fn get_child_mut_at_slot(
         &mut self,
         idx: usize,
     ) -> Option<(NodeMut<'_, Self::Concrete>, Range<usize>)>;
 
-    async fn get_child_mut_at_side(
+    fn get_child_mut_at_side(
         &mut self,
         side: Side,
     ) -> Option<(NodeMut<'_, Self::Concrete>, Range<usize>)> {
         match side {
-            Side::Front => self.get_child_mut_at_slot(0).await,
-            Side::Back => {
-                self.get_child_mut_at_slot(self.slots().await.saturating_sub(1))
-                    .await
-            }
+            Side::Front => self.get_child_mut_at_slot(0),
+            Side::Back => self.get_child_mut_at_slot(self.slots().saturating_sub(1)),
         }
     }
 
     /// Returns a mutable reference to the Rc of the child node that covers the leaf position in this node.
-    async fn get_child_mut_for_position(
+    fn get_child_mut_for_position(
         &mut self,
         position: usize,
     ) -> Option<(NodeMut<Self::Concrete>, Range<usize>)>;
@@ -206,13 +203,13 @@ pub trait BorrowedInternalTrait: Clone + std::fmt::Debug {
     ) -> Option<BorrowedNode<Self::Concrete>>;
 
     /// Undoes the popping that has occurred via a call to `pop_child`.
-    async fn unpop_child(&mut self, side: Side);
+    fn unpop_child(&mut self, side: Side);
 
     /// Checks the invariants that this node may hold if any.
     #[allow(dead_code)]
-    async fn debug_check_invariants(&self, reported_size: usize, reported_level: usize) {
-        debug_assert_eq!(reported_size, self.len().await);
-        debug_assert_eq!(reported_level, self.level().await);
+    fn debug_check_invariants(&self, reported_size: usize, reported_level: usize) {
+        debug_assert_eq!(reported_size, self.len());
+        debug_assert_eq!(reported_level, self.level());
     }
 }
 
@@ -720,14 +717,14 @@ where
     pub async fn len(&self) -> usize {
         match self {
             BorrowedNode::Leaf(leaf) => leaf.len(),
-            BorrowedNode::Internal(internal) => internal.len().await,
+            BorrowedNode::Internal(internal) => internal.len(),
         }
     }
 
     pub async fn level(&self) -> usize {
         match self {
             BorrowedNode::Leaf(_) => 0,
-            BorrowedNode::Internal(internal) => internal.level().await,
+            BorrowedNode::Internal(internal) => internal.level(),
         }
     }
 
@@ -778,13 +775,11 @@ where
         }
     }
 
-    pub async fn debug_check_invariants(&self, reported_size: usize, reported_level: usize) {
+    pub fn debug_check_invariants(&self, reported_size: usize, reported_level: usize) {
         match self {
             BorrowedNode::Leaf(leaf) => leaf.debug_check_invariants(reported_size, reported_level),
             BorrowedNode::Internal(internal) => {
-                internal
-                    .debug_check_invariants(reported_size, reported_level)
-                    .await
+                internal.debug_check_invariants(reported_size, reported_level)
             }
         }
     }
