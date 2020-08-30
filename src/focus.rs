@@ -40,7 +40,6 @@ where
                 .load(context)
                 .await
                 .get_child_ref_for_position(idx)
-                .await
             {
                 let subrange_len = subchild_range.end - subchild_range.start;
                 let absolute_subrange_start = range.start + subchild_range.start;
@@ -104,7 +103,7 @@ where
     ) -> Option<&<Internal::Leaf as LeafTrait>::Item> {
         if self.path.is_empty() {
             unsafe { Some(&*self.leaf.load(context).await.get(idx)?) }
-        } else if idx >= self.path[0].0.load(context).await.len().await {
+        } else if idx >= self.path[0].0.load(context).await.len() {
             None
         } else {
             self.move_focus(idx, context).await;
@@ -1067,7 +1066,7 @@ where
                         match subchild {
                             NodeMut::Internal(subchild) => {
                                 self.path.push((
-                                    subchild.load_mut(context).await.borrow_node().await,
+                                    subchild.load_mut(context).await.borrow_node(),
                                     absolute_subchild_range,
                                 ));
                             }
@@ -1106,8 +1105,7 @@ where
             match child_node {
                 NodeMut::Internal(internal) => {
                     let mut new_root = internal.load_mut(context).await;
-                    self.path
-                        .push((new_root.borrow_node().await, child_subrange));
+                    self.path.push((new_root.borrow_node(), child_subrange));
                 }
                 NodeMut::Leaf(leaf) => {
                     // skipped_items.start += this_skipped_items;

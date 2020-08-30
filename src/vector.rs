@@ -725,8 +725,7 @@ where
             let child = node
                 .load_mut(&self.context)
                 .await
-                .pop_child(side, &self.context)
-                .await;
+                .pop_child(side, &self.context);
             spine[level] = child;
         }
 
@@ -1208,9 +1207,9 @@ where
             let mut right = right_node.internal_mut().load_mut(&self.context).await;
 
             left.pack_children(&self.context).await;
-            let mut left_right_most = left.pop_child(Side::Back, &self.context).await;
-            while !left_right_most.is_full(&self.context).await && !right.is_empty().await {
-                let mut right_left_most = right.pop_child(Side::Front, &self.context).await;
+            let mut left_right_most = left.pop_child(Side::Back, &self.context);
+            while !left_right_most.is_full(&self.context).await && !right.is_empty() {
+                let mut right_left_most = right.pop_child(Side::Front, &self.context);
                 right_left_most
                     .share_children_with(
                         &mut left_right_most,
@@ -1228,10 +1227,8 @@ where
             left.push_child(Side::Back, left_right_most, &self.context)
                 .await;
             right.pack_children(&self.context).await;
-            let slots = right.slots().await;
-            right
-                .share_children_with(&mut *left, Side::Front, slots, &self.context)
-                .await;
+            let slots = right.slots();
+            right.share_children_with(&mut *left, Side::Front, slots, &self.context);
 
             if !left_node.is_empty(&self.context).await {
                 self.right_spine
@@ -1243,7 +1240,7 @@ where
                     .push_child(Side::Back, left_node, &self.context)
                     .await;
             }
-            if !right.is_empty().await {
+            if !right.is_empty() {
                 other
                     .left_spine
                     .last_mut()
@@ -1578,8 +1575,7 @@ where
                     let child = internal
                         .load_mut(&self.context)
                         .await
-                        .pop_child(side, &self.context)
-                        .await;
+                        .pop_child(side, &self.context);
                     spine.push(child);
                 }
                 NodeRc::Leaf(leaf) => {
@@ -2510,100 +2506,103 @@ where
     /// Checks the internal invariants that are required by the Vector.
     #[allow(dead_code)]
     pub(crate) async fn assert_invariants(&self) -> bool {
-        // Invariant 1
-        // Spines must be of equal length
-        assert_eq!(self.left_spine.len(), self.right_spine.len());
+        #[cfg(debug_assertions)]
+        {
+            // Invariant 1
+            // Spines must be of equal length
+            assert_eq!(self.left_spine.len(), self.right_spine.len());
 
-        // Invariant 2
-        // All nodes in the spine except for the first one (the leaf) must have at least 1 slot free.
-        for spine in self.left_spine.iter().skip(1) {
-            assert!(spine.free_slots(&self.context).await >= 1);
-        }
-        for spine in self.right_spine.iter().skip(1) {
-            assert!(spine.free_slots(&self.context).await >= 1);
-        }
+            // Invariant 2
+            // All nodes in the spine except for the first one (the leaf) must have at least 1 slot free.
+            for spine in self.left_spine.iter().skip(1) {
+                assert!(spine.free_slots(&self.context).await >= 1);
+            }
+            for spine in self.right_spine.iter().skip(1) {
+                assert!(spine.free_slots(&self.context).await >= 1);
+            }
 
-        // Invariant 3
-        // The first node(the leaf) in the spine must have at least 1 element, but may be full
-        if let Some(leaf) = self.left_spine.first() {
-            assert!(leaf.slots(&self.context).await >= 1);
-        }
-        if let Some(leaf) = self.right_spine.first() {
-            assert!(leaf.slots(&self.context).await >= 1);
-        }
+            // Invariant 3
+            // The first node(the leaf) in the spine must have at least 1 element, but may be full
+            if let Some(leaf) = self.left_spine.first() {
+                assert!(leaf.slots(&self.context).await >= 1);
+            }
+            if let Some(leaf) = self.right_spine.first() {
+                assert!(leaf.slots(&self.context).await >= 1);
+            }
 
-        // Invariant 4
-        // If the root is a non-leaf, it must always have at least 2 slot free, but may be empty
-        if !self.root.is_leaf(&self.context).await {
-            assert!(self.root.free_slots(&self.context).await >= 2);
-        }
+            // Invariant 4
+            // If the root is a non-leaf, it must always have at least 2 slot free, but may be empty
+            if !self.root.is_leaf(&self.context).await {
+                assert!(self.root.free_slots(&self.context).await >= 2);
+            }
 
-        // Invariant 5
-        // If the root is an empty non-leaf node then the last two nodes of both spines:
-        // 1) Must not be able to be merged into a node of 1 less height
-        // 2) Must differ in slots by at most one node
-        if self.root.is_empty(&self.context).await && !self.root.is_leaf(&self.context).await {
-            let left_children = self.left_spine.last().unwrap().slots(&self.context).await;
-            let right_children = self.right_spine.last().unwrap().slots(&self.context).await;
+            // Invariant 5
+            // If the root is an empty non-leaf node then the last two nodes of both spines:
+            // 1) Must not be able to be merged into a node of 1 less height
+            // 2) Must differ in slots by at most one node
+            if self.root.is_empty(&self.context).await && !self.root.is_leaf(&self.context).await {
+                let left_children = self.left_spine.last().unwrap().slots(&self.context).await;
+                let right_children = self.right_spine.last().unwrap().slots(&self.context).await;
 
-            let difference = if left_children > right_children {
-                left_children - right_children
-            } else {
-                right_children - left_children
-            };
+                let difference = if left_children > right_children {
+                    left_children - right_children
+                } else {
+                    right_children - left_children
+                };
 
-            assert!(difference <= 1);
+                assert!(difference <= 1);
 
-            let min_children = if self.root.level(&self.context).await == 1 {
-                // The root is one above a leaf and a new leaf root could be completely full
-                RRB_WIDTH
-            } else {
-                // New non-leaf roots must contain at least 2 empty slots
-                RRB_WIDTH - 2
-            };
+                let min_children = if self.root.level(&self.context).await == 1 {
+                    // The root is one above a leaf and a new leaf root could be completely full
+                    RRB_WIDTH
+                } else {
+                    // New non-leaf roots must contain at least 2 empty slots
+                    RRB_WIDTH - 2
+                };
 
-            assert!(left_children + right_children >= min_children);
-        }
+                assert!(left_children + right_children >= min_children);
+            }
 
-        // Invariant 6
-        // The spine nodes must have their RRB invariants fulfilled
-        for (level, spine) in self.left_spine.iter().enumerate() {
-            spine
-                .debug_check_invariants(spine.len(&self.context).await, level, &self.context)
+            // Invariant 6
+            // The spine nodes must have their RRB invariants fulfilled
+            for (level, spine) in self.left_spine.iter().enumerate() {
+                spine
+                    .debug_check_invariants(spine.len(&self.context).await, level, &self.context)
+                    .await;
+            }
+            self.root
+                .debug_check_invariants(
+                    self.root.len(&self.context).await,
+                    self.left_spine.len(),
+                    &self.context,
+                )
                 .await;
-        }
-        self.root
-            .debug_check_invariants(
-                self.root.len(&self.context).await,
-                self.left_spine.len(),
-                &self.context,
-            )
-            .await;
-        for (level, spine) in self.right_spine.iter().enumerate() {
-            spine
-                .debug_check_invariants(spine.len(&self.context).await, level, &self.context)
-                .await;
-        }
+            for (level, spine) in self.right_spine.iter().enumerate() {
+                spine
+                    .debug_check_invariants(spine.len(&self.context).await, level, &self.context)
+                    .await;
+            }
 
-        // Invariant 7
-        // The tree's `len` field must match the sum of the spine's lens
-        let mut left_spine_len = 0;
-        for node in self.left_spine.iter() {
-            left_spine_len += node.len(&self.context).await;
+            // Invariant 7
+            // The tree's `len` field must match the sum of the spine's lens
+            let mut left_spine_len = 0;
+            for node in self.left_spine.iter() {
+                left_spine_len += node.len(&self.context).await;
+            }
+            // .map(|x| x.len(&self.context))
+            // .sum::<usize>();
+            let root_len = self.root.len(&self.context).await;
+            let mut right_spine_len = 0;
+            for node in self.right_spine.iter() {
+                right_spine_len += node.len(&self.context).await;
+            }
+            // let right_spine_len = self
+            //     .right_spine
+            //     .iter()
+            //     .map(|x| x.len(&self.context))
+            //     .sum::<usize>();
+            assert_eq!(self.len, left_spine_len + root_len + right_spine_len);
         }
-        // .map(|x| x.len(&self.context))
-        // .sum::<usize>();
-        let root_len = self.root.len(&self.context).await;
-        let mut right_spine_len = 0;
-        for node in self.right_spine.iter() {
-            right_spine_len += node.len(&self.context).await;
-        }
-        // let right_spine_len = self
-        //     .right_spine
-        //     .iter()
-        //     .map(|x| x.len(&self.context))
-        //     .sum::<usize>();
-        assert_eq!(self.len, left_spine_len + root_len + right_spine_len);
         true
     }
 }
@@ -3384,16 +3383,16 @@ mod test {
         const N: usize = 1_000;
         for i in 0..N {
             v.insert(v.len() / 2, i).await;
-            // v.assert_invariants().await;
+            v.assert_invariants().await;
 
-            let first_half = (1..i + 1).step_by(2);
-            let second_half = (0..i + 1).step_by(2).rev();
+            // let first_half = (1..i + 1).step_by(2);
+            // let second_half = (0..i + 1).step_by(2).rev();
 
-            let mut vector = Vec::new();
-            vector.extend(first_half);
-            vector.extend(second_half);
+            // let mut vector = Vec::new();
+            // vector.extend(first_half);
+            // vector.extend(second_half);
 
-            assert_eq!(v.iter().await.collect::<Vec<usize>>().await, vector);
+            // assert_eq!(v.iter().await.collect::<Vec<usize>>().await, vector);
         }
         let first_half = (1..N).step_by(2);
         let second_half = (0..N).step_by(2).rev();
