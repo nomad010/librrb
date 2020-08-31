@@ -64,3 +64,16 @@ Documentation
 Errors
 ✔ thiserrorify everything @started(20-05-27 22:24) @done(20-05-27 22:49) @lasted(25m8s)
 ✔ Remove thiserror in favour of a single error enum because the errors are quite sparse. @done(20-08-14 22:08)
+
+[] Try and figure out better way of storing nodes:
+  Potential idea:
+    One struct for each type.
+      One type for potentially unloaded (or maybe in cache)
+      One type for definitely loaded in a read state
+      One type for definitely loaded in a write state
+    Might need a more complicated set of types than this.
+      Need to figure out what should happen for probably loaded, should this just be the first state from above.
+      If so, we need to figure out to convert between the states
+        Loading and evicting from a cache? This means we can't store the latter two states. If this is the case then
+        Entry loading and load_mut'ing should return a type with the same lifetime as the context?
+    Can read access be upgraded to write access? Or should write access be requested anew.

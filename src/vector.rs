@@ -468,9 +468,16 @@ where
     /// }
     /// ```
     pub async fn singleton(item: <Internal::Leaf as LeafTrait>::Item) -> Self {
-        let mut result = Self::new().await;
-        result.push_back(item).await;
-        result
+        let mut leaf = Internal::Leaf::empty();
+        let context = Internal::Context::default();
+        leaf.push(Side::Back, item, &context);
+        InternalVector {
+            context,
+            left_spine: vec![],
+            right_spine: vec![],
+            root: NodeRc::Leaf(Internal::LeafEntry::new(leaf).await),
+            len: 0,
+        }
     }
 
     /// Derp
@@ -3379,7 +3386,7 @@ mod test {
 
     #[tokio::test]
     pub async fn inserts() {
-        let mut v = Vector::new().await;
+        let mut v = ThreadSafeVector::new().await;
         const N: usize = 1_000;
         for i in 0..N {
             v.insert(v.len() / 2, i).await;
