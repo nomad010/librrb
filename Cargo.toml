@@ -11,11 +11,14 @@ rand_core = "0.5.1"
 rand_xoshiro = "0.4.0"
 archery = "*"
 num = "*"
+async-trait = "*"
+futures = "*"
 
 [dev-dependencies]
 proptest = "*"
 proptest-derive = "*"
 crossbeam = "*"
+tokio = { version = "0.2", features = ["rt-threaded", "macros"] }
 
 [features]
 may_dangle = []

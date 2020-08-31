@@ -2,17 +2,20 @@ use crate::Side;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut, Range};
 
+use async_trait::async_trait;
+
+#[async_trait(?Send)]
 pub trait Entry: Clone + std::fmt::Debug {
     type Item: Clone + std::fmt::Debug;
     type LoadGuard: Deref<Target = Self::Item>;
     type LoadMutGuard: DerefMut<Target = Self::Item>;
     type Context: Clone + std::fmt::Debug + Default;
 
-    fn new(item: Self::Item) -> Self;
+    async fn new(item: Self::Item) -> Self;
 
-    fn load(&self, context: &Self::Context) -> Self::LoadGuard;
+    async fn load(&self, context: &Self::Context) -> Self::LoadGuard;
 
-    fn load_mut(&mut self, context: &Self::Context) -> Self::LoadMutGuard;
+    async fn load_mut(&mut self, context: &Self::Context) -> Self::LoadMutGuard;
 }
 
 pub trait BorrowedLeafTrait: Clone + std::fmt::Debug {
@@ -149,6 +152,7 @@ pub trait LeafTrait: Clone + std::fmt::Debug {
         Self::Item: PartialEq;
 }
 
+#[async_trait(?Send)]
 pub trait BorrowedInternalTrait: Clone + std::fmt::Debug {
     type Concrete: InternalTrait<Borrowed = Self>;
     type ItemMutGuard: DerefMut<Target = Self::Concrete>;
@@ -173,12 +177,12 @@ pub trait BorrowedInternalTrait: Clone + std::fmt::Debug {
     fn get_child_mut_at_slot(
         &mut self,
         idx: usize,
-    ) -> Option<(NodeMut<Self::Concrete>, Range<usize>)>;
+    ) -> Option<(NodeMut<'_, Self::Concrete>, Range<usize>)>;
 
     fn get_child_mut_at_side(
         &mut self,
         side: Side,
-    ) -> Option<(NodeMut<Self::Concrete>, Range<usize>)> {
+    ) -> Option<(NodeMut<'_, Self::Concrete>, Range<usize>)> {
         match side {
             Side::Front => self.get_child_mut_at_slot(0),
             Side::Back => self.get_child_mut_at_slot(self.slots().saturating_sub(1)),
@@ -192,7 +196,7 @@ pub trait BorrowedInternalTrait: Clone + std::fmt::Debug {
     ) -> Option<(NodeMut<Self::Concrete>, Range<usize>)>;
 
     /// Logically pops a child from the node. The child is then returned.
-    fn pop_child(
+    async fn pop_child(
         &mut self,
         side: Side,
         context: &<<Self::Concrete as InternalTrait>::Leaf as LeafTrait>::Context,
@@ -209,6 +213,7 @@ pub trait BorrowedInternalTrait: Clone + std::fmt::Debug {
     }
 }
 
+#[async_trait(?Send)]
 pub trait InternalTrait: Clone + std::fmt::Debug {
     type Context: Clone + std::fmt::Debug + Default;
     type Borrowed: BorrowedInternalTrait<Concrete = Self> + std::fmt::Debug;
@@ -238,24 +243,24 @@ pub trait InternalTrait: Clone + std::fmt::Debug {
     ) -> usize;
 
     /// Packs the children of the to the left of the node so that all but the last is dense.
-    fn pack_children(&mut self, context: &Self::Context);
+    async fn pack_children(&mut self, context: &Self::Context);
 
     /// Returns a reference to the element at the given index in the tree.
-    fn get(
+    async fn get(
         &self,
         idx: usize,
         context: &Self::Context,
     ) -> Option<*const <Self::Leaf as LeafTrait>::Item>;
 
     /// Returns a mutable reference to the element at the given index in the tree.
-    fn get_mut_guarded(
+    async fn get_mut_guarded(
         &mut self,
         idx: usize,
         context: &Self::Context,
     ) -> Option<Self::ItemMutGuard>;
 
     /// Returns a mutable reference to the element at the given index in the tree.
-    fn get_mut(
+    async fn get_mut(
         &mut self,
         idx: usize,
         context: &Self::Context,
@@ -269,7 +274,7 @@ pub trait InternalTrait: Clone + std::fmt::Debug {
     /// Adds a node to the given side of this node.
     /// # Panics
     // This should panic if the node does not have a slot free.
-    fn push_child(&mut self, side: Side, node: NodeRc<Self>, context: &Self::Context);
+    async fn push_child(&mut self, side: Side, node: NodeRc<Self>, context: &Self::Context);
 
     fn borrow_node(&mut self) -> Self::Borrowed;
 
@@ -298,7 +303,7 @@ pub trait InternalTrait: Clone + std::fmt::Debug {
     /// Returns a reference to the Rc of the child node at the given slot in this node.
     fn get_child_ref_at_slot(&self, idx: usize) -> Option<(NodeRef<Self>, Range<usize>)>;
 
-    fn get_child_ref_at_side(&self, side: Side) -> Option<(NodeRef<Self>, Range<usize>)> {
+    fn get_child_ref_at_side(&self, side: Side) -> Option<(NodeRef<'_, Self>, Range<usize>)> {
         match side {
             Side::Front => self.get_child_ref_at_slot(0),
             Side::Back => self.get_child_ref_at_slot(self.slots().saturating_sub(1)),
@@ -311,7 +316,7 @@ pub trait InternalTrait: Clone + std::fmt::Debug {
     /// Returns a mutable reference to the Rc of the child node at the given slot in this node.
     fn get_child_mut_at_slot(&mut self, idx: usize) -> Option<(NodeMut<Self>, Range<usize>)>;
 
-    fn get_child_mut_at_side(&mut self, side: Side) -> Option<(NodeMut<Self>, Range<usize>)> {
+    fn get_child_mut_at_side(&mut self, side: Side) -> Option<(NodeMut<'_, Self>, Range<usize>)> {
         match side {
             Side::Front => self.get_child_mut_at_slot(0),
             Side::Back => self.get_child_mut_at_slot(self.slots().saturating_sub(1)),
@@ -328,11 +333,11 @@ pub trait InternalTrait: Clone + std::fmt::Debug {
     fn split_at_child(&mut self, idx: usize, context: &Self::Context) -> Self;
 
     /// Splits the node into two at the given position.
-    fn split_at_position(&mut self, position: usize, context: &Self::Context) -> Self;
+    async fn split_at_position(&mut self, position: usize, context: &Self::Context) -> Self;
 
     /// Checks the invariants that this node may hold if any.
     #[allow(dead_code)]
-    fn debug_check_invariants(
+    async fn debug_check_invariants(
         &self,
         reported_size: usize,
         reported_level: usize,
@@ -345,7 +350,7 @@ pub trait InternalTrait: Clone + std::fmt::Debug {
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
     #[allow(dead_code)]
-    fn equal_iter_debug<'a>(
+    async fn equal_iter_debug<'a>(
         &self,
         iter: &mut std::slice::Iter<'a, <Self::Leaf as LeafTrait>::Item>,
         context: &Self::Context,
@@ -381,13 +386,15 @@ where
     Internal: InternalTrait,
 {
     /// Constructs a new empty of the same level.
-    pub fn new_empty(&self, context: &Internal::Context) -> Self {
+    pub async fn new_empty(&self, context: &Internal::Context) -> Self {
         //TODO: This shouldn't have context
         match self {
-            NodeRc::Internal(x) => {
-                NodeRc::Internal(Internal::InternalEntry::new(x.load(context).new_empty()))
+            NodeRc::Internal(x) => NodeRc::Internal(
+                Internal::InternalEntry::new(x.load(context).await.new_empty()).await,
+            ),
+            NodeRc::Leaf(_) => {
+                NodeRc::Leaf(Internal::LeafEntry::new(Internal::Leaf::empty()).await)
             }
-            NodeRc::Leaf(_) => NodeRc::Leaf(Internal::LeafEntry::new(Internal::Leaf::empty())),
         }
     }
 
@@ -395,7 +402,7 @@ where
     /// elements will be removed. The actual number of elements decanted is returned. Elements are
     /// popped from `share_side` but pushed into the destination via `share_side.negate()`. Both
     /// self and destination should be at the same level in the tree.
-    pub fn share_children_with(
+    pub async fn share_children_with(
         &mut self,
         destination: &mut Self,
         share_side: Side,
@@ -404,8 +411,8 @@ where
     ) -> usize {
         match self {
             NodeRc::Internal(ref mut origin_internal) => {
-                let mut destination_internal = destination.internal_mut().load_mut(context);
-                origin_internal.load_mut(context).share_children_with(
+                let mut destination_internal = destination.internal_mut().load_mut(context).await;
+                origin_internal.load_mut(context).await.share_children_with(
                     &mut *destination_internal,
                     share_side,
                     len,
@@ -413,8 +420,8 @@ where
                 )
             }
             NodeRc::Leaf(ref mut origin_leaf) => {
-                let mut destination_leaf = destination.leaf_mut().load_mut(context);
-                origin_leaf.load_mut(context).share_children_with(
+                let mut destination_leaf = destination.leaf_mut().load_mut(context).await;
+                origin_leaf.load_mut(context).await.share_children_with(
                     &mut *destination_leaf,
                     share_side,
                     len,
@@ -425,91 +432,96 @@ where
     }
 
     /// Returns the size of the of node.
-    pub fn len(&self, context: &Internal::Context) -> usize {
+    pub async fn len(&self, context: &Internal::Context) -> usize {
         match self {
-            NodeRc::Leaf(x) => x.load(context).len(),
-            NodeRc::Internal(x) => x.load(context).len(),
+            NodeRc::Leaf(x) => x.load(context).await.len(),
+            NodeRc::Internal(x) => x.load(context).await.len(),
         }
     }
 
     /// Returns the number of direct children of the node.
-    pub fn slots(&self, context: &Internal::Context) -> usize {
+    pub async fn slots(&self, context: &Internal::Context) -> usize {
         match self {
-            NodeRc::Leaf(x) => x.load(context).len(),
-            NodeRc::Internal(x) => x.load(context).slots(),
+            NodeRc::Leaf(x) => x.load(context).await.len(),
+            NodeRc::Internal(x) => x.load(context).await.slots(),
         }
     }
 
     /// Returns whether the node is completely empty.
-    pub fn is_empty(&self, context: &Internal::Context) -> bool {
+    pub async fn is_empty(&self, context: &Internal::Context) -> bool {
         match self {
-            NodeRc::Leaf(x) => x.load(context).is_empty(),
-            NodeRc::Internal(x) => x.load(context).is_empty(),
+            NodeRc::Leaf(x) => x.load(context).await.is_empty(),
+            NodeRc::Internal(x) => x.load(context).await.is_empty(),
         }
     }
 
     /// Returns whether the node is completely full.
-    pub fn is_full(&self, context: &Internal::Context) -> bool {
+    pub async fn is_full(&self, context: &Internal::Context) -> bool {
         match self {
-            NodeRc::Leaf(x) => x.load(context).is_full(),
-            NodeRc::Internal(x) => x.load(context).is_full(),
+            NodeRc::Leaf(x) => x.load(context).await.is_full(),
+            NodeRc::Internal(x) => x.load(context).await.is_full(),
         }
     }
 
     /// Returns the level of the node.
-    pub fn level(&self, context: &Internal::Context) -> usize {
+    pub async fn level(&self, context: &Internal::Context) -> usize {
         match self {
             NodeRc::Leaf(_) => 0,
-            NodeRc::Internal(x) => x.load(context).level(),
+            NodeRc::Internal(x) => x.load(context).await.level(),
         }
     }
 
     /// Tests whether the node is a leaf.
-    pub fn is_leaf(&self, context: &Internal::Context) -> bool {
-        self.level(context) == 0
+    pub async fn is_leaf(&self, context: &Internal::Context) -> bool {
+        self.level(context).await == 0
     }
 
     /// Returns the element at the given position in the node.
-    pub fn get(
+    pub async fn get(
         &self,
         idx: usize,
         context: &Internal::Context,
     ) -> Option<*const <Internal::Leaf as LeafTrait>::Item> {
         match self {
-            NodeRc::Leaf(x) => x.load(context).get(idx),
-            NodeRc::Internal(x) => x.load(context).get(idx, context),
+            NodeRc::Leaf(x) => x.load(context).await.get(idx),
+            NodeRc::Internal(x) => x.load(context).await.get(idx, context).await,
         }
     }
 
     /// Returns the element at the given position in the node.
-    pub fn get_mut(
+    pub async fn get_mut(
         &mut self,
         idx: usize,
         context: &Internal::Context,
     ) -> Option<*mut <Internal::Leaf as LeafTrait>::Item> {
         match self {
-            NodeRc::Leaf(ref mut x) => x.load_mut(context).get_mut(idx, context),
-            NodeRc::Internal(ref mut x) => x.load_mut(context).get_mut(idx, context),
+            NodeRc::Leaf(ref mut x) => x.load_mut(context).await.get_mut(idx, context),
+            NodeRc::Internal(ref mut x) => x.load_mut(context).await.get_mut(idx, context).await,
         }
     }
 
     /// Returns the element at the given position in the node.
-    pub fn get_mut_guarded(
+    pub async fn get_mut_guarded(
         &mut self,
         idx: usize,
         context: &Internal::Context,
     ) -> Option<<Internal::Leaf as LeafTrait>::ItemMutGuard> {
         match self {
-            NodeRc::Leaf(ref mut x) => x.load_mut(context).get_mut_guarded(idx, context),
-            NodeRc::Internal(ref mut x) => x.load_mut(context).get_mut_guarded(idx, context),
+            NodeRc::Leaf(ref mut x) => x.load_mut(context).await.get_mut_guarded(idx, context),
+            NodeRc::Internal(ref mut x) => {
+                x.load_mut(context)
+                    .await
+                    .get_mut_guarded(idx, context)
+                    .await
+            }
         }
     }
 
     /// Returns the number of children that can be inserted into this node.
-    pub fn free_slots(&self, context: &Internal::Context) -> usize {
+    pub async fn free_slots(&self, context: &Internal::Context) -> usize {
         match self {
-            NodeRc::Leaf(x) => x.load(context).free_space(),
-            NodeRc::Internal(x) => x.load(context).free_slots(),
+            NodeRc::Leaf(x) => x.load(context).await.free_space(),
+            NodeRc::Internal(x) => x.load(context).await.free_slots(),
         }
     }
 
@@ -578,42 +590,58 @@ where
         }
     }
 
-    pub fn borrow_node(&mut self, context: &Internal::Context) -> BorrowedNode<Internal> {
+    pub async fn borrow_node(&mut self, context: &Internal::Context) -> BorrowedNode<Internal> {
         match self {
             NodeRc::Internal(internal) => {
-                BorrowedNode::Internal(internal.load_mut(context).borrow_node())
+                BorrowedNode::Internal(internal.load_mut(context).await.borrow_node())
             }
-            NodeRc::Leaf(leaf) => BorrowedNode::Leaf(leaf.load_mut(context).borrow_node()),
+            NodeRc::Leaf(leaf) => BorrowedNode::Leaf(leaf.load_mut(context).await.borrow_node()),
         }
     }
 
-    pub fn split_at_child(&mut self, idx: usize, context: &Internal::Context) -> Self {
+    pub async fn split_at_child(&mut self, idx: usize, context: &Internal::Context) -> Self {
         match self {
-            NodeRc::Internal(internal) => NodeRc::Internal(Internal::InternalEntry::new(
-                internal.load_mut(context).split_at_child(idx, context),
-            )),
-            NodeRc::Leaf(leaf) => NodeRc::Leaf(Internal::LeafEntry::new(
-                leaf.load_mut(context).split(idx, context),
-            )),
+            NodeRc::Internal(internal) => NodeRc::Internal(
+                Internal::InternalEntry::new(
+                    internal
+                        .load_mut(context)
+                        .await
+                        .split_at_child(idx, context),
+                )
+                .await,
+            ),
+            NodeRc::Leaf(leaf) => NodeRc::Leaf(
+                Internal::LeafEntry::new(leaf.load_mut(context).await.split(idx, context)).await,
+            ),
         }
     }
 
-    pub fn split_at_position(&mut self, position: usize, context: &Internal::Context) -> Self {
+    pub async fn split_at_position(
+        &mut self,
+        position: usize,
+        context: &Internal::Context,
+    ) -> Self {
         match self {
-            NodeRc::Internal(internal) => NodeRc::Internal(Internal::InternalEntry::new(
-                internal
-                    .load_mut(context)
-                    .split_at_position(position, context),
-            )),
-            NodeRc::Leaf(leaf) => NodeRc::Leaf(Internal::LeafEntry::new(
-                leaf.load_mut(context).split(position, context),
-            )),
+            NodeRc::Internal(internal) => NodeRc::Internal(
+                Internal::InternalEntry::new(
+                    internal
+                        .load_mut(context)
+                        .await
+                        .split_at_position(position, context)
+                        .await,
+                )
+                .await,
+            ),
+            NodeRc::Leaf(leaf) => NodeRc::Leaf(
+                Internal::LeafEntry::new(leaf.load_mut(context).await.split(position, context))
+                    .await,
+            ),
         }
     }
 
     /// Checks internal invariants of the node.
     #[allow(dead_code)]
-    pub fn debug_check_invariants(
+    pub async fn debug_check_invariants(
         &self,
         reported_size: usize,
         reported_level: usize,
@@ -622,11 +650,14 @@ where
         match self {
             NodeRc::Leaf(x) => {
                 x.load(context)
+                    .await
                     .debug_check_invariants(reported_size, reported_level, context)
             }
             NodeRc::Internal(x) => {
                 x.load(context)
+                    .await
                     .debug_check_invariants(reported_size, reported_level, context)
+                    .await
             }
         }
     }
@@ -640,16 +671,20 @@ where
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
     #[allow(dead_code)]
-    pub(crate) fn equal_iter_debug<'a>(
+    pub(crate) async fn equal_iter_debug<'a>(
         &self,
         iter: &mut std::slice::Iter<'a, <Internal::Leaf as LeafTrait>::Item>,
         context: &Internal::Context,
     ) -> bool {
         match self {
             NodeRc::Internal(ref internal) => {
-                internal.load(context).equal_iter_debug(iter, context)
+                internal
+                    .load(context)
+                    .await
+                    .equal_iter_debug(iter, context)
+                    .await
             }
-            NodeRc::Leaf(ref leaf) => leaf.load(context).equal_iter_debug(iter, context),
+            NodeRc::Leaf(ref leaf) => leaf.load(context).await.equal_iter_debug(iter, context),
         }
     }
 }
@@ -667,14 +702,14 @@ impl<Internal> BorrowedNode<Internal>
 where
     Internal: InternalTrait,
 {
-    pub fn len(&self) -> usize {
+    pub async fn len(&self) -> usize {
         match self {
             BorrowedNode::Leaf(leaf) => leaf.len(),
             BorrowedNode::Internal(internal) => internal.len(),
         }
     }
 
-    pub fn level(&self) -> usize {
+    pub async fn level(&self) -> usize {
         match self {
             BorrowedNode::Leaf(_) => 0,
             BorrowedNode::Internal(internal) => internal.level(),
@@ -753,59 +788,59 @@ where
     Internal: InternalTrait,
 {
     /// Returns the size of the of node.
-    pub fn len(&self, context: &Internal::Context) -> usize {
+    pub async fn len(&self, context: &Internal::Context) -> usize {
         match self {
-            NodeRef::Leaf(x) => x.load(context).len(),
-            NodeRef::Internal(x) => x.load(context).len(),
+            NodeRef::Leaf(x) => x.load(context).await.len(),
+            NodeRef::Internal(x) => x.load(context).await.len(),
         }
     }
 
     /// Returns the number of direct children of the node.
-    pub fn slots(&self, context: &Internal::Context) -> usize {
+    pub async fn slots(&self, context: &Internal::Context) -> usize {
         match self {
-            NodeRef::Leaf(x) => x.load(context).len(),
-            NodeRef::Internal(x) => x.load(context).slots(),
+            NodeRef::Leaf(x) => x.load(context).await.len(),
+            NodeRef::Internal(x) => x.load(context).await.slots(),
         }
     }
 
     /// Returns whether the node is completely empty.
-    pub fn is_empty(&self, context: &Internal::Context) -> bool {
+    pub async fn is_empty(&self, context: &Internal::Context) -> bool {
         match self {
-            NodeRef::Leaf(x) => x.load(context).is_empty(),
-            NodeRef::Internal(x) => x.load(context).is_empty(),
+            NodeRef::Leaf(x) => x.load(context).await.is_empty(),
+            NodeRef::Internal(x) => x.load(context).await.is_empty(),
         }
     }
 
     /// Returns the level of the node.
-    pub fn level(&self, context: &Internal::Context) -> usize {
+    pub async fn level(&self, context: &Internal::Context) -> usize {
         match self {
             NodeRef::Leaf(_) => 0,
-            NodeRef::Internal(x) => x.load(context).level(),
+            NodeRef::Internal(x) => x.load(context).await.level(),
         }
     }
 
     /// Tests whether the node is a leaf.
-    pub fn is_leaf(&self, context: &Internal::Context) -> bool {
-        self.level(context) == 0
+    pub async fn is_leaf(&self, context: &Internal::Context) -> bool {
+        self.level(context).await == 0
     }
 
     /// Returns the element at the given position in the node.
-    pub fn get(
+    pub async fn get(
         &self,
         idx: usize,
         context: &Internal::Context,
     ) -> Option<*const <Internal::Leaf as LeafTrait>::Item> {
         match self {
-            NodeRef::Leaf(x) => x.load(context).get(idx),
-            NodeRef::Internal(x) => x.load(context).get(idx, context),
+            NodeRef::Leaf(x) => x.load(context).await.get(idx),
+            NodeRef::Internal(x) => x.load(context).await.get(idx, context).await,
         }
     }
 
     /// Returns the number of children that can be inserted into this node.
-    pub fn free_slots(&self, context: &Internal::Context) -> usize {
+    pub async fn free_slots(&self, context: &Internal::Context) -> usize {
         match self {
-            NodeRef::Leaf(x) => x.load(context).free_space(),
-            NodeRef::Internal(x) => x.load(context).free_slots(),
+            NodeRef::Leaf(x) => x.load(context).await.free_space(),
+            NodeRef::Internal(x) => x.load(context).await.free_slots(),
         }
     }
 
@@ -837,7 +872,7 @@ where
 
     /// Checks internal invariants of the node.
     #[allow(dead_code)]
-    pub fn debug_check_invariants(
+    pub async fn debug_check_invariants(
         &self,
         reported_size: usize,
         reported_level: usize,
@@ -846,11 +881,14 @@ where
         match self {
             NodeRef::Leaf(x) => {
                 x.load(context)
+                    .await
                     .debug_check_invariants(reported_size, reported_level, context)
             }
             NodeRef::Internal(x) => {
                 x.load(context)
+                    .await
                     .debug_check_invariants(reported_size, reported_level, context)
+                    .await
             }
         }
     }
@@ -864,16 +902,20 @@ where
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
     #[allow(dead_code)]
-    pub(crate) fn equal_iter_debug<'b>(
+    pub(crate) async fn equal_iter_debug<'b>(
         &self,
         iter: &mut std::slice::Iter<'b, <Internal::Leaf as LeafTrait>::Item>,
         context: &Internal::Context,
     ) -> bool {
         match self {
             NodeRef::Internal(ref internal) => {
-                internal.load(context).equal_iter_debug(iter, context)
+                internal
+                    .load(context)
+                    .await
+                    .equal_iter_debug(iter, context)
+                    .await
             }
-            NodeRef::Leaf(ref leaf) => leaf.load(context).equal_iter_debug(iter, context),
+            NodeRef::Leaf(ref leaf) => leaf.load(context).await.equal_iter_debug(iter, context),
         }
     }
 }
@@ -893,59 +935,59 @@ where
     Internal: InternalTrait,
 {
     /// Returns the size of the of node.
-    pub fn len(&self, context: &Internal::Context) -> usize {
+    pub async fn len(&self, context: &Internal::Context) -> usize {
         match self {
-            NodeMut::Leaf(x) => x.load(context).len(),
-            NodeMut::Internal(x) => x.load(context).len(),
+            NodeMut::Leaf(x) => x.load(context).await.len(),
+            NodeMut::Internal(x) => x.load(context).await.len(),
         }
     }
 
     /// Returns the number of direct children of the node.
-    pub fn slots(&self, context: &Internal::Context) -> usize {
+    pub async fn slots(&self, context: &Internal::Context) -> usize {
         match self {
-            NodeMut::Leaf(x) => x.load(context).len(),
-            NodeMut::Internal(x) => x.load(context).slots(),
+            NodeMut::Leaf(x) => x.load(context).await.len(),
+            NodeMut::Internal(x) => x.load(context).await.slots(),
         }
     }
 
     /// Returns whether the node is completely empty.
-    pub fn is_empty(&self, context: &Internal::Context) -> bool {
+    pub async fn is_empty(&self, context: &Internal::Context) -> bool {
         match self {
-            NodeMut::Leaf(x) => x.load(context).is_empty(),
-            NodeMut::Internal(x) => x.load(context).is_empty(),
+            NodeMut::Leaf(x) => x.load(context).await.is_empty(),
+            NodeMut::Internal(x) => x.load(context).await.is_empty(),
         }
     }
 
     /// Returns the level of the node.
-    pub fn level(&self, context: &Internal::Context) -> usize {
+    pub async fn level(&self, context: &Internal::Context) -> usize {
         match self {
             NodeMut::Leaf(_) => 0,
-            NodeMut::Internal(x) => x.load(context).level(),
+            NodeMut::Internal(x) => x.load(context).await.level(),
         }
     }
 
     /// Tests whether the node is a leaf.
-    pub fn is_leaf(&self, context: &Internal::Context) -> bool {
-        self.level(context) == 0
+    pub async fn is_leaf(&self, context: &Internal::Context) -> bool {
+        self.level(context).await == 0
     }
 
     /// Returns the element at the given position in the node.
-    pub fn get(
+    pub async fn get(
         &self,
         idx: usize,
         context: &Internal::Context,
     ) -> Option<*const <Internal::Leaf as LeafTrait>::Item> {
         match self {
-            NodeMut::Leaf(x) => x.load(context).get(idx),
-            NodeMut::Internal(x) => x.load(context).get(idx, context),
+            NodeMut::Leaf(x) => x.load(context).await.get(idx),
+            NodeMut::Internal(x) => x.load(context).await.get(idx, context).await,
         }
     }
 
     /// Returns the number of children that can be inserted into this node.
-    pub fn free_slots(&self, context: &Internal::Context) -> usize {
+    pub async fn free_slots(&self, context: &Internal::Context) -> usize {
         match self {
-            NodeMut::Leaf(x) => x.load(context).free_space(),
-            NodeMut::Internal(x) => x.load(context).free_slots(),
+            NodeMut::Leaf(x) => x.load(context).await.free_space(),
+            NodeMut::Internal(x) => x.load(context).await.free_slots(),
         }
     }
 
@@ -976,18 +1018,18 @@ where
     }
 
     /// derp
-    pub fn borrow_node(self, context: &Internal::Context) -> BorrowedNode<Internal> {
+    pub async fn borrow_node(self, context: &Internal::Context) -> BorrowedNode<Internal> {
         match self {
             NodeMut::Internal(internal) => {
-                BorrowedNode::Internal(internal.load_mut(context).borrow_node())
+                BorrowedNode::Internal(internal.load_mut(context).await.borrow_node())
             }
-            NodeMut::Leaf(leaf) => BorrowedNode::Leaf(leaf.load_mut(context).borrow_node()),
+            NodeMut::Leaf(leaf) => BorrowedNode::Leaf(leaf.load_mut(context).await.borrow_node()),
         }
     }
 
     /// Checks internal invariants of the node.
     #[allow(dead_code)]
-    pub fn debug_check_invariants(
+    pub async fn debug_check_invariants(
         &self,
         reported_size: usize,
         reported_level: usize,
@@ -996,11 +1038,14 @@ where
         match self {
             NodeMut::Leaf(x) => {
                 x.load(context)
+                    .await
                     .debug_check_invariants(reported_size, reported_level, context)
             }
             NodeMut::Internal(x) => {
                 x.load(context)
+                    .await
                     .debug_check_invariants(reported_size, reported_level, context)
+                    .await
             }
         }
     }
@@ -1014,16 +1059,20 @@ where
     /// Tests whether the node is compatible with the given iterator. This is mainly used for
     /// debugging purposes.
     #[allow(dead_code)]
-    pub(crate) fn equal_iter_debug<'b>(
+    pub(crate) async fn equal_iter_debug<'b>(
         &self,
         iter: &mut std::slice::Iter<'b, <Internal::Leaf as LeafTrait>::Item>,
         context: &Internal::Context,
     ) -> bool {
         match self {
             NodeMut::Internal(ref internal) => {
-                internal.load(context).equal_iter_debug(iter, context)
+                internal
+                    .load(context)
+                    .await
+                    .equal_iter_debug(iter, context)
+                    .await
             }
-            NodeMut::Leaf(ref leaf) => leaf.load(context).equal_iter_debug(iter, context),
+            NodeMut::Leaf(ref leaf) => leaf.load(context).await.equal_iter_debug(iter, context),
         }
     }
 }

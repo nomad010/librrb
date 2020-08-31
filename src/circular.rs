@@ -163,6 +163,8 @@ impl<'a, A: 'a + Debug> Iterator for BorrowedIter<'a, A> {
     }
 }
 
+impl<'a, A: 'a + Debug> ExactSizeIterator for BorrowedIter<'a, A> {}
+
 /// A fixed-sized circular buffer. The buffer can hold up to `RRB_WIDTH` items and supports fast
 /// operations on either end, however operations in the middle of the buffer are typically O(N).
 pub(crate) struct CircularBuffer<A: Debug> {
