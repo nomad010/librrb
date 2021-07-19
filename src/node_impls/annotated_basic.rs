@@ -1,4 +1,4 @@
-use crate::circular::{BorrowBufferMut, CircularBuffer};
+use crate::circular::{BorrowedBuffer, CircularBuffer};
 use crate::node_traits::*;
 use crate::size_table::SizeTable;
 use crate::{Side, RRB_WIDTH};
@@ -77,11 +77,11 @@ where
         SharedPointerEntry(SharedPointer::new(item), std::marker::PhantomData)
     }
 
-    fn load<'a>(&'a self, _context: &Self::Context) -> Self::LoadGuard {
+    fn load(&'_ self, _context: &Self::Context) -> Self::LoadGuard {
         DerefPtr(self.0.deref() as *const I)
     }
 
-    fn load_mut<'a>(&'a mut self, _context: &Self::Context) -> Self::LoadMutGuard {
+    fn load_mut(&'_ mut self, _context: &Self::Context) -> Self::LoadMutGuard {
         DerefMutPtr(SharedPointer::make_mut(&mut self.0))
     }
 }
@@ -129,7 +129,7 @@ impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Outp
 pub struct BorrowedLeaf<
     A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
 > {
-    buffer: BorrowBufferMut<A>,
+    buffer: BorrowedBuffer<A>,
     sum: *mut A,
 }
 
@@ -532,8 +532,8 @@ pub(crate) enum BorrowedChildList<
     A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
     P: SharedPointerKind,
 > {
-    Internals(BorrowBufferMut<SharedPointerEntry<Internal<A, P>, P, ()>>),
-    Leaves(BorrowBufferMut<SharedPointerEntry<Leaf<A>, P, ()>>),
+    Internals(BorrowedBuffer<SharedPointerEntry<Internal<A, P>, P, ()>>),
+    Leaves(BorrowedBuffer<SharedPointerEntry<Leaf<A>, P, ()>>),
 }
 
 impl<
@@ -1303,7 +1303,6 @@ impl SumVector<usize>
 mod test {
     use super::SumVector;
     use crate::*;
-    use crossbeam;
 
     #[test]
     pub fn split_focus_mut_annotations() {

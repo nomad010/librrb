@@ -4,6 +4,11 @@ use rand_core::RngCore;
 use std::cmp;
 use std::mem;
 
+// pub(crate) fn sort_multiple<'a>(
+//     foci: &mut [FocusMut<'a, dyn InternalTrait, dyn Leaf, dyn BorrowedInternal>],
+// ) {
+// }
+
 // We need GATs for an additional lifetime and I don't want to work around it here.
 // pub(crate) trait SortFocus<'a>: Sized {
 //     type CompareItem;
@@ -460,7 +465,7 @@ mod test {
             }
             assert!(vec.iter().eq(vector.iter()));
             vector.sort();
-            vec.sort();
+            vec.sort_unstable();
             assert!(vec.iter().eq(vector.iter()));
         }
     }

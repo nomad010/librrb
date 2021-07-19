@@ -1,4 +1,4 @@
-use crate::circular::{BorrowBufferMut, CircularBuffer};
+use crate::circular::{BorrowedBuffer, CircularBuffer};
 use crate::node_traits::*;
 use crate::size_table::SizeTable;
 use crate::{Side, RRB_WIDTH};
@@ -76,18 +76,18 @@ where
         SharedPointerEntry(SharedPointer::new(item), std::marker::PhantomData)
     }
 
-    fn load<'a>(&'a self, _context: &Self::Context) -> Self::LoadGuard {
+    fn load(&'_ self, _context: &Self::Context) -> Self::LoadGuard {
         DerefPtr(self.0.deref() as *const I)
     }
 
-    fn load_mut<'a>(&'a mut self, _context: &Self::Context) -> Self::LoadMutGuard {
+    fn load_mut(&'_ mut self, _context: &Self::Context) -> Self::LoadMutGuard {
         DerefMutPtr(SharedPointer::make_mut(&mut self.0))
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct BorrowedLeaf<A: Clone + std::fmt::Debug> {
-    buffer: BorrowBufferMut<A>,
+    buffer: BorrowedBuffer<A>,
 }
 
 impl<A: Clone + std::fmt::Debug> Drop for BorrowedLeaf<A> {
@@ -378,8 +378,8 @@ impl<Leaf: LeafTrait, P: SharedPointerKind> BorrowedInternalTrait for BorrowedIn
 
 #[derive(Debug)]
 pub(crate) enum BorrowedChildList<Leaf: LeafTrait, P: SharedPointerKind> {
-    Internals(BorrowBufferMut<SharedPointerEntry<Internal<Leaf, P>, P, Leaf::Context>>),
-    Leaves(BorrowBufferMut<SharedPointerEntry<Leaf, P, Leaf::Context>>),
+    Internals(BorrowedBuffer<SharedPointerEntry<Internal<Leaf, P>, P, Leaf::Context>>),
+    Leaves(BorrowedBuffer<SharedPointerEntry<Leaf, P, Leaf::Context>>),
 }
 
 impl<Leaf: LeafTrait, P: SharedPointerKind> Clone for BorrowedChildList<Leaf, P> {

@@ -919,11 +919,6 @@ where
     }
 
     /// Derp
-    pub fn index(&self, idx: usize) -> &<Internal::Leaf as LeafTrait>::Item {
-        self.get(idx).expect("Index out of bounds.")
-    }
-
-    /// Derp
     pub fn get_mut(&mut self, idx: usize) -> Option<&mut <Internal::Leaf as LeafTrait>::Item> {
         if let Some((spine_info, subindex)) = self.find_node_info_for_index(idx) {
             let node = match spine_info {
@@ -937,6 +932,7 @@ where
         }
     }
 
+    /// Derp
     pub fn get_mut_guarded(&mut self, idx: usize) -> Option<MutBoundGuard<Internal>> {
         if let Some((spine_info, subindex)) = self.find_node_info_for_index(idx) {
             let node = match spine_info {
@@ -951,11 +947,6 @@ where
         } else {
             None
         }
-    }
-
-    /// Derp
-    pub fn index_mut(&mut self, idx: usize) -> &mut <Internal::Leaf as LeafTrait>::Item {
-        self.get_mut(idx).expect("Index out of bounds.")
     }
 
     /// Appends the given vector onto the back of this vector.
@@ -2389,6 +2380,26 @@ where
     }
 }
 
+impl<Internal> std::ops::Index<usize> for InternalVector<Internal>
+where
+    Internal: InternalTrait,
+{
+    type Output = <Internal::Leaf as LeafTrait>::Item;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        self.get(index).expect("Index out of bounds.")
+    }
+}
+
+impl<Internal> std::ops::IndexMut<usize> for InternalVector<Internal>
+where
+    Internal: InternalTrait,
+{
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        self.get_mut(index).expect("Index out of bounds.")
+    }
+}
+
 impl<Internal> InternalVector<Internal>
 where
     Internal: InternalTrait,
@@ -2397,7 +2408,7 @@ where
     /// Tests whether the node is equal to the given vector. This is mainly used for
     /// debugging purposes.
     #[allow(dead_code)]
-    pub(crate) fn equal_vec(&self, v: &Vec<<Internal::Leaf as LeafTrait>::Item>) -> bool {
+    pub(crate) fn equal_vec(&self, v: &[<Internal::Leaf as LeafTrait>::Item]) -> bool {
         if self.len() == v.len() {
             let mut iter = v.iter();
             for spine in self.left_spine.iter() {
@@ -2682,6 +2693,54 @@ where
 {
 }
 
+/// derp
+pub struct IntoIter<Internal>
+where
+    Internal: InternalTrait,
+{
+    vector: InternalVector<Internal>,
+}
+
+impl<Internal> Iterator for IntoIter<Internal>
+where
+    Internal: InternalTrait,
+{
+    type Item = <Internal::Leaf as LeafTrait>::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.vector.pop_front()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.vector.len(), Some(self.vector.len()))
+    }
+}
+
+impl<Internal> DoubleEndedIterator for IntoIter<Internal>
+where
+    Internal: InternalTrait,
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.vector.pop_back()
+    }
+}
+
+impl<Internal> ExactSizeIterator for IntoIter<Internal> where Internal: InternalTrait {}
+
+impl<Internal> FusedIterator for IntoIter<Internal> where Internal: InternalTrait {}
+
+impl<Internal> IntoIterator for InternalVector<Internal>
+where
+    Internal: InternalTrait,
+{
+    type Item = <Internal::Leaf as LeafTrait>::Item;
+    type IntoIter = IntoIter<Internal>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter { vector: self }
+    }
+}
+
 #[allow(clippy::cognitive_complexity)]
 #[cfg(test)]
 mod test {
@@ -2793,29 +2852,29 @@ mod test {
             for action in &actions.actions {
                 match action {
                     Action::PushFront(item) => {
-                        vec.insert(0, item.clone());
-                        vector.push_front(item.clone());
+                        vec.insert(0, *item);
+                        vector.push_front(*item);
                         assert_eq!(vec.len(), vector.len());
                         assert!(vector.equal_vec(&vec));
                     },
                     Action::PushBack(item) => {
-                        vec.push(item.clone());
-                        vector.push_back(item.clone());
+                        vec.push(*item);
+                        vector.push_back(*item);
                         assert_eq!(vec.len(), vector.len());
                         assert!(vector.equal_vec(&vec));
                     },
                     Action::ExtendFront(items) => {
                         for item in items {
-                            vec.insert(0, item.clone());
-                            vector.push_front(item.clone());
+                            vec.insert(0, *item);
+                            vector.push_front(*item);
                         }
                         assert_eq!(vec.len(), vector.len());
                         assert!(vector.equal_vec(&vec));
                     }
                     Action::ExtendBack(items) => {
                         for item in items {
-                            vec.push(item.clone());
-                            vector.push_back(item.clone());
+                            vec.push(*item);
+                            vector.push_back(*item);
                         }
                         assert_eq!(vec.len(), vector.len());
                         assert!(vector.equal_vec(&vec));
@@ -2837,8 +2896,8 @@ mod test {
                     Action::ConcatFront(items) => {
                         let mut new_vector = Vector::new();
                         for item in items {
-                            vec.insert(0, item.clone());
-                            new_vector.push_front(item.clone());
+                            vec.insert(0, *item);
+                            new_vector.push_front(*item);
                         }
                         new_vector.append(vector);
                         vector = new_vector;
@@ -2848,8 +2907,8 @@ mod test {
                     Action::ConcatBack(items) => {
                         let mut new_vector = Vector::new();
                         for item in items {
-                            vec.push(item.clone());
-                            new_vector.push_back(item.clone());
+                            vec.push(*item);
+                            new_vector.push_back(*item);
                         }
                         vector.append(new_vector);
                         assert_eq!(vec.len(), vector.len());
@@ -2872,10 +2931,10 @@ mod test {
 
     #[test]
     pub fn empty() {
-        let empty: Vector<usize> = Vector::new();
-        // let empty_vec: Vec<usize> = Vec::new();
-        // let empty_ref_vec: Vec<&usize> = Vec::new();
-        // let empty_ref_mut_vec: Vec<&mut usize> = Vec::new();
+        let mut empty: Vector<usize> = Vector::new();
+        let empty_vec: Vec<usize> = Vec::new();
+        let empty_ref_vec: Vec<&usize> = Vec::new();
+        let empty_ref_mut_vec: Vec<&mut usize> = Vec::new();
 
         // Len
         assert!(empty.is_empty());
@@ -2903,9 +2962,9 @@ mod test {
         assert_eq!(empty_slice_right.len(), 0);
 
         // Iter
-        // assert_eq!(empty.iter().collect::<Vec<_>>(), empty_ref_vec);
-        // assert_eq!(empty.iter_mut().collect::<Vec<_>>(), empty_ref_mut_vec);
-        // assert_eq!(empty.into_iter().collect::<Vec<_>>(), empty_vec);
+        assert_eq!(empty.iter().collect::<Vec<_>>(), empty_ref_vec);
+        assert_eq!(empty.iter_mut().collect::<Vec<_>>(), empty_ref_mut_vec);
+        assert_eq!(empty.into_iter().collect::<Vec<_>>(), empty_vec);
     }
 
     #[test]
@@ -2913,6 +2972,7 @@ mod test {
         let mut item = 9;
         let mut single = Vector::new();
         single.push_back(item);
+        let mut vec = vec![item];
 
         // Len
         assert!(!single.is_empty());
@@ -2935,15 +2995,15 @@ mod test {
         assert_eq!(front.pop_front(), None);
 
         // Iter
-        // assert_eq!(
-        //     single.iter().collect::<Vec<_>>(),
-        //     vec.iter().collect::<Vec<_>>()
-        // );
-        // assert_eq!(
-        //     single.iter_mut().collect::<Vec<_>>(),
-        //     vec.iter_mut().collect::<Vec<_>>()
-        // );
-        // assert_eq!(single.into_iter().collect::<Vec<_>>(), vec);
+        assert_eq!(
+            single.iter().collect::<Vec<_>>(),
+            vec.iter().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            single.iter_mut().collect::<Vec<_>>(),
+            vec.iter_mut().collect::<Vec<_>>()
+        );
+        assert_eq!(single.into_iter().collect::<Vec<_>>(), vec);
     }
 
     #[test]
@@ -2973,18 +3033,17 @@ mod test {
             vec.iter().collect::<Vec<_>>(),
             (0..N).collect::<Vec<_>>().iter().collect::<Vec<_>>()
         );
-        // assert_eq!(
-        //     vec.iter_mut().collect::<Vec<_>>(),
-        //     (0..N).collect::<Vec<_>>()
-        // );
-        // assert_eq!(
-        //     vec.into_iter().collect::<Vec<_>>(),
-        //     (0..N).collect::<Vec<_>>()
-        // );
-
+        assert_eq!(
+            vec.iter_mut().collect::<Vec<_>>(),
+            (0..N).collect::<Vec<_>>().iter_mut().collect::<Vec<_>>()
+        );
         assert_eq!(
             vec.iter().rev().collect::<Vec<_>>(),
             (0..N).rev().collect::<Vec<_>>().iter().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            vec.into_iter().collect::<Vec<_>>(),
+            (0..N).collect::<Vec<_>>()
         );
     }
 

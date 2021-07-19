@@ -7,19 +7,20 @@ use std::fmt::{self, Debug, Formatter};
 use std::iter::FusedIterator;
 use std::mem;
 use std::ops::Range;
+use std::ptr::NonNull;
 
 #[derive(Clone)]
-pub(crate) struct BorrowBufferMut<A: Debug> {
+pub(crate) struct BorrowedBuffer<A> {
     pub(crate) range: Range<usize>,
-    data: *mut mem::MaybeUninit<A>,
+    data: NonNull<A>,
     front: usize,
     len: usize,
 }
 
-unsafe impl<A: Debug + Send> Send for BorrowBufferMut<A> {}
-unsafe impl<A: Debug + Sync> Sync for BorrowBufferMut<A> {}
+unsafe impl<A: Send> Send for BorrowedBuffer<A> {}
+unsafe impl<A: Sync> Sync for BorrowedBuffer<A> {}
 
-impl<A: Debug> Debug for BorrowBufferMut<A> {
+impl<A: Debug> Debug for BorrowedBuffer<A> {
     fn fmt(&self, f: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
         f.write_str("[")?;
         if !self.is_empty() {
@@ -32,7 +33,7 @@ impl<A: Debug> Debug for BorrowBufferMut<A> {
     }
 }
 
-impl<'a, A: Debug> BorrowBufferMut<A> {
+impl<A> BorrowedBuffer<A> {
     #[allow(dead_code)]
     pub fn from_same_source(&self, other: &Self) -> bool {
         self.data == other.data
@@ -61,10 +62,8 @@ impl<'a, A: Debug> BorrowBufferMut<A> {
         let idx = idx + self.range.start;
         if self.range.contains(&idx) {
             let index = self.index_for(idx);
-            unsafe {
-                let data = std::slice::from_raw_parts(self.data, RRB_WIDTH);
-                Some(data[index].as_ptr())
-            }
+            let item_ptr = unsafe { self.data.as_ptr().add(index) };
+            Some(item_ptr as *const A)
         } else {
             None
         }
@@ -75,49 +74,23 @@ impl<'a, A: Debug> BorrowBufferMut<A> {
     }
 
     pub(crate) fn get_mut_ptr(&mut self, idx: usize) -> Option<*mut A> {
-        let idx = idx + self.range.start;
-        if self.range.contains(&idx) {
-            let index = self.index_for(idx);
-            unsafe {
-                let maybe_uninit_ptr = self.data.add(index);
-                Some((*maybe_uninit_ptr).as_mut_ptr())
-            }
-        } else {
-            None
-        }
+        self.get_ptr(idx).map(|x| x as *mut A)
     }
 
     pub fn get_mut(&mut self, idx: usize) -> Option<&mut A> {
         unsafe { Some(&mut *self.get_mut_ptr(idx)?) }
     }
 
-    // pub fn front_mut(&mut self) -> Option<&mut A> {
-    //     self.get_mut(0)
-    // }
-
-    // pub fn split_at(&mut self, index: usize) -> Self {
-    //     let first_end = self.range.start + index;
-    //     assert!(first_end <= self.range.end);
-    //     let other = BorrowBufferMut {
-    //         data: self.data,
-    //         range: first_end..self.range.end,
-    //         front: self.front,
-    //         len: self.len,
-    //     };
-    //     self.range.end = first_end;
-    //     other
-    // }
-
     pub fn split_at(&mut self, index: usize) -> (Self, Self) {
         let first_end = self.range.start + index;
         assert!(first_end <= self.range.end);
-        let first = BorrowBufferMut {
+        let first = BorrowedBuffer {
             data: self.data,
             range: self.range.start..first_end,
             front: self.front,
             len: self.len,
         };
-        let other = BorrowBufferMut {
+        let other = BorrowedBuffer {
             data: self.data,
             range: first_end..self.range.end,
             front: self.front,
@@ -130,21 +103,33 @@ impl<'a, A: Debug> BorrowBufferMut<A> {
         BorrowedIter {
             consumed: 0,
             front: 0,
-            back: 0,
             buffer: self,
         }
     }
 }
 
-/// An iterator over a buffer that is obtained by the `CircularBuffer::iter()` method.
-pub struct BorrowedIter<'a, A: 'a + Debug> {
-    consumed: usize,
-    front: usize,
-    back: usize,
-    buffer: &'a BorrowBufferMut<A>,
+impl<A> std::ops::Index<usize> for BorrowedBuffer<A> {
+    type Output = A;
+
+    fn index(&self, idx: usize) -> &A {
+        self.get(idx).unwrap()
+    }
 }
 
-impl<'a, A: 'a + Debug> Iterator for BorrowedIter<'a, A> {
+impl<A> std::ops::IndexMut<usize> for BorrowedBuffer<A> {
+    fn index_mut(&mut self, idx: usize) -> &mut A {
+        self.get_mut(idx).unwrap()
+    }
+}
+
+/// An iterator over a buffer that is obtained by the `CircularBuffer::iter()` method.
+pub struct BorrowedIter<'a, A: 'a> {
+    consumed: usize,
+    front: usize,
+    buffer: &'a BorrowedBuffer<A>,
+}
+
+impl<'a, A: 'a> Iterator for BorrowedIter<'a, A> {
     type Item = &'a A;
 
     fn next(&mut self) -> Option<&'a A> {
@@ -165,13 +150,13 @@ impl<'a, A: 'a + Debug> Iterator for BorrowedIter<'a, A> {
 
 /// A fixed-sized circular buffer. The buffer can hold up to `RRB_WIDTH` items and supports fast
 /// operations on either end, however operations in the middle of the buffer are typically O(N).
-pub(crate) struct CircularBuffer<A: Debug> {
+pub(crate) struct CircularBuffer<A> {
     front: usize,
     len: usize,
     data: [mem::MaybeUninit<A>; RRB_WIDTH],
 }
 
-impl<A: Debug> CircularBuffer<A> {
+impl<A> CircularBuffer<A> {
     /// Creates an empty `CircularBuffer`.
     pub fn new() -> Self {
         let data: [mem::MaybeUninit<A>; RRB_WIDTH] =
@@ -484,18 +469,32 @@ impl<A: Debug> CircularBuffer<A> {
         }
     }
 
-    pub(crate) fn mutable_view(&mut self) -> BorrowBufferMut<A> {
+    pub(crate) fn mutable_view(&mut self) -> BorrowedBuffer<A> {
         assert_ne!(self.len(), 0);
-        BorrowBufferMut {
+        BorrowedBuffer {
             range: 0..self.len(),
-            data: self.data.as_mut_ptr(),
+            data: NonNull::new(self.data.as_mut_ptr() as *mut A).unwrap(),
             front: self.front,
             len: self.len,
         }
     }
 }
 
-impl<A: Debug> Default for CircularBuffer<A> {
+impl<A> std::ops::Index<usize> for CircularBuffer<A> {
+    type Output = A;
+
+    fn index(&self, idx: usize) -> &A {
+        self.get(idx).unwrap()
+    }
+}
+
+impl<A> std::ops::IndexMut<usize> for CircularBuffer<A> {
+    fn index_mut(&mut self, idx: usize) -> &mut A {
+        self.get_mut(idx).unwrap()
+    }
+}
+
+impl<A> Default for CircularBuffer<A> {
     fn default() -> Self {
         CircularBuffer::new()
     }
@@ -507,7 +506,7 @@ impl<A: Debug> Debug for CircularBuffer<A> {
     }
 }
 
-impl<A: Clone + Debug> Clone for CircularBuffer<A> {
+impl<A: Clone> Clone for CircularBuffer<A> {
     fn clone(&self) -> Self {
         let mut data: [mem::MaybeUninit<A>; RRB_WIDTH] =
             unsafe { mem::MaybeUninit::uninit().assume_init() };
@@ -545,7 +544,7 @@ impl<A: Clone + Debug> Clone for CircularBuffer<A> {
 }
 
 #[cfg(not(feature = "may_dangle"))]
-impl<A: Debug> Drop for CircularBuffer<A> {
+impl<A> Drop for CircularBuffer<A> {
     fn drop(&mut self) {
         let back = (self.front + self.len) % RRB_WIDTH;
         if self.is_full() {
@@ -576,7 +575,7 @@ impl<A: Debug> Drop for CircularBuffer<A> {
 }
 
 #[cfg(feature = "may_dangle")]
-unsafe impl<#[may_dangle] A: Debug> Drop for CircularBuffer<A> {
+unsafe impl<#[may_dangle] A> Drop for CircularBuffer<A> {
     fn drop(&mut self) {
         let back = (self.front + self.len) % RRB_WIDTH;
         if self.is_full() {
@@ -606,18 +605,18 @@ unsafe impl<#[may_dangle] A: Debug> Drop for CircularBuffer<A> {
     }
 }
 
-unsafe impl<A: Clone + Debug + Send> Send for CircularBuffer<A> {}
-unsafe impl<A: Clone + Debug + Sync> Sync for CircularBuffer<A> {}
+unsafe impl<A: Send> Send for CircularBuffer<A> {}
+unsafe impl<A: Sync> Sync for CircularBuffer<A> {}
 
 /// An iterator over a buffer that is obtained by the `CircularBuffer::iter()` method.
-pub struct Iter<'a, A: 'a + Debug> {
+pub struct Iter<'a, A: 'a> {
     consumed: usize,
     front: usize,
     back: usize,
     buffer: &'a CircularBuffer<A>,
 }
 
-impl<'a, A: 'a + Debug> Iterator for Iter<'a, A> {
+impl<'a, A: 'a> Iterator for Iter<'a, A> {
     type Item = &'a A;
 
     fn next(&mut self) -> Option<&'a A> {
@@ -637,7 +636,7 @@ impl<'a, A: 'a + Debug> Iterator for Iter<'a, A> {
     }
 }
 
-impl<'a, A: 'a + Debug> DoubleEndedIterator for Iter<'a, A> {
+impl<'a, A: 'a> DoubleEndedIterator for Iter<'a, A> {
     fn next_back(&mut self) -> Option<&'a A> {
         if self.consumed == self.buffer.len() {
             None
@@ -650,18 +649,18 @@ impl<'a, A: 'a + Debug> DoubleEndedIterator for Iter<'a, A> {
     }
 }
 
-impl<'a, A: 'a + Debug> ExactSizeIterator for Iter<'a, A> {}
+impl<'a, A: 'a> ExactSizeIterator for Iter<'a, A> {}
 
-impl<'a, A: 'a + Debug> FusedIterator for Iter<'a, A> {}
+impl<'a, A: 'a> FusedIterator for Iter<'a, A> {}
 
 /// A mutable iterator over a buffer that is obtained by the `CircularBuffer::iter_mut()` method.
-pub struct IterMut<'a, A: 'a + Debug> {
+pub struct IterMut<'a, A: 'a> {
     front: usize,
     len: usize,
     buffer: &'a mut CircularBuffer<A>,
 }
 
-impl<'a, A: 'a + Debug> Iterator for IterMut<'a, A> {
+impl<'a, A: 'a> Iterator for IterMut<'a, A> {
     type Item = &'a mut A;
 
     fn next(&mut self) -> Option<&'a mut A> {
@@ -680,7 +679,7 @@ impl<'a, A: 'a + Debug> Iterator for IterMut<'a, A> {
     }
 }
 
-impl<'a, A: 'a + Debug> DoubleEndedIterator for IterMut<'a, A> {
+impl<'a, A: 'a> DoubleEndedIterator for IterMut<'a, A> {
     fn next_back(&mut self) -> Option<&'a mut A> {
         if self.len == 0 {
             None
@@ -693,19 +692,19 @@ impl<'a, A: 'a + Debug> DoubleEndedIterator for IterMut<'a, A> {
     }
 }
 
-impl<'a, A: 'a + Debug> ExactSizeIterator for IterMut<'a, A> {}
+impl<'a, A: 'a> ExactSizeIterator for IterMut<'a, A> {}
 
-impl<'a, A: 'a + Debug> FusedIterator for IterMut<'a, A> {}
+impl<'a, A: 'a> FusedIterator for IterMut<'a, A> {}
 
 /// A consuming iterator over a vector that is obtained by the `Vector::into_iter()` method.
-pub struct IntoIter<A: Debug> {
+pub struct IntoIter<A> {
     consumed: usize,
     front: usize,
     back: usize,
     buffer: CircularBuffer<A>,
 }
 
-impl<A: Debug> Iterator for IntoIter<A> {
+impl<A> Iterator for IntoIter<A> {
     type Item = A;
 
     fn next(&mut self) -> Option<A> {
@@ -731,7 +730,7 @@ impl<A: Debug> Iterator for IntoIter<A> {
     }
 }
 
-impl<A: Debug> DoubleEndedIterator for IntoIter<A> {
+impl<A> DoubleEndedIterator for IntoIter<A> {
     fn next_back(&mut self) -> Option<A> {
         if self.consumed == self.buffer.len() {
             None
@@ -750,11 +749,11 @@ impl<A: Debug> DoubleEndedIterator for IntoIter<A> {
     }
 }
 
-impl<A: Debug> ExactSizeIterator for IntoIter<A> {}
+impl<A> ExactSizeIterator for IntoIter<A> {}
 
-impl<A: Debug> FusedIterator for IntoIter<A> {}
+impl<A> FusedIterator for IntoIter<A> {}
 
-impl<'a, A: 'a + Debug> IntoIterator for &'a CircularBuffer<A> {
+impl<'a, A: 'a> IntoIterator for &'a CircularBuffer<A> {
     type IntoIter = Iter<'a, A>;
     type Item = &'a A;
 
@@ -763,7 +762,7 @@ impl<'a, A: 'a + Debug> IntoIterator for &'a CircularBuffer<A> {
     }
 }
 
-impl<'a, A: 'a + Debug> IntoIterator for &'a mut CircularBuffer<A> {
+impl<'a, A: 'a> IntoIterator for &'a mut CircularBuffer<A> {
     type IntoIter = IterMut<'a, A>;
     type Item = &'a mut A;
 
@@ -772,7 +771,7 @@ impl<'a, A: 'a + Debug> IntoIterator for &'a mut CircularBuffer<A> {
     }
 }
 
-impl<A: Debug> IntoIterator for CircularBuffer<A> {
+impl<A> IntoIterator for CircularBuffer<A> {
     type IntoIter = IntoIter<A>;
     type Item = A;
 

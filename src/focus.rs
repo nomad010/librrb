@@ -130,7 +130,7 @@ where
     fn clone(&self) -> Self {
         Self {
             tree: self.tree,
-            spine_position: self.spine_position.clone(),
+            spine_position: self.spine_position,
             spine_node_focus: self.spine_node_focus.clone(),
             focus_range: self.focus_range.clone(),
             range: self.range.clone(),
@@ -428,7 +428,7 @@ where
 {
     fn drop(&mut self) {
         if let FocusMut::Rooted { borrowed_roots, .. } = self {
-            while let Some(_) = borrowed_roots.pop() {
+            while borrowed_roots.pop().is_some() {
                 // println!("Dropping borrowed root");
             }
         // println!("Lel dropping FocusMutRoot here");
@@ -708,7 +708,7 @@ where
     /// necessary to be called when the parent is re-used or dropped. The borrowed nodes cannot
     /// exist at the same time as the path nodes.
     fn drop_borrowed_nodes(&mut self) {
-        while let Some(_) = self.borrowed_nodes.pop() {
+        while self.borrowed_nodes.pop().is_some() {
             // println!("dropping borrowed");
         }
     }
@@ -720,11 +720,11 @@ where
     fn drop_path_nodes(&mut self) {
         self.root = None;
         // panic!("rawr {}", self.path.len());
-        if let Some(_) = self.leaf.take() {
+        if self.leaf.take().is_some() {
             // println!("dropping leaf {:?} ", self.leaf_range);
             self.leaf_range = 0..0;
         }
-        while let Some(_) = self.path.pop() {
+        while self.path.pop().is_some() {
             // println!("dropping internal {:?} ", p.1);
         }
     }
@@ -939,7 +939,7 @@ where
             // Nothing needs to move here
             return;
         }
-        if let Some(_) = self.leaf.take() {
+        if self.leaf.take().is_some() {
             // print!("Dropping leaf {:?} ", self.leaf_range);
             self.leaf_range = 0..0;
         }
