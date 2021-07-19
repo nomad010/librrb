@@ -7,20 +7,17 @@ use num::Zero;
 use std::ops::{Bound, Deref, DerefMut, Range, RangeBounds};
 
 #[derive(Debug)]
-pub struct SharedPointerEntry<
-    I: Clone + std::fmt::Debug,
-    P: SharedPointerKind,
-    C: Clone + std::fmt::Debug + Default,
->(SharedPointer<I, P>, std::marker::PhantomData<C>);
+pub struct SharedPointerEntry<I: Clone + std::fmt::Debug, P: SharedPointerKind>(
+    SharedPointer<I, P>,
+);
 
-impl<I, P, C> Clone for SharedPointerEntry<I, P, C>
+impl<I, P> Clone for SharedPointerEntry<I, P>
 where
     I: Clone + std::fmt::Debug,
     P: SharedPointerKind,
-    C: Clone + std::fmt::Debug + Default,
 {
     fn clone(&self) -> Self {
-        SharedPointerEntry(self.0.clone(), std::marker::PhantomData)
+        SharedPointerEntry(self.0.clone())
     }
 }
 
@@ -62,26 +59,24 @@ impl<A: Clone + std::fmt::Debug> Drop for DerefMutPtr<A> {
     }
 }
 
-impl<I, P, C> Entry for SharedPointerEntry<I, P, C>
+impl<I, P> Entry for SharedPointerEntry<I, P>
 where
     I: Clone + std::fmt::Debug,
     P: SharedPointerKind,
-    C: Clone + std::fmt::Debug + Default,
 {
     type Item = I;
     type LoadGuard = DerefPtr<I>;
     type LoadMutGuard = DerefMutPtr<I>;
-    type Context = C;
 
     fn new(item: Self::Item) -> Self {
-        SharedPointerEntry(SharedPointer::new(item), std::marker::PhantomData)
+        SharedPointerEntry(SharedPointer::new(item))
     }
 
-    fn load(&'_ self, _context: &Self::Context) -> Self::LoadGuard {
+    fn load(&'_ self) -> Self::LoadGuard {
         DerefPtr(self.0.deref() as *const I)
     }
 
-    fn load_mut(&'_ mut self, _context: &Self::Context) -> Self::LoadMutGuard {
+    fn load_mut(&'_ mut self) -> Self::LoadMutGuard {
         DerefMutPtr(SharedPointer::make_mut(&mut self.0))
     }
 }
@@ -193,7 +188,6 @@ impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Outp
     LeafTrait for Leaf<A>
 {
     type Item = A;
-    type Context = ();
     type Borrowed = BorrowedLeaf<A>;
     type ItemMutGuard = ItemMutGuard<A>;
 
@@ -204,7 +198,7 @@ impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Outp
         }
     }
 
-    fn with_item(item: Self::Item, _context: &Self::Context) -> Self {
+    fn with_item(item: Self::Item) -> Self {
         Leaf {
             sum: item.clone(),
             buffer: CircularBuffer::with_item(item),
@@ -224,12 +218,8 @@ impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Outp
     }
 
     /// Gets a mutable reference to the item at requested position if it exists.
-    fn get_mut_guarded(
-        &mut self,
-        position: usize,
-        context: &Self::Context,
-    ) -> Option<Self::ItemMutGuard> {
-        let item = self.get_mut(position, context)?;
+    fn get_mut_guarded(&mut self, position: usize) -> Option<Self::ItemMutGuard> {
+        let item = self.get_mut(position)?;
         Some(ItemMutGuard {
             item,
             previous: unsafe { (*item).clone() },
@@ -237,27 +227,27 @@ impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Outp
         })
     }
 
-    fn get_mut(&mut self, position: usize, _context: &Self::Context) -> Option<*mut Self::Item> {
+    fn get_mut(&mut self, position: usize) -> Option<*mut Self::Item> {
         self.buffer.get_mut_ptr(position)
     }
 
-    fn push(&mut self, side: Side, item: Self::Item, _context: &Self::Context) {
+    fn push(&mut self, side: Side, item: Self::Item) {
         self.sum = self.sum.clone() + item.clone();
         self.buffer.push(side, item)
     }
 
-    fn pop(&mut self, side: Side, _context: &Self::Context) -> Self::Item {
+    fn pop(&mut self, side: Side) -> Self::Item {
         let item = self.buffer.pop(side);
         self.sum = self.sum.clone() - item.clone();
         item
     }
 
-    fn split(&mut self, idx: usize, context: &Self::Context) -> Self {
+    fn split(&mut self, idx: usize) -> Self {
         if idx <= self.len() {
             let mut other = Self::empty();
             for _ in 0..idx {
-                let node = self.pop(Side::Front, context);
-                other.push(Side::Back, node, context);
+                let node = self.pop(Side::Front);
+                other.push(Side::Back, node);
             }
             std::mem::replace(self, other)
         } else {
@@ -270,7 +260,6 @@ impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Outp
         destination: &mut Self,
         share_side: Side,
         len: usize,
-        _context: &Self::Context,
     ) -> usize {
         let shared = self
             .buffer
@@ -295,11 +284,7 @@ impl<A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Outp
         }
     }
 
-    fn equal_iter_debug<'a>(
-        &self,
-        iter: &mut std::slice::Iter<'a, Self::Item>,
-        _context: &Self::Context,
-    ) -> bool
+    fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, Self::Item>) -> bool
     where
         Self::Item: PartialEq,
     {
@@ -486,8 +471,8 @@ impl<
         self.get_child_mut_at_slot(index)
     }
 
-    fn pop_child(&mut self, side: Side, context: &()) -> Option<BorrowedNode<Self::Concrete>> {
-        let child = self.get_child_mut_at_side(side)?.0.borrow_node(context);
+    fn pop_child(&mut self, side: Side) -> Option<BorrowedNode<Self::Concrete>> {
+        let child = self.get_child_mut_at_side(side)?.0.borrow_node();
         if side == Side::Front {
             self.children.range_mut().start += 1;
         } else {
@@ -532,8 +517,8 @@ pub(crate) enum BorrowedChildList<
     A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
     P: SharedPointerKind,
 > {
-    Internals(BorrowedBuffer<SharedPointerEntry<Internal<A, P>, P, ()>>),
-    Leaves(BorrowedBuffer<SharedPointerEntry<Leaf<A>, P, ()>>),
+    Internals(BorrowedBuffer<SharedPointerEntry<Internal<A, P>, P>>),
+    Leaves(BorrowedBuffer<SharedPointerEntry<Leaf<A>, P>>),
 }
 
 impl<
@@ -598,8 +583,8 @@ pub(crate) enum ChildList<
     A: Clone + std::fmt::Debug + std::ops::Add<Output = A> + std::ops::Sub<Output = A> + Zero,
     P: SharedPointerKind,
 > {
-    Leaves(CircularBuffer<SharedPointerEntry<Leaf<A>, P, ()>>),
-    Internals(CircularBuffer<SharedPointerEntry<Internal<A, P>, P, ()>>),
+    Leaves(CircularBuffer<SharedPointerEntry<Leaf<A>, P>>),
+    Internals(CircularBuffer<SharedPointerEntry<Internal<A, P>, P>>),
 }
 
 impl<
@@ -633,7 +618,7 @@ impl<
     /// # Panics
     ///
     /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves_ref(&self) -> &CircularBuffer<SharedPointerEntry<Leaf<A>, P, ()>> {
+    pub fn leaves_ref(&self) -> &CircularBuffer<SharedPointerEntry<Leaf<A>, P>> {
         if let ChildList::Leaves(x) = self {
             x
         } else {
@@ -646,7 +631,7 @@ impl<
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals_ref(&self) -> &CircularBuffer<SharedPointerEntry<Internal<A, P>, P, ()>> {
+    pub fn internals_ref(&self) -> &CircularBuffer<SharedPointerEntry<Internal<A, P>, P>> {
         if let ChildList::Internals(x) = self {
             x
         } else {
@@ -659,7 +644,7 @@ impl<
     /// # Panics
     ///
     /// Panics if `self` is not a list of leaf nodes.
-    pub fn leaves_mut(&mut self) -> &mut CircularBuffer<SharedPointerEntry<Leaf<A>, P, ()>> {
+    pub fn leaves_mut(&mut self) -> &mut CircularBuffer<SharedPointerEntry<Leaf<A>, P>> {
         if let ChildList::Leaves(x) = self {
             x
         } else {
@@ -672,9 +657,7 @@ impl<
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn internals_mut(
-        &mut self,
-    ) -> &mut CircularBuffer<SharedPointerEntry<Internal<A, P>, P, ()>> {
+    pub fn internals_mut(&mut self) -> &mut CircularBuffer<SharedPointerEntry<Internal<A, P>, P>> {
         if let ChildList::Internals(x) = self {
             x
         } else {
@@ -694,59 +677,36 @@ impl<
     /// # Panics
     ///
     /// Panics if `self` is not a list of internal nodes.
-    pub fn get(
-        &self,
-        child_idx: usize,
-        idx: usize,
-        context: &<Leaf<A> as LeafTrait>::Context,
-    ) -> Option<*const A> {
+    pub fn get(&self, child_idx: usize, idx: usize) -> Option<*const A> {
         match self {
-            ChildList::Leaves(children) => children.get(child_idx).unwrap().load(context).get(idx),
-            ChildList::Internals(children) => children
-                .get(child_idx)
-                .unwrap()
-                .load(context)
-                .get(idx, context),
+            ChildList::Leaves(children) => children.get(child_idx).unwrap().load().get(idx),
+            ChildList::Internals(children) => children.get(child_idx).unwrap().load().get(idx),
         }
     }
 
-    pub fn get_mut(
-        &mut self,
-        child_idx: usize,
-        idx: usize,
-        context: &<Leaf<A> as LeafTrait>::Context,
-    ) -> Option<*mut A> {
+    pub fn get_mut(&mut self, child_idx: usize, idx: usize) -> Option<*mut A> {
+        match self {
+            ChildList::Leaves(children) => {
+                children.get_mut(child_idx).unwrap().load_mut().get_mut(idx)
+            }
+            ChildList::Internals(children) => {
+                children.get_mut(child_idx).unwrap().load_mut().get_mut(idx)
+            }
+        }
+    }
+
+    pub fn get_mut_guarded(&mut self, child_idx: usize, idx: usize) -> Option<ItemMutGuard<A>> {
         match self {
             ChildList::Leaves(children) => children
                 .get_mut(child_idx)
                 .unwrap()
-                .load_mut(&())
-                .get_mut(idx, context),
+                .load_mut()
+                .get_mut_guarded(idx),
             ChildList::Internals(children) => children
                 .get_mut(child_idx)
                 .unwrap()
-                .load_mut(&())
-                .get_mut(idx, context),
-        }
-    }
-
-    pub fn get_mut_guarded(
-        &mut self,
-        child_idx: usize,
-        idx: usize,
-        context: &<Leaf<A> as LeafTrait>::Context,
-    ) -> Option<ItemMutGuard<A>> {
-        match self {
-            ChildList::Leaves(children) => children
-                .get_mut(child_idx)
-                .unwrap()
-                .load_mut(&())
-                .get_mut_guarded(idx, context),
-            ChildList::Internals(children) => children
-                .get_mut(child_idx)
-                .unwrap()
-                .load_mut(&())
-                .get_mut_guarded(idx, context),
+                .load_mut()
+                .get_mut_guarded(idx),
         }
     }
 
@@ -858,11 +818,10 @@ impl<
 {
     // type Item = A;
     type Borrowed = BorrowedInternal<A, P>;
-    type Context = ();
 
     type Leaf = Leaf<A>;
-    type LeafEntry = SharedPointerEntry<Leaf<A>, P, ()>;
-    type InternalEntry = SharedPointerEntry<Self, P, ()>;
+    type LeafEntry = SharedPointerEntry<Leaf<A>, P>;
+    type InternalEntry = SharedPointerEntry<Self, P>;
     type ItemMutGuard = ItemMutGuard<A>;
 
     fn empty_internal(level: usize) -> Self {
@@ -895,7 +854,6 @@ impl<
         destination: &mut Self,
         share_side: Side,
         len: usize,
-        _context: &Self::Context,
     ) -> usize {
         debug_assert_eq!(self.level(), destination.level());
         let shared = match self.children {
@@ -932,7 +890,7 @@ impl<
         shared
     }
 
-    fn pack_children(&mut self, context: &Self::Context) {
+    fn pack_children(&mut self) {
         if self.is_empty() {
             return;
         }
@@ -952,28 +910,27 @@ impl<
                         continue;
                     } else {
                         let (write, read) = children.pair_mut(write_position, read_position);
-                        read.load_mut(context).share_children_with(
-                            &mut *write.load_mut(context),
+                        read.load_mut().share_children_with(
+                            &mut *write.load_mut(),
                             Side::Front,
                             RRB_WIDTH,
-                            context,
                         );
 
-                        if write.load_mut(context).is_full() {
+                        if write.load_mut().is_full() {
                             write_position += 1;
                         }
-                        if read.load_mut(context).is_empty() {
+                        if read.load_mut().is_empty() {
                             read_position += 1;
                         }
                     }
                 }
-                while children.back().unwrap().load(context).is_empty() {
+                while children.back().unwrap().load().is_empty() {
                     children.pop_back();
                 }
                 let sizes = SharedPointer::make_mut(&mut self.sizes);
                 *sizes = SizeTable::new(sizes.level());
                 for child in children {
-                    sizes.push_child(Side::Back, child.load(context).len());
+                    sizes.push_child(Side::Back, child.load().len());
                 }
             }
             ChildList::Leaves(ref mut children) => {
@@ -983,29 +940,28 @@ impl<
                         continue;
                     } else {
                         let (write, read) = children.pair_mut(write_position, read_position);
-                        read.load_mut(context).share_children_with(
-                            &mut *write.load_mut(context),
+                        read.load_mut().share_children_with(
+                            &mut *write.load_mut(),
                             Side::Front,
                             RRB_WIDTH,
-                            context,
                         );
 
-                        if write.load_mut(context).is_full() {
+                        if write.load_mut().is_full() {
                             write_position += 1;
                         }
-                        if read.load_mut(context).is_empty() {
+                        if read.load_mut().is_empty() {
                             read_position += 1;
                         }
                     }
                 }
 
-                while children.back().unwrap().load(context).is_empty() {
+                while children.back().unwrap().load().is_empty() {
                     children.pop_back();
                 }
                 let sizes = SharedPointer::make_mut(&mut self.sizes);
                 *sizes = SizeTable::new(sizes.level());
                 for child in children {
-                    sizes.push_child(Side::Back, child.load(context).len());
+                    sizes.push_child(Side::Back, child.load().len());
                 }
             }
         }
@@ -1017,34 +973,30 @@ impl<
         }
     }
 
-    fn get(&self, idx: usize, context: &Self::Context) -> Option<*const A> {
+    fn get(&self, idx: usize) -> Option<*const A> {
         if let Some((array_idx, new_idx)) = self.sizes.position_info_for(idx) {
-            self.children.get(array_idx, new_idx, context)
+            self.children.get(array_idx, new_idx)
         } else {
             None
         }
     }
 
-    fn get_mut_guarded(
-        &mut self,
-        idx: usize,
-        context: &Self::Context,
-    ) -> Option<Self::ItemMutGuard> {
+    fn get_mut_guarded(&mut self, idx: usize) -> Option<Self::ItemMutGuard> {
         let (array_idx, new_idx) = self.sizes.position_info_for(idx)?;
-        let mut guard = self.children.get_mut_guarded(array_idx, new_idx, context)?;
+        let mut guard = self.children.get_mut_guarded(array_idx, new_idx)?;
         guard.ptrs.push(&mut self.sum);
         Some(guard)
     }
 
-    fn get_mut(&mut self, idx: usize, context: &Self::Context) -> Option<*mut A> {
+    fn get_mut(&mut self, idx: usize) -> Option<*mut A> {
         if let Some((array_idx, new_idx)) = self.sizes.position_info_for(idx) {
-            self.children.get_mut(array_idx, new_idx, context)
+            self.children.get_mut(array_idx, new_idx)
         } else {
             None
         }
     }
 
-    fn pop_child(&mut self, side: Side, _context: &Self::Context) -> NodeRc<Self> {
+    fn pop_child(&mut self, side: Side) -> NodeRc<Self> {
         SharedPointer::make_mut(&mut self.sizes).pop_child(side);
         let (sum, node) = match self.children {
             ChildList::Internals(ref mut children) => {
@@ -1060,8 +1012,8 @@ impl<
         node
     }
 
-    fn push_child(&mut self, side: Side, node: NodeRc<Self>, context: &Self::Context) {
-        SharedPointer::make_mut(&mut self.sizes).push_child(side, node.len(context));
+    fn push_child(&mut self, side: Side, node: NodeRc<Self>) {
+        SharedPointer::make_mut(&mut self.sizes).push_child(side, node.len());
         let sum = match &node {
             NodeRc::Internal(internal) => internal.0.sum.clone(),
             NodeRc::Leaf(leaf) => leaf.0.sum.clone(),
@@ -1146,11 +1098,11 @@ impl<
         }
     }
 
-    fn split_at_child(&mut self, idx: usize, context: &Self::Context) -> Self {
+    fn split_at_child(&mut self, idx: usize) -> Self {
         // TODO: Need to set the sum values correctly
         if idx <= self.slots() {
             let mut result = self.new_empty();
-            self.share_children_with(&mut result, Side::Front, idx, context);
+            self.share_children_with(&mut result, Side::Front, idx);
             std::mem::swap(self, &mut result);
             result
         } else {
@@ -1158,7 +1110,7 @@ impl<
         }
     }
 
-    fn split_at_position(&mut self, position: usize, context: &Self::Context) -> Self {
+    fn split_at_position(&mut self, position: usize) -> Self {
         // TODO: Need to set the sum values correctly
         if position > self.len() {
             panic!("Trying to split at a position out of bounds of the tree");
@@ -1166,29 +1118,25 @@ impl<
         let original_position = position;
         let original_len = self.len();
         let (child_position, position) = self.sizes.position_info_for(position).unwrap();
-        let mut result = self.split_at_child(child_position, context);
-        let mut next_child = result.pop_child(Side::Front, context);
+        let mut result = self.split_at_child(child_position);
+        let mut next_child = result.pop_child(Side::Front);
 
         if position == 0 {
-            result.push_child(Side::Front, next_child, context);
-        } else if position == next_child.len(context) {
-            self.push_child(Side::Back, next_child, context);
+            result.push_child(Side::Front, next_child);
+        } else if position == next_child.len() {
+            self.push_child(Side::Back, next_child);
         } else {
-            let subresult = next_child.split_at_position(position, context);
-            self.push_child(Side::Back, next_child, context);
-            result.push_child(Side::Front, subresult, context);
+            let subresult = next_child.split_at_position(position);
+            self.push_child(Side::Back, next_child);
+            result.push_child(Side::Front, subresult);
         }
 
-        self.debug_check_invariants(original_position, self.level(), context);
-        result.debug_check_invariants(original_len - original_position, result.level(), context);
+        self.debug_check_invariants(original_position, self.level());
+        result.debug_check_invariants(original_len - original_position, result.level());
         result
     }
 
-    fn equal_iter_debug<'a>(
-        &self,
-        iter: &mut std::slice::Iter<'a, A>,
-        context: &Self::Context,
-    ) -> bool
+    fn equal_iter_debug<'a>(&self, iter: &mut std::slice::Iter<'a, A>) -> bool
     where
         A: PartialEq,
     {
@@ -1196,24 +1144,19 @@ impl<
         match &self.children {
             ChildList::Internals(internals) => {
                 for internal in internals {
-                    result &= internal.load(context).equal_iter_debug(iter, context);
+                    result &= internal.load().equal_iter_debug(iter);
                 }
             }
             ChildList::Leaves(leaves) => {
                 for leaf in leaves {
-                    result &= leaf.load(context).equal_iter_debug(iter, context);
+                    result &= leaf.load().equal_iter_debug(iter);
                 }
             }
         }
         result
     }
 
-    fn debug_check_invariants(
-        &self,
-        reported_size: usize,
-        reported_level: usize,
-        context: &Self::Context,
-    ) {
+    fn debug_check_invariants(&self, reported_size: usize, reported_level: usize) {
         debug_assert_eq!(reported_level, self.level());
         match &self.children {
             ChildList::Internals(internals) => {
@@ -1221,11 +1164,9 @@ impl<
                 let mut sum = 0;
                 for (idx, internal) in internals.iter().enumerate() {
                     let child_size = self.sizes.get_child_size(idx).unwrap();
-                    internal.load(context).debug_check_invariants(
-                        child_size,
-                        reported_level - 1,
-                        context,
-                    );
+                    internal
+                        .load()
+                        .debug_check_invariants(child_size, reported_level - 1);
                     sum += child_size;
                 }
                 debug_assert_eq!(sum, reported_size);
@@ -1235,11 +1176,8 @@ impl<
                 let mut sum = 0;
                 for (idx, leaf) in leaves.iter().enumerate() {
                     let child_size = self.sizes.get_child_size(idx).unwrap();
-                    leaf.load(context).debug_check_invariants(
-                        child_size,
-                        reported_level - 1,
-                        context,
-                    );
+                    leaf.load()
+                        .debug_check_invariants(child_size, reported_level - 1);
                     sum += child_size;
                 }
                 debug_assert_eq!(sum, reported_size);
@@ -1273,7 +1211,7 @@ impl SumVector<usize>
         let mut start_pos = 0;
         for node_idx in self.spine_iter() {
             let node = node_idx.1;
-            let end_pos = start_pos + node.len(&self.context);
+            let end_pos = start_pos + node.len();
             println!("Range derp {:?}", start_pos..end_pos);
             if start_pos < end && end_pos > start {
                 let subrange = start.saturating_sub(start_pos)..(end - start_pos);

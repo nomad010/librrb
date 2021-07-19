@@ -33,11 +33,10 @@ where
     fn tree_path(
         nodes: &mut Vec<(Internal::InternalEntry, Range<usize>)>,
         mut idx: usize,
-        context: &Internal::Context,
     ) -> (Range<usize>, Internal::LeafEntry) {
         while let Some((previous_root, range)) = nodes.last() {
             let (next_node, next_range) = if let Some((subchild, subchild_range)) =
-                previous_root.load(context).get_child_ref_for_position(idx)
+                previous_root.load().get_child_ref_for_position(idx)
             {
                 let subrange_len = subchild_range.end - subchild_range.start;
                 let absolute_subrange_start = range.start + subchild_range.start;
@@ -58,11 +57,11 @@ where
     }
 
     /// Constructs the focus from a tree node. This will focus on the first element in the node.
-    fn from_tree(tree: &'a NodeRc<Internal>, context: &Internal::Context) -> Self {
+    fn from_tree(tree: &'a NodeRc<Internal>) -> Self {
         match tree {
             NodeRc::Internal(internal) => {
-                let mut path = vec![(internal.clone(), 0..tree.len(context))];
-                let (leaf_range, leaf) = PartialFocus::<Internal>::tree_path(&mut path, 0, context);
+                let mut path = vec![(internal.clone(), 0..tree.len())];
+                let (leaf_range, leaf) = PartialFocus::<Internal>::tree_path(&mut path, 0);
                 PartialFocus {
                     path,
                     leaf,
@@ -72,20 +71,19 @@ where
             NodeRc::Leaf(leaf) => PartialFocus {
                 path: Vec::new(),
                 leaf: leaf.clone(),
-                leaf_range: 0..leaf.load(context).len(),
+                leaf_range: 0..leaf.load().len(),
             },
         }
     }
 
     /// Moves the focus to a new index in the tree.
-    pub fn move_focus(&mut self, idx: usize, context: &Internal::Context) {
+    pub fn move_focus(&mut self, idx: usize) {
         if !self.leaf_range.contains(&idx) {
             while !self.path.last().unwrap().1.contains(&idx) {
                 self.path.pop();
             }
             let new_idx = idx - self.path.last().unwrap().1.start;
-            let (leaf_range, leaf) =
-                PartialFocus::<Internal>::tree_path(&mut self.path, new_idx, context);
+            let (leaf_range, leaf) = PartialFocus::<Internal>::tree_path(&mut self.path, new_idx);
             self.leaf_range = leaf_range;
             self.leaf = leaf;
         }
@@ -93,18 +91,14 @@ where
 
     /// Gets an element from the tree. If the element does not exist this will return `None`. This
     /// will move the focus along if necessary.
-    fn get(
-        &mut self,
-        idx: usize,
-        context: &Internal::Context,
-    ) -> Option<&<Internal::Leaf as LeafTrait>::Item> {
+    fn get(&mut self, idx: usize) -> Option<&<Internal::Leaf as LeafTrait>::Item> {
         if self.path.is_empty() {
-            unsafe { Some(&*self.leaf.load(context).get(idx)?) }
-        } else if idx >= self.path[0].0.load(context).len() {
+            unsafe { Some(&*self.leaf.load().get(idx)?) }
+        } else if idx >= self.path[0].0.load().len() {
             None
         } else {
-            self.move_focus(idx, context);
-            unsafe { Some(&*self.leaf.load(context).get(idx - self.leaf_range.start)?) }
+            self.move_focus(idx);
+            unsafe { Some(&*self.leaf.load().get(idx - self.leaf_range.start)?) }
         }
     }
 }
@@ -183,7 +177,7 @@ where
         let mut focus_node = &tree.root;
         for (node_position, node) in tree_iter {
             let range_start = range_end;
-            range_end = range_start + node.len(&tree.context);
+            range_end = range_start + node.len();
 
             if range.start < range_end && range.end > range_start {
                 focus_range = range_start..range_end;
@@ -194,7 +188,7 @@ where
         Focus {
             tree,
             spine_position,
-            spine_node_focus: PartialFocus::from_tree(focus_node, &tree.context),
+            spine_node_focus: PartialFocus::from_tree(focus_node),
             focus_range,
             range,
         }
@@ -214,14 +208,13 @@ where
             };
             let mut range_end = self.focus_range.start;
             for (position, node) in self.tree.spine_iter().rev().skip(skip_amount) {
-                let range_start = range_end - node.len(&self.tree.context);
+                let range_start = range_end - node.len();
                 let range = range_start..range_end;
                 if range.contains(&idx) {
                     self.spine_position = position;
                     self.focus_range = range;
-                    self.spine_node_focus = PartialFocus::from_tree(node, &self.tree.context);
-                    self.spine_node_focus
-                        .move_focus(idx - range_start, &self.tree.context);
+                    self.spine_node_focus = PartialFocus::from_tree(node);
+                    self.spine_node_focus.move_focus(idx - range_start);
                     break;
                 }
                 range_end = range_start;
@@ -236,14 +229,13 @@ where
             };
             let mut range_start = self.focus_range.end;
             for (position, node) in self.tree.spine_iter().skip(skip_amount) {
-                let range_end = range_start + node.len(&self.tree.context);
+                let range_end = range_start + node.len();
                 let range = range_start..range_end;
                 if range.contains(&idx) {
                     self.spine_position = position;
                     self.focus_range = range;
-                    self.spine_node_focus = PartialFocus::from_tree(node, &self.tree.context);
-                    self.spine_node_focus
-                        .move_focus(idx - range_start, &self.tree.context);
+                    self.spine_node_focus = PartialFocus::from_tree(node);
+                    self.spine_node_focus.move_focus(idx - range_start);
                     break;
                 }
                 range_start = range_end;
@@ -273,8 +265,7 @@ where
             if !self.focus_range.contains(&new_idx) {
                 self.refocus(new_idx);
             }
-            self.spine_node_focus
-                .get(new_idx - self.focus_range.start, &self.tree.context)
+            self.spine_node_focus.get(new_idx - self.focus_range.start)
         } else {
             None
         }
@@ -515,8 +506,8 @@ where
     ///
     pub fn split_at(&mut self, index: usize) -> (FocusMut<Internal>, FocusMut<Internal>) {
         match self {
-            FocusMut::Rooted { focus, origin, .. } => {
-                let (left, right) = focus.split_at(index, &origin.context);
+            FocusMut::Rooted { focus, .. } => {
+                let (left, right) = focus.split_at(index);
                 (
                     FocusMut::Nonrooted {
                         focus: left,
@@ -530,8 +521,8 @@ where
                     },
                 )
             }
-            FocusMut::Nonrooted { focus, parent, .. } => {
-                let (left, right) = focus.split_at(index, parent.context());
+            FocusMut::Nonrooted { focus, .. } => {
+                let (left, right) = focus.split_at(index);
                 (
                     FocusMut::Nonrooted {
                         focus: left,
@@ -596,8 +587,8 @@ where
     /// ```
     pub fn get(&mut self, idx: usize) -> Option<&mut <Internal::Leaf as LeafTrait>::Item> {
         match self {
-            FocusMut::Rooted { focus, origin, .. } => focus.get(idx, &origin.context),
-            FocusMut::Nonrooted { focus, parent, .. } => focus.get(idx, parent.context()),
+            FocusMut::Rooted { focus, .. } => focus.get(idx),
+            FocusMut::Nonrooted { focus, .. } => focus.get(idx),
         }
     }
 
@@ -622,13 +613,6 @@ where
     /// derp
     pub fn assert_invariants(&self) -> bool {
         true
-    }
-
-    fn context(&self) -> &Internal::Context {
-        match self {
-            FocusMut::Rooted { origin, .. } => &origin.context,
-            FocusMut::Nonrooted { parent, .. } => parent.context(),
-        }
     }
 }
 
@@ -747,7 +731,7 @@ where
     ///
     /// Panics if the given index is greater than the focus' length.
     ///
-    fn split_at(&mut self, index: usize, context: &Internal::Context) -> (Self, Self) {
+    fn split_at(&mut self, index: usize) -> (Self, Self) {
         // We split the vector in two at the position, we need to find the two positions that denote
         // the last of this vector and the first of the next vector.
         self.drop_borrowed_nodes(); // Might be going from one split to another so we may need drop.
@@ -785,7 +769,7 @@ where
                 BorrowedNode::Internal(mut internal) => {
                     let (new_subindex, left, mut right) = internal.split_at_position(subindex);
                     subindex = new_subindex;
-                    let child = right.pop_child(Side::Front, context).unwrap();
+                    let child = right.pop_child(Side::Front).unwrap();
                     if !left.is_empty() {
                         left_nodes.push(BorrowedNode::Internal(left));
                     }
@@ -931,7 +915,7 @@ where
     //     });
     // }
 
-    fn move_focus(&mut self, mut idx: usize, context: &Internal::Context) {
+    fn move_focus(&mut self, mut idx: usize) {
         if !self.borrowed_nodes.is_empty() {
             self.drop_borrowed_nodes();
         }
@@ -985,12 +969,12 @@ where
                         match subchild {
                             NodeMut::Internal(subchild) => {
                                 self.path.push((
-                                    subchild.load_mut(context).borrow_node(),
+                                    subchild.load_mut().borrow_node(),
                                     absolute_subchild_range,
                                 ));
                             }
                             NodeMut::Leaf(subchild) => {
-                                self.leaf = Some(subchild.load_mut(context).borrow_node());
+                                self.leaf = Some(subchild.load_mut().borrow_node());
                                 self.leaf_range = absolute_subchild_range;
                                 return;
                             }
@@ -1023,13 +1007,13 @@ where
             // idx = new_idx;
             match child_node {
                 NodeMut::Internal(internal) => {
-                    let mut new_root = internal.load_mut(context);
+                    let mut new_root = internal.load_mut();
                     self.path.push((new_root.borrow_node(), child_subrange));
                 }
                 NodeMut::Leaf(leaf) => {
                     // skipped_items.start += this_skipped_items;
                     // skipped_items.end = skipped_items.start + leaf_len;
-                    self.leaf = Some(leaf.load_mut(context).borrow_node());
+                    self.leaf = Some(leaf.load_mut().borrow_node());
                     self.leaf_range = child_subrange;
                     break;
                 }
@@ -1052,12 +1036,8 @@ where
     /// assert_eq!(focus.get(2), Some(&mut 3));
     /// assert_eq!(focus.get(3), None);
     /// ```
-    pub fn get(
-        &mut self,
-        idx: usize,
-        context: &Internal::Context,
-    ) -> Option<&mut <Internal::Leaf as LeafTrait>::Item> {
-        self.move_focus(idx, context);
+    pub fn get(&mut self, idx: usize) -> Option<&mut <Internal::Leaf as LeafTrait>::Item> {
+        self.move_focus(idx);
         if self.leaf_range.contains(&idx) {
             // println!("In branch A {} with idx for in {:?}", idx, self.leaf_range);
             let position = idx - self.leaf_range.start;

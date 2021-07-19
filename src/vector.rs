@@ -392,7 +392,6 @@ where
     pub(crate) left_spine: Vec<NodeRc<Internal>>,
     pub(crate) right_spine: Vec<NodeRc<Internal>>,
     pub(crate) root: NodeRc<Internal>,
-    pub(crate) context: Internal::Context,
     len: usize,
 }
 
@@ -402,7 +401,6 @@ where
 {
     fn clone(&self) -> Self {
         InternalVector {
-            context: Internal::Context::default(),
             left_spine: self.left_spine.clone(),
             right_spine: self.right_spine.clone(),
             root: self.root.clone(),
@@ -427,7 +425,6 @@ where
     /// ```
     pub fn new() -> Self {
         InternalVector {
-            context: Internal::Context::default(),
             left_spine: vec![],
             right_spine: vec![],
             root: NodeRc::Leaf(Internal::LeafEntry::new(Internal::Leaf::empty())),
@@ -519,7 +516,7 @@ where
     /// bubble up full nodes. This will also handle expandung the tree.
     fn complete_leaf(&mut self, side: Side) {
         debug_assert_eq!(self.left_spine.len(), self.right_spine.len());
-        debug_assert_eq!(self.leaf_ref(side).load(&self.context).free_space(), 0);
+        debug_assert_eq!(self.leaf_ref(side).load().free_space(), 0);
         let (spine, other_spine) = match side {
             Side::Back => (&mut self.right_spine, &mut self.left_spine),
             Side::Front => (&mut self.left_spine, &mut self.right_spine),
@@ -528,39 +525,34 @@ where
         for idx in 0..spine.len() {
             let node = &mut spine[idx];
 
-            if node.free_slots(&self.context) != 0 {
+            if node.free_slots() != 0 {
                 // Nothing to do here
                 break;
             }
 
-            let full_node = mem::replace(node, node.new_empty(&self.context));
+            let full_node = mem::replace(node, node.new_empty());
             let mut parent_node = spine
                 .get_mut(idx + 1)
                 .unwrap_or(&mut self.root)
                 .internal_mut()
-                .load_mut(&self.context);
-            parent_node.push_child(side, full_node, &self.context);
+                .load_mut();
+            parent_node.push_child(side, full_node);
         }
 
-        if self.root.slots(&self.context) >= RRB_WIDTH - 1 {
+        if self.root.slots() >= RRB_WIDTH - 1 {
             // This root is overfull so we have to raise the tree here, we add a new node of the
             // same height as the old root. We decant half the old root into this new node.
             // Finally, we create a new node of height one more than the old root and set that as
             // the new root. We leave the root empty
             let new_root = NodeRc::Internal(Internal::InternalEntry::new(
-                Internal::empty_internal(self.root.level(&self.context) + 1),
+                Internal::empty_internal(self.root.level() + 1),
             ));
             let mut new_node = mem::replace(&mut self.root, new_root);
-            let mut other_new_node = new_node.new_empty(&self.context);
-            new_node.share_children_with(
-                &mut other_new_node,
-                side.negate(),
-                RRB_WIDTH / 2,
-                &self.context,
-            );
+            let mut other_new_node = new_node.new_empty();
+            new_node.share_children_with(&mut other_new_node, side.negate(), RRB_WIDTH / 2);
             spine.push(new_node);
             other_spine.push(other_new_node);
-        } else if self.root.slots(&self.context) == 0 {
+        } else if self.root.slots() == 0 {
             // We have e have enough space in the root but we have balance the top of the spines
             self.fixup_spine_tops();
         }
@@ -569,7 +561,7 @@ where
     /// Pushes an item into a side leaf of the tree. This fixes up some invariants in the case that
     /// the root sits directly above the leaves.
     fn push_side(&mut self, side: Side, item: <Internal::Leaf as LeafTrait>::Item) {
-        if self.leaf_ref(side).load(&self.context).free_space() == 0 {
+        if self.leaf_ref(side).load().free_space() == 0 {
             self.complete_leaf(side);
         }
         match side {
@@ -584,8 +576,8 @@ where
                 .unwrap_or(&mut self.root)
                 .leaf_mut(),
         }
-        .load_mut(&self.context)
-        .push(side, item, &self.context);
+        .load_mut()
+        .push(side, item);
         self.len += 1;
 
         if self.spine_ref(side).len() == 1 {
@@ -644,14 +636,12 @@ where
             Side::Back => &mut self.right_spine,
             Side::Front => &mut self.left_spine,
         };
-        debug_assert_eq!(spine.first().unwrap().slots(&self.context), 0);
-        debug_assert!(
-            self.root.slots(&self.context) != 0 || spine.last().unwrap().slots(&self.context) != 0
-        );
+        debug_assert_eq!(spine.first().unwrap().slots(), 0);
+        debug_assert!(self.root.slots() != 0 || spine.last().unwrap().slots() != 0);
 
         let mut last_empty = spine.len() - 1;
         for (i, v) in spine.iter().enumerate().skip(1) {
-            if v.slots(&self.context) != 0 {
+            if v.slots() != 0 {
                 last_empty = i - 1;
                 break;
             }
@@ -666,7 +656,7 @@ where
                 .get_mut(level + 1)
                 .unwrap_or(&mut self.root)
                 .internal_mut();
-            let child = node.load_mut(&self.context).pop_child(side, &self.context);
+            let child = node.load_mut().pop_child(side);
             spine[level] = child;
         }
 
@@ -684,11 +674,11 @@ where
         // 2) Must differ in slots by at most one node
 
         // The invariant must be checked in a loop as slicing may break the invariant multiple times
-        while self.root.slots(&self.context) == 0 && !self.root.is_leaf(&self.context) {
+        while self.root.slots() == 0 && !self.root.is_leaf() {
             let left_spine_top = self.left_spine.last_mut().unwrap();
             let right_spine_top = self.right_spine.last_mut().unwrap();
-            let left_spine_children = left_spine_top.slots(&self.context);
-            let right_spine_children = right_spine_top.slots(&self.context);
+            let left_spine_children = left_spine_top.slots();
+            let right_spine_children = right_spine_top.slots();
 
             let total_children = left_spine_children + right_spine_children;
             let difference = if left_spine_children > right_spine_children {
@@ -696,7 +686,7 @@ where
             } else {
                 right_spine_children - left_spine_children
             };
-            let min_children = if self.root.level(&self.context) == 1 {
+            let min_children = if self.root.level() == 1 {
                 // The root is one above a leaf and a new leaf root could be completely full
                 RRB_WIDTH
             } else {
@@ -710,12 +700,7 @@ where
                 // continue checking.
                 let mut left_spine_top = self.left_spine.pop().unwrap();
                 let mut right_spine_top = self.right_spine.pop().unwrap();
-                left_spine_top.share_children_with(
-                    &mut right_spine_top,
-                    Side::Back,
-                    RRB_WIDTH,
-                    &self.context,
-                );
+                left_spine_top.share_children_with(&mut right_spine_top, Side::Back, RRB_WIDTH);
                 self.root = right_spine_top;
             } else if difference >= 2 {
                 // Part 2) of invariant 5 is broken, we might need to share children between the
@@ -726,7 +711,7 @@ where
                 } else {
                     (right_spine_top, left_spine_top, Side::Front)
                 };
-                source.share_children_with(destination, side, difference / 2, &self.context);
+                source.share_children_with(destination, side, difference / 2);
                 break;
             } else {
                 // No invariant is broken. We can stop checking here
@@ -740,14 +725,9 @@ where
     fn pop_side(&mut self, side: Side) -> Option<<Internal::Leaf as LeafTrait>::Item> {
         debug_assert_eq!(self.left_spine.len(), self.right_spine.len());
         if self.spine_ref(side).is_empty() {
-            if !self.root.is_empty(&self.context) {
+            if !self.root.is_empty() {
                 self.len -= 1;
-                Some(
-                    self.root
-                        .leaf_mut()
-                        .load_mut(&self.context)
-                        .pop(side, &self.context),
-                )
+                Some(self.root.leaf_mut().load_mut().pop(side))
             } else {
                 None
             }
@@ -765,9 +745,9 @@ where
                     .unwrap_or(&mut self.root)
                     .leaf_mut(),
             };
-            let item = leaf.load_mut(&self.context).pop(side, &self.context);
+            let item = leaf.load_mut().pop(side);
 
-            if leaf.load(&self.context).is_empty() {
+            if leaf.load().is_empty() {
                 self.empty_leaf(side);
             } else if self.spine_ref(side).len() == 1 {
                 self.fixup_spine_tops();
@@ -836,7 +816,7 @@ where
     /// ```
     pub fn front(&self) -> Option<&<Internal::Leaf as LeafTrait>::Item> {
         let leaf = self.left_spine.first().unwrap_or(&self.root);
-        unsafe { Some(&*leaf.leaf_ref().load(&self.context).front()?) }
+        unsafe { Some(&*leaf.leaf_ref().load().front()?) }
     }
 
     /// Returns a mutable reference to the item at the front of the sequence. If the tree is empty
@@ -853,14 +833,7 @@ where
     /// ```
     pub fn front_mut(&mut self) -> Option<&mut <Internal::Leaf as LeafTrait>::Item> {
         let leaf = self.left_spine.first_mut().unwrap_or(&mut self.root);
-        unsafe {
-            Some(
-                &mut *leaf
-                    .leaf_mut()
-                    .load_mut(&self.context)
-                    .front_mut(&self.context)?,
-            )
-        }
+        unsafe { Some(&mut *leaf.leaf_mut().load_mut().front_mut()?) }
     }
 
     /// Returns a reference to the item at the back of the sequence. If the tree is empty this
@@ -877,7 +850,7 @@ where
     /// ```
     pub fn back(&self) -> Option<&<Internal::Leaf as LeafTrait>::Item> {
         let leaf = self.right_spine.first().unwrap_or(&self.root);
-        unsafe { Some(&*leaf.leaf_ref().load(&self.context).back()?) }
+        unsafe { Some(&*leaf.leaf_ref().load().back()?) }
     }
 
     /// Returns a mutable reference to the item at the back of the sequence. If the tree is empty
@@ -894,14 +867,7 @@ where
     /// ```
     pub fn back_mut(&mut self) -> Option<&mut <Internal::Leaf as LeafTrait>::Item> {
         let leaf = self.right_spine.first_mut().unwrap_or(&mut self.root);
-        unsafe {
-            Some(
-                &mut *leaf
-                    .leaf_mut()
-                    .load_mut(&self.context)
-                    .back_mut(&self.context)?,
-            )
-        }
+        unsafe { Some(&mut *leaf.leaf_mut().load_mut().back_mut()?) }
     }
 
     /// Derp
@@ -912,7 +878,7 @@ where
                 Some((Side::Back, spine_idx)) => &self.right_spine[spine_idx],
                 None => &self.root,
             };
-            unsafe { Some(&*node.get(subindex, &self.context).unwrap()) }
+            unsafe { Some(&*node.get(subindex).unwrap()) }
         } else {
             None
         }
@@ -926,7 +892,7 @@ where
                 Some((Side::Back, spine_idx)) => &mut self.right_spine[spine_idx],
                 None => &mut self.root,
             };
-            unsafe { Some(&mut *node.get_mut(subindex, &self.context).unwrap()) }
+            unsafe { Some(&mut *node.get_mut(subindex).unwrap()) }
         } else {
             None
         }
@@ -941,7 +907,7 @@ where
                 None => &mut self.root,
             };
             Some(MutBoundGuard {
-                guard: node.get_mut_guarded(subindex, &self.context)?,
+                guard: node.get_mut_guarded(subindex)?,
                 vector: self,
             })
         } else {
@@ -1013,16 +979,11 @@ where
             // The root moves to either the left or right spine and the root becomes empty
             // We replace the left with root here and right with an empty node
             let new_root = NodeRc::Internal(Internal::InternalEntry::new(
-                Internal::empty_internal(self.root.level(&self.context) + 1),
+                Internal::empty_internal(self.root.level() + 1),
             ));
             let mut new_left = mem::replace(&mut self.root, new_root);
-            let mut new_right = new_left.new_empty(&self.context);
-            new_left.share_children_with(
-                &mut new_right,
-                Side::Back,
-                new_left.slots(&self.context) / 2,
-                &self.context,
-            );
+            let mut new_right = new_left.new_empty();
+            new_left.share_children_with(&mut new_right, Side::Back, new_left.slots() / 2);
             self.left_spine.push(new_left);
             self.right_spine.push(new_right);
         }
@@ -1031,16 +992,11 @@ where
             // The root moves to either the left or right spine and the root becomes empty
             // We replace the right with root here and left with an empty node
             let new_root = NodeRc::Internal(Internal::InternalEntry::new(
-                Internal::empty_internal(other.root.level(&self.context) + 1),
+                Internal::empty_internal(other.root.level() + 1),
             ));
             let mut new_right = mem::replace(&mut other.root, new_root);
-            let mut new_left = new_right.new_empty(&self.context);
-            new_right.share_children_with(
-                &mut new_left,
-                Side::Front,
-                new_right.slots(&self.context) / 2,
-                &self.context,
-            );
+            let mut new_left = new_right.new_empty();
+            new_right.share_children_with(&mut new_left, Side::Front, new_right.slots() / 2);
             other.left_spine.push(new_left);
             other.right_spine.push(new_right);
         }
@@ -1059,9 +1015,9 @@ where
                 .last_mut()
                 .unwrap_or(&mut self.root)
                 .internal_mut()
-                .load_mut(&self.context);
-            if !left_child.is_empty(&self.context) {
-                parent_node.push_child(Side::Back, left_child, &self.context);
+                .load_mut();
+            if !left_child.is_empty() {
+                parent_node.push_child(Side::Back, left_child);
             }
         }
         if let Some(right_child) = other.left_spine.pop() {
@@ -1070,44 +1026,43 @@ where
                 .last_mut()
                 .unwrap_or(&mut other.root)
                 .internal_mut()
-                .load_mut(&self.context);
-            if !right_child.is_empty(&self.context) {
-                parent_node.push_child(Side::Front, right_child, &self.context);
+                .load_mut();
+            if !right_child.is_empty() {
+                parent_node.push_child(Side::Front, right_child);
             }
         }
         while !self.right_spine.is_empty() {
             let mut left_node = self.right_spine.pop().unwrap();
             let mut right_node = other.left_spine.pop().unwrap();
 
-            let mut left = left_node.internal_mut().load_mut(&self.context);
-            let mut right = right_node.internal_mut().load_mut(&self.context);
+            let mut left = left_node.internal_mut().load_mut();
+            let mut right = right_node.internal_mut().load_mut();
 
-            left.pack_children(&self.context);
-            let mut left_right_most = left.pop_child(Side::Back, &self.context);
-            while !left_right_most.is_full(&self.context) && !right.is_empty() {
-                let mut right_left_most = right.pop_child(Side::Front, &self.context);
+            left.pack_children();
+            let mut left_right_most = left.pop_child(Side::Back);
+            while !left_right_most.is_full() && !right.is_empty() {
+                let mut right_left_most = right.pop_child(Side::Front);
                 right_left_most.share_children_with(
                     &mut left_right_most,
                     Side::Front,
-                    right_left_most.slots(&self.context),
-                    &self.context,
+                    right_left_most.slots(),
                 );
-                if !right_left_most.is_empty(&self.context) {
-                    right.push_child(Side::Front, right_left_most, &self.context);
+                if !right_left_most.is_empty() {
+                    right.push_child(Side::Front, right_left_most);
                 }
             }
-            left.push_child(Side::Back, left_right_most, &self.context);
-            right.pack_children(&self.context);
+            left.push_child(Side::Back, left_right_most);
+            right.pack_children();
             let slots = right.slots();
-            right.share_children_with(&mut *left, Side::Front, slots, &self.context);
+            right.share_children_with(&mut *left, Side::Front, slots);
 
-            if !left_node.is_empty(&self.context) {
+            if !left_node.is_empty() {
                 self.right_spine
                     .last_mut()
                     .unwrap_or(&mut self.root)
                     .internal_mut()
-                    .load_mut(&self.context)
-                    .push_child(Side::Back, left_node, &self.context);
+                    .load_mut()
+                    .push_child(Side::Back, left_node);
             }
             if !right.is_empty() {
                 other
@@ -1115,8 +1070,8 @@ where
                     .last_mut()
                     .unwrap_or(&mut other.root)
                     .internal_mut()
-                    .load_mut(&self.context)
-                    .push_child(Side::Front, right_node, &self.context);
+                    .load_mut()
+                    .push_child(Side::Front, right_node);
             }
         }
 
@@ -1126,16 +1081,16 @@ where
 
         other
             .root
-            .share_children_with(&mut self.root, Side::Front, RRB_WIDTH, &self.context);
+            .share_children_with(&mut self.root, Side::Front, RRB_WIDTH);
 
-        if self.root.free_slots(&self.context) < 2 {
+        if self.root.free_slots() < 2 {
             self.root
-                .share_children_with(&mut other.root, Side::Back, 1, &self.context);
+                .share_children_with(&mut other.root, Side::Back, 1);
         }
 
-        if !other.root.is_empty(&self.context) {
+        if !other.root.is_empty() {
             let new_root = NodeRc::Internal(Internal::InternalEntry::new(
-                Internal::empty_internal(self.root.level(&self.context) + 1),
+                Internal::empty_internal(self.root.level() + 1),
             ));
             let old_root = mem::replace(&mut self.root, new_root);
             self.left_spine.push(old_root);
@@ -1242,11 +1197,11 @@ where
                 .zip(self.right_spine.iter())
                 .enumerate()
             {
-                if index < forward_end + left.len(&self.context) {
+                if index < forward_end + left.len() {
                     return Some((Some((Side::Front, idx)), index - forward_end));
                 }
-                forward_end += left.len(&self.context);
-                backward_start -= right.len(&self.context);
+                forward_end += left.len();
+                backward_start -= right.len();
                 if index >= backward_start {
                     return Some((Some((Side::Back, idx)), index - backward_start));
                 }
@@ -1289,7 +1244,7 @@ where
                     let mut split_node = self.left_spine.pop().unwrap();
                     result
                         .left_spine
-                        .insert(0, split_node.split_at_position(subposition, &self.context));
+                        .insert(0, split_node.split_at_position(subposition));
                     mem::swap(&mut self.root, &mut result.root);
                     mem::swap(&mut self.right_spine, &mut result.right_spine);
                     self.root = split_node;
@@ -1297,14 +1252,14 @@ where
                 None => {
                     // The root node is getting split
                     mem::swap(&mut self.right_spine, &mut result.right_spine);
-                    result.root = self.root.split_at_position(subposition, &self.context);
+                    result.root = self.root.split_at_position(subposition);
                 }
                 Some((Side::Back, node_position)) => {
                     // The right spine is getting split
                     result.right_spine = self.right_spine.split_off(node_position + 1);
                     let mut split_node = self.right_spine.pop().unwrap();
                     mem::swap(&mut result.right_spine, &mut self.right_spine);
-                    let split_right = split_node.split_at_position(subposition, &self.context);
+                    let split_right = split_node.split_at_position(subposition);
                     self.right_spine.insert(0, split_node);
                     result.right_spine.push(split_right);
                 }
@@ -1317,14 +1272,14 @@ where
             while self
                 .right_spine
                 .last()
-                .map(|x| x.is_empty(&self.context))
+                .map(|x| x.is_empty())
                 .unwrap_or(false)
             {
                 self.right_spine.pop().unwrap();
             }
             self.right_spine.reverse();
 
-            while self.root.is_empty(&self.context)
+            while self.root.is_empty()
                 && (self.left_spine.is_empty() || self.right_spine.is_empty())
             {
                 // Basically only the left branch has nodes - we pop a node from the top of the
@@ -1349,14 +1304,14 @@ where
             while result
                 .left_spine
                 .last()
-                .map(|x| x.is_empty(&self.context))
+                .map(|x| x.is_empty())
                 .unwrap_or(false)
             {
                 result.left_spine.pop().unwrap();
             }
             result.left_spine.reverse();
 
-            while result.root.is_empty(&self.context)
+            while result.root.is_empty()
                 && (result.left_spine.is_empty() || result.right_spine.is_empty())
             {
                 // Basically only the right branch has nodes - we pop a node from the top of the
@@ -1389,13 +1344,11 @@ where
         let result = loop {
             match spine.last_mut().unwrap_or(&mut self.root) {
                 NodeRc::Internal(internal) => {
-                    let child = internal
-                        .load_mut(&self.context)
-                        .pop_child(side, &self.context);
+                    let child = internal.load_mut().pop_child(side);
                     spine.push(child);
                 }
                 NodeRc::Leaf(leaf) => {
-                    break leaf.load(&self.context).is_empty();
+                    break leaf.load().is_empty();
                 }
             }
         };
@@ -2146,16 +2099,16 @@ where
     pub fn focus_mut(&mut self) -> FocusMut<Internal> {
         let mut nodes = Vec::new();
         for node in self.left_spine.iter_mut() {
-            if !node.is_empty(&self.context) {
-                nodes.push(node.borrow_node(&self.context));
+            if !node.is_empty() {
+                nodes.push(node.borrow_node());
             }
         }
-        if !self.root.is_empty(&self.context) {
-            nodes.push(self.root.borrow_node(&self.context));
+        if !self.root.is_empty() {
+            nodes.push(self.root.borrow_node());
         }
         for node in self.right_spine.iter_mut().rev() {
-            if !node.is_empty(&self.context) {
-                nodes.push(node.borrow_node(&self.context));
+            if !node.is_empty() {
+                nodes.push(node.borrow_node());
             }
         }
         FocusMut::from_vector(self, nodes)
@@ -2215,34 +2168,34 @@ where
         // Invariant 2
         // All nodes in the spine except for the first one (the leaf) must have at least 1 slot free.
         for spine in self.left_spine.iter().skip(1) {
-            assert!(spine.free_slots(&self.context) >= 1);
+            assert!(spine.free_slots() >= 1);
         }
         for spine in self.right_spine.iter().skip(1) {
-            assert!(spine.free_slots(&self.context) >= 1);
+            assert!(spine.free_slots() >= 1);
         }
 
         // Invariant 3
         // The first node(the leaf) in the spine must have at least 1 element, but may be full
         if let Some(leaf) = self.left_spine.first() {
-            assert!(leaf.slots(&self.context) >= 1);
+            assert!(leaf.slots() >= 1);
         }
         if let Some(leaf) = self.right_spine.first() {
-            assert!(leaf.slots(&self.context) >= 1);
+            assert!(leaf.slots() >= 1);
         }
 
         // Invariant 4
         // If the root is a non-leaf, it must always have at least 2 slot free, but may be empty
-        if !self.root.is_leaf(&self.context) {
-            assert!(self.root.free_slots(&self.context) >= 2);
+        if !self.root.is_leaf() {
+            assert!(self.root.free_slots() >= 2);
         }
 
         // Invariant 5
         // If the root is an empty non-leaf node then the last two nodes of both spines:
         // 1) Must not be able to be merged into a node of 1 less height
         // 2) Must differ in slots by at most one node
-        if self.root.is_empty(&self.context) && !self.root.is_leaf(&self.context) {
-            let left_children = self.left_spine.last().unwrap().slots(&self.context);
-            let right_children = self.right_spine.last().unwrap().slots(&self.context);
+        if self.root.is_empty() && !self.root.is_leaf() {
+            let left_children = self.left_spine.last().unwrap().slots();
+            let right_children = self.right_spine.last().unwrap().slots();
 
             let difference = if left_children > right_children {
                 left_children - right_children
@@ -2252,7 +2205,7 @@ where
 
             assert!(difference <= 1);
 
-            let min_children = if self.root.level(&self.context) == 1 {
+            let min_children = if self.root.level() == 1 {
                 // The root is one above a leaf and a new leaf root could be completely full
                 RRB_WIDTH
             } else {
@@ -2266,30 +2219,19 @@ where
         // Invariant 6
         // The spine nodes must have their RRB invariants fulfilled
         for (level, spine) in self.left_spine.iter().enumerate() {
-            spine.debug_check_invariants(spine.len(&self.context), level, &self.context);
+            spine.debug_check_invariants(spine.len(), level);
         }
-        self.root.debug_check_invariants(
-            self.root.len(&self.context),
-            self.left_spine.len(),
-            &self.context,
-        );
+        self.root
+            .debug_check_invariants(self.root.len(), self.left_spine.len());
         for (level, spine) in self.right_spine.iter().enumerate() {
-            spine.debug_check_invariants(spine.len(&self.context), level, &self.context);
+            spine.debug_check_invariants(spine.len(), level);
         }
 
         // Invariant 7
         // The tree's `len` field must match the sum of the spine's lens
-        let left_spine_len = self
-            .left_spine
-            .iter()
-            .map(|x| x.len(&self.context))
-            .sum::<usize>();
-        let root_len = self.root.len(&self.context);
-        let right_spine_len = self
-            .right_spine
-            .iter()
-            .map(|x| x.len(&self.context))
-            .sum::<usize>();
+        let left_spine_len = self.left_spine.iter().map(|x| x.len()).sum::<usize>();
+        let root_len = self.root.len();
+        let right_spine_len = self.right_spine.iter().map(|x| x.len()).sum::<usize>();
         assert_eq!(self.len, left_spine_len + root_len + right_spine_len);
         true
     }
@@ -2412,17 +2354,17 @@ where
         if self.len() == v.len() {
             let mut iter = v.iter();
             for spine in self.left_spine.iter() {
-                if !spine.equal_iter_debug(&mut iter, &self.context) {
+                if !spine.equal_iter_debug(&mut iter) {
                     println!("Left: {:?} {:?}", self, v);
                     return false;
                 }
             }
-            if !self.root.equal_iter_debug(&mut iter, &self.context) {
+            if !self.root.equal_iter_debug(&mut iter) {
                 println!("Root: {:?} {:?}", self, v);
                 return false;
             }
             for spine in self.right_spine.iter().rev() {
-                if !spine.equal_iter_debug(&mut iter, &self.context) {
+                if !spine.equal_iter_debug(&mut iter) {
                     println!("Right: {:?} {:?}", self, v);
                     return false;
                 }
